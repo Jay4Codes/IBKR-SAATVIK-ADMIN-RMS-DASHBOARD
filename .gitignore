@@ -1,0 +1,23 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# JavaScript
+node_modules/
+.next/
+out/
+npm-debug.log*
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Editors
+.idea/
+.vscode/
