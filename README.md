@@ -1,60 +1,50 @@
-# Sattvic Trading Dashboard
+# IBKR Admin RMS
 
-A full-stack starter for a market dashboard:
+Read-only Interactive Brokers connectivity, account monitoring, and durable
+order/fill history. The application lives in [`ibkr-platform/`](ibkr-platform/);
+see its [README](ibkr-platform/README.md) for setup, the IB Gateway connection,
+and two-factor login handling.
 
-- Next.js App Router, React, and TypeScript
-- Tailwind CSS and shadcn/ui-style components
-- TradingView Lightweight Charts and Apache ECharts
-- FastAPI with async MongoDB and Redis clients
-- Docker Compose for a reproducible local stack
+## Layout
 
-## Quick start with Docker
+| Path | What it is |
+| --- | --- |
+| `ibkr-platform/` | The application: FastAPI backend, Next.js frontend, IBKR worker. |
+| `external/US-Trading-Infra/` | A separate trading system, vendored read-only as a reference. Not deployed. |
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+## Deployment on this host
 
-Open [http://localhost:3000](http://localhost:3000). API docs are at
-[http://localhost:8000/docs](http://localhost:8000/docs).
+Runs under systemd, not Docker (the compose file in `ibkr-platform/` describes a
+different deployment shape).
 
-By default Compose starts local MongoDB and Redis containers. To use MongoDB
-Atlas, put your connection string in the root `.env`:
+| Unit | Bind | Runs |
+| --- | --- | --- |
+| `ibkr-api` | 127.0.0.1:8120 | `uvicorn app.main:app --workers 2` |
+| `ibkr-web` | 127.0.0.1:3020 | Next.js standalone build |
+| `ibkr-worker` | outbound only | `python -m app.worker` — the only process speaking the TWS API |
+| `ibkr-gateway` | 127.0.0.1:4001 | IB Gateway under IBC inside Xvfb |
 
-```dotenv
-MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority
-MONGODB_DATABASE=sattvic
-```
+nginx terminates TLS at `sattvic-rms.ekalonsolutions.com` and routes `/` to the
+web service, `/api/v1/` and `/ws/live` to the API. The former hostname
+`saatvik-rms.ekalonsolutions.com` keeps its own certificate and 301-redirects
+every request to the new one.
 
-The `.env` file is ignored by Git.
-
-## Run without Docker
-
-Start MongoDB and Redis, then install dependencies:
-
-```bash
-make install
-cp backend/.env.example backend/.env
-```
-
-Run the API and frontend in separate terminals:
+To deploy: rebuild the frontend, copy static assets into the standalone bundle,
+then restart the services.
 
 ```bash
-cd backend && .venv/bin/uvicorn app.main:app --reload
-cd frontend && npm run dev
+cd ibkr-platform/frontend && npm run build
+cp -r .next/static .next/standalone/.next/static
+cp -r public .next/standalone/public
+systemctl restart ibkr-api ibkr-web ibkr-worker
 ```
 
-The frontend proxies `/api/*` to `http://localhost:8000` by default. Set
-`API_INTERNAL_URL` if the API runs elsewhere.
+The backend is an editable install, so Python changes need only a restart.
 
-## Checks
+## Retired
 
-```bash
-make test
-make lint
-```
-
-The market endpoint uses deterministic demo candles when MongoDB has no data.
-Store candle documents in the `candles` collection with `symbol`, `timestamp`,
-`open`, `high`, `low`, `close`, and `volume` fields to display real data.
-
+A "Sattvic Trading Dashboard" market-data starter previously served this domain
+from ports 8110/3010. It was superseded by `ibkr-platform` on 2026-09-08 and
+removed from this repository on 2026-09-09; its services are stopped and their
+unit files deleted. The code remains in git history, and a working-tree archive
+including its uncommitted changes is at `/root/sattvic-dashboard-retired-*.tar.gz`.

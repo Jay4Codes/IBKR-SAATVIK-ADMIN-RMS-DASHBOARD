@@ -1,0 +1,19 @@
+[Unit]
+Description=IBKR Admin RMS Worker (gateway/normalizer/stream consumer)
+After=network-online.target mongod.service redis-server.service
+Wants=network-online.target
+Requires=mongod.service
+
+[Service]
+Type=simple
+WorkingDirectory=__PLATFORM_ROOT__/backend
+Environment=TZ=Asia/Kolkata
+EnvironmentFile=__PLATFORM_ROOT__/backend/.env
+ExecStart=__PLATFORM_ROOT__/backend/.venv/bin/python -m app.worker
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

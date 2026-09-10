@@ -1,0 +1,28 @@
+[Unit]
+Description=IB Gateway (headless, managed by IBC)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=TWS_MAJOR_VRSN=1045
+Environment=IBC_INI=/opt/ibc/config.ini
+Environment=IBC_PATH=/opt/ibc
+Environment=TWS_PATH=/root/Jts
+Environment=LOG_PATH=/var/log/ibc
+Environment=HOME=/root
+WorkingDirectory=/opt/ibc
+ExecStartPre=/bin/mkdir -p /var/log/ibc
+# xvfb-run owns the X server's lifetime and exports DISPLAY itself. The previous
+# unit hard-coded DISPLAY=:99 and guarded startup with `pgrep -f "Xvfb :99"`,
+# which matched the guard's own command line, so Xvfb was never actually started
+# and IBC died with "Can't connect to X11 window server using ':99'".
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1280x1024x24" /opt/ibc/gatewaystart.sh -inline
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=60
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

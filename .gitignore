@@ -21,3 +21,8 @@ __pycache__/
 # Editors
 .idea/
 .vscode/
+
+# Local authentication database
+backend/data/
+*.sqlite3*
+external/*

@@ -1,0 +1,20 @@
+[Unit]
+Description=IBKR Admin RMS Web (Next.js standalone)
+After=network-online.target ibkr-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PLATFORM_ROOT__/frontend/.next/standalone
+Environment=TZ=Asia/Kolkata
+Environment=NODE_ENV=production
+Environment=PORT=3020
+Environment=HOSTNAME=127.0.0.1
+Environment=API_INTERNAL_URL=http://127.0.0.1:8120
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,697 @@
+{
+  "$defs": {
+    "AccountState": {
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "available_funds": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available Funds"
+        },
+        "buying_power": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Buying Power"
+        },
+        "cash": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cash"
+        },
+        "currency": {
+          "default": "BASE",
+          "title": "Currency",
+          "type": "string"
+        },
+        "day_pnl": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Day Pnl"
+        },
+        "excess_liquidity": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excess Liquidity"
+        },
+        "gross_position_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gross Position Value"
+        },
+        "initial_margin": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Margin"
+        },
+        "maintenance_margin": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maintenance Margin"
+        },
+        "net_liquidation": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Net Liquidation"
+        },
+        "realized_pnl": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Realized Pnl"
+        },
+        "unrealized_pnl": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unrealized Pnl"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id"
+      ],
+      "title": "AccountState",
+      "type": "object"
+    },
+    "Event": {
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "account_id",
+        "data"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Execution": {
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "commission": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commission"
+        },
+        "con_id": {
+          "title": "Con Id",
+          "type": "integer"
+        },
+        "exchange": {
+          "title": "Exchange",
+          "type": "string"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "title": "Executed At",
+          "type": "string"
+        },
+        "execution_id": {
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "order_id": {
+          "title": "Order Id",
+          "type": "integer"
+        },
+        "perm_id": {
+          "title": "Perm Id",
+          "type": "integer"
+        },
+        "price": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Price",
+          "type": "string"
+        },
+        "quantity": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Quantity",
+          "type": "string"
+        },
+        "realized_pnl": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Realized Pnl"
+        },
+        "side": {
+          "title": "Side",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "account_id",
+        "order_id",
+        "perm_id",
+        "con_id",
+        "symbol",
+        "side",
+        "quantity",
+        "price",
+        "exchange",
+        "executed_at"
+      ],
+      "title": "Execution",
+      "type": "object"
+    },
+    "GatewayState": {
+      "properties": {
+        "account_id": {
+          "default": "*",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": 17,
+          "title": "Client Id",
+          "type": "integer"
+        },
+        "connected_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connected At"
+        },
+        "disconnected_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disconnected At"
+        },
+        "gateway_id": {
+          "default": "primary",
+          "title": "Gateway Id",
+          "type": "string"
+        },
+        "host": {
+          "default": "",
+          "title": "Host",
+          "type": "string"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "last_heartbeat": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Heartbeat"
+        },
+        "last_order_snapshot": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Order Snapshot"
+        },
+        "port": {
+          "default": 4002,
+          "title": "Port",
+          "type": "integer"
+        },
+        "reconnect_attempts": {
+          "default": 0,
+          "title": "Reconnect Attempts",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/GatewayStatus",
+          "default": "DISCONNECTED"
+        },
+        "subscriptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Subscriptions",
+          "type": "object"
+        }
+      },
+      "title": "GatewayState",
+      "type": "object"
+    },
+    "GatewayStatus": {
+      "enum": [
+        "DISCONNECTED",
+        "CONNECTING",
+        "CONNECTED",
+        "DEGRADED",
+        "RECONNECTING",
+        "FAILED"
+      ],
+      "title": "GatewayStatus",
+      "type": "string"
+    },
+    "Order": {
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "aux_price": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aux Price"
+        },
+        "client_id": {
+          "title": "Client Id",
+          "type": "integer"
+        },
+        "con_id": {
+          "title": "Con Id",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "filled_quantity": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Filled Quantity",
+          "type": "string"
+        },
+        "limit_price": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit Price"
+        },
+        "order_id": {
+          "title": "Order Id",
+          "type": "integer"
+        },
+        "order_type": {
+          "title": "Order Type",
+          "type": "string"
+        },
+        "perm_id": {
+          "title": "Perm Id",
+          "type": "integer"
+        },
+        "quantity": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Quantity",
+          "type": "string"
+        },
+        "remaining_quantity": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Remaining Quantity",
+          "type": "string"
+        },
+        "sec_type": {
+          "title": "Sec Type",
+          "type": "string"
+        },
+        "side": {
+          "title": "Side",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "order_id",
+        "perm_id",
+        "client_id",
+        "con_id",
+        "symbol",
+        "sec_type",
+        "side",
+        "order_type",
+        "quantity",
+        "filled_quantity",
+        "remaining_quantity",
+        "status"
+      ],
+      "title": "Order",
+      "type": "object"
+    },
+    "Position": {
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "average_cost": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Average Cost",
+          "type": "string"
+        },
+        "con_id": {
+          "title": "Con Id",
+          "type": "integer"
+        },
+        "currency": {
+          "default": "",
+          "title": "Currency",
+          "type": "string"
+        },
+        "exchange": {
+          "default": "",
+          "title": "Exchange",
+          "type": "string"
+        },
+        "expiry": {
+          "default": "",
+          "title": "Expiry",
+          "type": "string"
+        },
+        "local_symbol": {
+          "default": "",
+          "title": "Local Symbol",
+          "type": "string"
+        },
+        "market_price": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Market Price"
+        },
+        "market_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Market Value"
+        },
+        "multiplier": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Multiplier"
+        },
+        "quantity": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Quantity",
+          "type": "string"
+        },
+        "quantity_changed": {
+          "default": false,
+          "title": "Quantity Changed",
+          "type": "boolean"
+        },
+        "realized_pnl": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Realized Pnl"
+        },
+        "right": {
+          "default": "",
+          "title": "Right",
+          "type": "string"
+        },
+        "sec_type": {
+          "title": "Sec Type",
+          "type": "string"
+        },
+        "strike": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strike"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "underlying_price": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Underlying Price"
+        },
+        "unrealized_pnl": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unrealized Pnl"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "con_id",
+        "symbol",
+        "sec_type",
+        "quantity",
+        "average_cost"
+      ],
+      "title": "Position",
+      "type": "object"
+    }
+  },
+  "title": "IBKR Admin RMS domain"
+}

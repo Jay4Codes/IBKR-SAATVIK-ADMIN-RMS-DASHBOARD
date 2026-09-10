@@ -1,0 +1,20 @@
+[Unit]
+Description=IBKR Admin RMS API (FastAPI/uvicorn)
+After=network-online.target mongod.service redis-server.service
+Wants=network-online.target
+Requires=mongod.service
+
+[Service]
+Type=simple
+WorkingDirectory=__PLATFORM_ROOT__/backend
+Environment=TZ=Asia/Kolkata
+EnvironmentFile=__PLATFORM_ROOT__/backend/.env
+ExecStart=__PLATFORM_ROOT__/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8120 --workers 2 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

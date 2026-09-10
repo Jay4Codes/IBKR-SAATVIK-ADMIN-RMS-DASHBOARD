@@ -1,2 +1,0 @@
-"""Sattvic API package."""
-
