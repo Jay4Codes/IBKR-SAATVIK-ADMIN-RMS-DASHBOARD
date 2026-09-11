@@ -20,3 +20,7 @@ def configure():
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    # httpx logs every request at INFO with the full URL, query string included.
+    # Massive authenticates with an `apiKey` query parameter, so leaving this at
+    # INFO would write the vendor key into the logs on every poll.
+    logging.getLogger("httpx").setLevel(logging.WARNING)

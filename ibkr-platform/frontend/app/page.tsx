@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
-export default function Home() {
-  redirect("/dashboard");
+import { sessionPrincipal } from "@/lib/session";
+export default async function Home() {
+  redirect((await sessionPrincipal()) ? "/dashboard" : "/login");
 }

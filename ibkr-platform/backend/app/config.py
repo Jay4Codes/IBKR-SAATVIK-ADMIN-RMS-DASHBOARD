@@ -53,10 +53,42 @@ class Settings(BaseSettings):
     snaptrade_redirect_uri: str = ""
     snaptrade_poll_seconds: float = 60
 
+    # Massive (Polygon-compatible) market data, the same vendor and REST host the
+    # US-Trading-Infra project uses. Supplies the underlying reference price the
+    # payoff panel models from. Blank key leaves the feed off entirely and the
+    # panel falls back to the `undPrice` IB computes off an option's model tick.
+    # Massive has priority for configured symbols; an unavailable vendor quote
+    # falls back to the option-model `undPrice` supplied by IB.
+    massive_api_key: str = ""
+    massive_rest_url: str = "https://api.massive.com"
+    #: Comma-separated underlyings to poll, e.g. "SPX,NDX". US-listed, so USD.
+    massive_underlyings: str = ""
+    massive_refresh_seconds: float = 15
+    #: Backoff once a whole cycle returns nothing — a closed market, or no entitlement.
+    massive_idle_seconds: float = 60
+    massive_archive_directory: str = "/var/lib/ibkr-rms/market-data"
+    massive_session_timezone: str = "America/New_York"
+    massive_session_open: str = "09:30"
+    massive_session_close: str = "16:00"
+
+    # Account history. Snapshots are what this platform records from the moment
+    # it is switched on; Flex backfills the broker's own daily net liquidation
+    # from before that. Blank Flex settings simply leave the curve starting at
+    # the first snapshot.
+    snapshot_seconds: float = 300
+    #: Snapshots older than this are dropped by the sweeper. Zero keeps them all.
+    snapshot_retention_days: int = 1095
+    ibkr_flex_token: str = ""
+    ibkr_flex_query_id: str = ""
+
     # Encrypts broker secrets held in MongoDB (SnapTrade user secrets). IBKR
     # passwords are never stored in the database at all — they go straight to
     # the IBC config file on disk.
     secret_key: str = ""
+
+    @property
+    def massive_symbols(self) -> list[str]:
+        return [s.strip().upper() for s in self.massive_underlyings.split(",") if s.strip()]
 
     @property
     def origins(self) -> list[str]:

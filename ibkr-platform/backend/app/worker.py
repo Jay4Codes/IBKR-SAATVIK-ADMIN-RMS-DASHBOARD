@@ -21,15 +21,16 @@ import signal
 from decimal import Decimal
 from uuid import uuid4
 
+import httpx
 from ib_async import IB, StartupFetch
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
 from app import connections as registry
+from app import massive, secrets, snaptrade
 from app import normalizers as norm
-from app import secrets, snaptrade
 from app.config import settings
-from app.db import database, initialize, persist
+from app.db import database, initialize, persist, snapshot_id
 from app.domain import AccountState, Event, GatewayState, GatewayStatus, Position, now
 from app.logging import configure
 from app.state import StateRepository
@@ -175,6 +176,10 @@ class GatewaySession(Session):
         self.market_subscriptions = {}
         self.market_data_denied = False
         self.underlying_prices = {}
+        #: Vendor marks as `massive.Spot`, held apart from IB's so a gateway
+        #: reconnect cannot wipe them and an option model tick cannot overwrite
+        #: them. `underlying_of` prefers these.
+        self.massive_prices = {}
         self.underlying_changed = set()
         self.state = GatewayState(
             gateway_id=self.connection_id,
@@ -255,6 +260,7 @@ class GatewaySession(Session):
             )
         item.quantity_changed = previous is None or previous.quantity != item.quantity
         item.underlying_price = self.underlying_of(item)
+        item.underlying_source = self.underlying_source_of(item)
         self.positions[key] = item
         self.track_underlying(item, value.contract)
         self.enqueue("position.closed" if item.quantity == 0 else "position.updated", item)
@@ -276,6 +282,7 @@ class GatewaySession(Session):
             update={
                 "quantity_changed": False,
                 "underlying_price": self.underlying_of(item),
+                "underlying_source": self.underlying_source_of(item),
                 "market_value": norm.decimal(value.value),
                 "unrealized_pnl": norm.decimal(value.unrealizedPnL),
                 "realized_pnl": norm.decimal(value.realizedPnL),
@@ -303,8 +310,26 @@ class GatewaySession(Session):
         return f"{item.currency}:{item.symbol}"
 
     def underlying_of(self, item):
-        """The live underlying mark for an option, or None for anything else."""
-        return self.underlying_prices.get(self.underlying_key(item)) if item.sec_type == "OPT" else None
+        """The live underlying mark for an option, or None for anything else.
+
+        Massive wins when it has a quote; IB's option-model `undPrice` keeps the
+        RMS curve available when the vendor is unavailable or unauthorized.
+        """
+        if item.sec_type != "OPT":
+            return None
+        key = self.underlying_key(item)
+        vendor = self.massive_prices.get(key)
+        return vendor.price if vendor is not None else self.underlying_prices.get(key)
+
+    def underlying_source_of(self, item) -> str:
+        """Which feed `underlying_of` would answer from, for the panel's label."""
+        if item.sec_type != "OPT":
+            return ""
+        key = self.underlying_key(item)
+        vendor = self.massive_prices.get(key)
+        if vendor is not None:
+            return vendor.source
+        return "ib_und_price" if key in self.underlying_prices else ""
 
     def track_underlying(self, item, contract):
         """Note which leg should carry an underlying's market-data line.
@@ -335,6 +360,135 @@ class GatewaySession(Session):
             ):
                 self.market_wanted.setdefault(key, other.con_id)
                 return
+
+    async def spot(self):
+        """Poll Massive for the configured underlyings until the session stops.
+
+        Runs beside `live` rather than inside it: the vendor feed has nothing to
+        do with the IB socket, so it keeps its marks across a reconnect. Moved
+        prices are queued onto `underlying_changed`, and the heartbeat loop's
+        existing `flush_underlyings` publishes them on its next pass.
+        """
+        symbols = settings.massive_symbols
+        if not symbols:
+            await self.stop.wait()  # Unconfigured, but `run` waits on the first task to finish.
+            return
+        async with httpx.AsyncClient(timeout=10) as client:
+            while not self.stop.is_set():
+                moment = now()
+                for symbol in symbols:
+                    try:
+                        archived = await massive.archive_due_samples(
+                            self.redis, symbol, at=moment
+                        )
+                        key = f"USD:{symbol}"
+                        if archived and self.massive_prices.pop(key, None) is not None:
+                            # Do not carry yesterday's close as today's live RMS
+                            # reference while waiting for the next session.
+                            self.underlying_changed.add(key)
+                    except Exception:
+                        # The source list remains/restores on failure, so the
+                        # next idle pass can safely retry the archive.
+                        log.exception("massive.archive_failed symbol=%s", symbol)
+                if not settings.massive_api_key or not massive.session_is_open(moment):
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(
+                            self.stop.wait(), settings.massive_idle_seconds
+                        )
+                    continue
+                answered = False
+                limited = False
+                for symbol in symbols:
+                    try:
+                        spot = await massive.fetch_spot(client, symbol)
+                    except massive.RateLimited as exc:
+                        # Quota is per minute and shared across symbols, so the
+                        # rest of this cycle would only deepen the hole.
+                        log.warning("massive.rate_limited connection=%s path=%s", self.label, exc)
+                        limited = True
+                        break
+                    if spot is None:
+                        continue
+                    answered = True
+                    try:
+                        await massive.record_sample(self.redis, symbol, spot, at=moment)
+                    except Exception:
+                        log.exception("massive.sample_store_failed symbol=%s", symbol)
+                    key = f"USD:{symbol}"
+                    if getattr(self.massive_prices.get(key), "price", None) != spot.price:
+                        self.massive_prices[key] = spot
+                        self.underlying_changed.add(key)
+                        log.debug(
+                            "massive.spot connection=%s underlying=%s price=%s source=%s",
+                            self.label,
+                            key,
+                            spot.price,
+                            spot.source,
+                        )
+                if not answered and not limited:
+                    log.warning(
+                        "massive.no_prices connection=%s underlyings=%s backing off to %ss",
+                        self.label,
+                        ",".join(symbols),
+                        settings.massive_idle_seconds,
+                    )
+                delay = (
+                    settings.massive_refresh_seconds if answered else settings.massive_idle_seconds
+                )
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self.stop.wait(), delay)
+
+    async def snapshots(self):
+        """Record each account's standing every `snapshot_seconds`.
+
+        This is the only record of what an account was worth at a moment in
+        time: `ibkr_accounts` is replaced in place on every update, so without
+        this there is no history to plot. Rows are keyed by account and date
+        plus a within-day bucket, so a restart re-samples rather than
+        duplicating, and a later Flex backfill can supersede the whole day.
+        """
+        interval = max(30.0, settings.snapshot_seconds)
+        while not self.stop.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.stop.wait(), interval)
+            if self.stop.is_set():
+                return
+            moment = now()
+            report_date = moment.date().isoformat()
+            bucket = moment.strftime("%H%M")
+            for account in list(self.accounts.values()):
+                if account.net_liquidation is None:
+                    continue  # Nothing worth plotting until the broker has valued it.
+                try:
+                    await self.db.account_snapshots.update_one(
+                        {"_id": snapshot_id(self.tenant_id, account.account_id, report_date, bucket)},
+                        {
+                            "$set": {
+                                "tenant_id": self.tenant_id,
+                                "account_id": account.account_id,
+                                "report_date": report_date,
+                                "taken_at": moment.isoformat(),
+                                "currency": account.currency,
+                                "net_liquidation": str(account.net_liquidation),
+                                "cash": None if account.cash is None else str(account.cash),
+                                # The broker's own daily figure, which resets at
+                                # its session boundary — the only way to draw an
+                                # intraday P&L curve after the fact.
+                                "day_pnl": None if account.day_pnl is None else str(account.day_pnl),
+                                "realized_pnl": None
+                                if account.realized_pnl is None
+                                else str(account.realized_pnl),
+                                "unrealized_pnl": None
+                                if account.unrealized_pnl is None
+                                else str(account.unrealized_pnl),
+                                "source": "snapshot",
+                            }
+                        },
+                        upsert=True,
+                    )
+                except Exception:
+                    log.exception("snapshot.write_failed connection=%s account=%s",
+                                  self.label, account.account_id)
 
     async def subscribe_underlyings(self):
         """Open the market-data lines `track_underlying` asked for.
@@ -399,7 +553,12 @@ class GatewaySession(Session):
             price = self.underlying_of(item)
             if self.underlying_key(item) in keys and item.quantity != 0 and item.underlying_price != price:
                 item = item.model_copy(
-                    update={"quantity_changed": False, "underlying_price": price, "updated_at": now()}
+                    update={
+                        "quantity_changed": False,
+                        "underlying_price": price,
+                        "underlying_source": self.underlying_source_of(item),
+                        "updated_at": now(),
+                    }
                 )
                 self.positions[key] = item
                 self.enqueue("position.updated", item)
@@ -671,6 +830,8 @@ class GatewaySession(Session):
                 asyncio.create_task(self.renew()),
                 asyncio.create_task(self.process()),
                 asyncio.create_task(self.live()),
+                asyncio.create_task(self.spot()),
+                asyncio.create_task(self.snapshots()),
                 asyncio.create_task(self.stop.wait()),
             ]
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

@@ -5,13 +5,20 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=__PLATFORM_ROOT__/frontend/.next/standalone
+# Serves the release that deploy/deploy.sh assembled, never the working
+# tree — `next build` empties .next/ and would take the live app's CSS and
+# JS offline for the length of the build.
+WorkingDirectory=/srv/ibkr-web/current
 Environment=TZ=Asia/Kolkata
 Environment=NODE_ENV=production
 Environment=PORT=3020
 Environment=HOSTNAME=127.0.0.1
 Environment=API_INTERNAL_URL=http://127.0.0.1:8120
-ExecStart=/usr/bin/node server.js
+ExecStart=/usr/bin/node /srv/ibkr-web/current/server.js
+# Next exits 143 on SIGTERM. Without this every ordinary stop is logged as
+# "Failed with result 'exit-code'", which is a misleading thing to find
+# when reading back through a deploy.
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20

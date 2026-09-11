@@ -66,6 +66,8 @@ export type Position = {
   market_value: Money;
   unrealized_pnl: Money;
   underlying_price?: Money;
+  /** Which feed produced `underlying_price`: a Massive loader name, or "ib_und_price". */
+  underlying_source?: string;
 };
 export type Order = {
   account_id: string;
@@ -89,6 +91,8 @@ export type Execution = {
   side: string;
   quantity: string;
   price: string;
+  commission?: Money;
+  realized_pnl?: Money;
   exchange: string;
   order_id: number;
   executed_at: string;
@@ -172,4 +176,31 @@ export type SnapTradeAuthorization = {
   id: string;
   brokerage: string | null;
   disabled: boolean;
+};
+
+/** One account's net liquidation on one report date. */
+export type HistoryPoint = {
+  account_id: string;
+  report_date: string;
+  taken_at: string;
+  currency: string;
+  net_liquidation: string;
+  cash?: string | null;
+  realized_pnl?: string | null;
+  unrealized_pnl?: string | null;
+  /** "snapshot" when this platform recorded it, "flex" when the broker did. */
+  source: string;
+};
+
+export type HistoryResponse = {
+  accounts: string[];
+  series: HistoryPoint[];
+  combined: { report_date: string; accounts: number; net_liquidation: string; currencies: string[] }[];
+};
+
+export type IntradayResponse = {
+  date: string;
+  accounts: string[];
+  series: (HistoryPoint & { day_pnl: string | null })[];
+  combined: { taken_at: string; accounts: number; day_pnl: string }[];
 };

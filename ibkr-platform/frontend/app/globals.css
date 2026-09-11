@@ -314,6 +314,70 @@ small {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+/* The clock and its zone read as one control: the time, then the zone it is in. */
+.tz-picker {
+  display: inline-flex;
+  margin-left: calc(var(--space-4) * -1 + var(--space-2));
+}
+.tz-picker select {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.tz-picker select:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* Session clock: green while a session is running, amber inside the last half
+   hour of one, so a close creeps into view rather than arriving. */
+.market-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.market-clock b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.market-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.market-clock.open {
+  color: var(--green);
+}
+.market-clock.shut {
+  color: var(--muted);
+}
+.market-clock.urgent {
+  color: var(--amber);
+}
+.market-clock.urgent b {
+  color: var(--amber);
+}
 .live-dot {
   display: inline-flex;
   align-items: center;
@@ -448,6 +512,33 @@ small {
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
+/* Tapping anything outside the drawer closes it. Only ever shown at the width
+   where the sidebar becomes an overlay. */
+.nav-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  border: 0;
+  padding: 0;
+  background: #0009;
+  cursor: default;
+  animation: nav-fade 0.18s ease;
+}
+@keyframes nav-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-backdrop {
+    animation: none;
+  }
+  .sidebar {
+    transition: none;
+  }
+}
+
 .sidebar {
   width: var(--sidebar);
   position: fixed;
@@ -745,6 +836,282 @@ h1 {
 .gw-facts .muted,
 .facts .muted {
   color: var(--muted);
+}
+
+/* ── Searchable dropdown ──────────────────────────────────────────────────── */
+.ss {
+  position: relative;
+  display: inline-flex;
+}
+.ss-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 110px;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--text-base);
+  text-align: left;
+}
+.ss-value:hover {
+  border-color: var(--line-strong);
+}
+.ss-caret {
+  color: var(--muted);
+  font-size: 9px;
+}
+.ss-pop {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  max-width: 260px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px #0007;
+  overflow: hidden;
+}
+.ss-search {
+  width: 100%;
+  height: var(--control-height-sm);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  font-size: var(--text-base);
+}
+.ss-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.ss-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-list button.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.ss-list button.selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+.ss-empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.table-facet {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.table-facet > span {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── Sortable, resizable table headings ───────────────────────────────────── */
+/* A heading advertises both of its affordances: an arrow that is always there,
+   dimmed until it is the sorted column, and a divider you can grab. */
+th {
+  position: relative;
+}
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: inherit;
+}
+.th-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.th-arrow {
+  color: var(--muted);
+  opacity: 0.35;
+  font-size: 10px;
+  flex: none;
+  transition: opacity 0.12s ease;
+}
+.th-sort:hover .th-arrow {
+  opacity: 0.8;
+}
+.th-arrow.on {
+  opacity: 1;
+  color: var(--accent);
+}
+.th-grip {
+  position: absolute;
+  top: 15%;
+  right: -3px;
+  height: 70%;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+/* The visible hairline sits inside the wider hit area. */
+.th-grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--line-strong);
+  transition:
+    background 0.12s ease,
+    width 0.12s ease;
+}
+.th-grip:hover::after,
+.th-grip:focus-visible::after {
+  background: var(--accent);
+  width: 2px;
+}
+th:last-child .th-grip {
+  right: 0;
+}
+.responsive-table.sized {
+  table-layout: fixed;
+}
+.responsive-table.sized td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Range tabs sit inline in a control row, so they are lighter than page tabs. */
+.tabs.range-tabs {
+  margin-bottom: 0;
+  border-bottom: 0;
+  padding: 0;
+  gap: 0;
+}
+.tabs.range-tabs button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  margin: 0 0 0 -1px;
+  border-bottom-width: 1px;
+}
+.tabs.range-tabs button:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  margin-left: 0;
+}
+.tabs.range-tabs button:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.tabs.range-tabs button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  z-index: 1;
+  position: relative;
+}
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.control-caption {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.account-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 0 var(--gutter) var(--space-3);
+  padding: var(--space-3);
+}
+.account-picker legend {
+  padding: 0 var(--space-1);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.account-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+}
+
+/* ── Account tabs ─────────────────────────────────────────────────────────────
+   One account section at a time. Stacked, the five ran to several screens and
+   the risk curve sat below a table nobody had scrolled past. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--stack);
+  border-bottom: 1px solid var(--line);
+  padding: 0 var(--space-1);
+}
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: var(--text-base);
+  font-family: inherit;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  /* Always present so the label does not shift when a tab becomes current. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tabs button:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+#account-panel:focus {
+  outline: none;
 }
 
 /* ── Gateway panel ────────────────────────────────────────────────────────── */
@@ -1353,6 +1720,28 @@ pre {
   .nav-toggle {
     display: flex;
   }
+  /* The drawer is positioned below a topbar of exactly --topbar. Letting the
+     header wrap made it taller than that, and the first nav item slid up
+     underneath it — so the controls stay on one row and scroll instead. */
+  .topbar {
+    flex-wrap: nowrap;
+  }
+  .top-right {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+  .top-right::-webkit-scrollbar {
+    display: none;
+  }
+  .top-right > * {
+    flex: none;
+  }
+  .nav-backdrop {
+    display: block;
+  }
   .brand {
     width: auto;
     border-right: 0;
@@ -1366,6 +1755,8 @@ pre {
     transition: transform 0.18s ease;
     width: min(280px, 82vw);
     box-shadow: 0 0 40px #0008;
+    /* Over the sticky header rather than under it. */
+    z-index: 40;
   }
   .sidebar.open {
     transform: translateX(0);

@@ -36,6 +36,7 @@ describe("gateway controls", () => {
 
   it("shows the current connection target", () => {
     render(<GatewayStatus gateway={gateway()} clock={Date.now()} isAdmin />);
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText(/127\.0\.0\.1:4002/)).toBeTruthy();
     expect(screen.getByText(/client 17/)).toBeTruthy();
   });
@@ -125,6 +126,7 @@ describe("gateway controls", () => {
         isAdmin
       />,
     );
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.queryByText("Online")).toBeNull();
     expect(screen.getByText(/degraded/)).toBeTruthy();
   });

@@ -1,7 +1,7 @@
 # Account and desk payoff scenarios
 
-The Overview and Positions views show desk curves across all accounts the current
-user can access. An individual account page shows its own curves. The panel uses
+The dedicated RMS view shows desk curves across all accounts the current user
+can access. An individual account page shows its own curves. The panel uses
 the existing authorized positions queries and receives the same live updates as
 the leg table. Calculations run in the browser; no new backend endpoint or
 market-data subscription is required.
@@ -29,7 +29,8 @@ converted. The desk is limited to accounts accessible in the active tenant.
 * **Desk aggregation:** every underlying receives the same percentage shock to
   its reference price. Terminal account lines sum to the desk terminal line.
   The dashed line shows aggregate pre-expiry estimated P&L. Individual account
-  pages show both curves for that account.
+  pages show both curves for that account. The RMS table fixes exact −1% through
+  −5% and +1% through +5% levels and separates terminal P&L by account ID.
 * **Tail visibility:** selectable shocks extend from a total underlying loss
   (−100%) to +200%. Strike breakpoints are included in the terminal curve.
   Reported worst P&L is limited to the plotted range; the pre-expiry minimum is
@@ -38,6 +39,9 @@ converted. The desk is limited to accounts accessible in the active tenant.
   short-stock exposure. Calls are netted within each underlying and expiry;
   long calls at other expiries are not assumed to guarantee protection. Flags
   are conservative when expiries differ.
+
+The chart can be zoomed horizontally with its slider, mouse wheel, trackpad or
+pinch gesture; zoom changes only the visible graph and not the RMS table values.
 
 For mixed expiries, terminal payoff assumes the same relative move at each
 contract's own expiry. It is not the value of a portfolio liquidated on one date,

@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useZone } from "./timezone";
+import { formatDateTime } from "@/lib/timezone";
 import { Gateway, LiveEvent } from "@/lib/types";
 import { GatewayStatus } from "./gateway-status";
 
@@ -19,6 +21,7 @@ type Diagnostics = {
   visibility_tests: Record<string, unknown>[];
 };
 export function Diagnostics({ clock }: { clock: number }) {
+  const zone = useZone();
   const query = useQuery({
     queryKey: ["diagnostics"],
     queryFn: () => api<Diagnostics>("/admin/diagnostics"),
@@ -155,7 +158,7 @@ export function Diagnostics({ clock }: { clock: number }) {
           {data.events.map((event) => (
             <details key={event.event_id}>
               <summary>
-                <time>{event.timestamp}</time> <b>{event.event_type}</b>{" "}
+                <time>{formatDateTime(event.timestamp, zone)}</time> <b>{event.event_type}</b>{" "}
                 {event.account_id}
               </summary>
               <pre>{JSON.stringify(event.data, null, 2)}</pre>

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Gateway } from "@/lib/types";
 import { api } from "@/lib/api";
+import { ChevronDown, ChevronUp, Info, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   effectivePhase,
@@ -38,6 +39,9 @@ export function GatewayStatus({
   const [notice, setNotice] = useState<string | null>(null);
   const [configuring, setConfiguring] = useState(false);
   const [confirming, setConfirming] = useState<Interrupt | null>(null);
+  // Collapsed by default: the head already carries the state anyone glances at,
+  // and the rows below it spell out the login, host and port on a shared screen.
+  const [facts, setFacts] = useState(false);
 
   const remaining = twoFactorRemaining(gateway, clock);
   const awaitingTwoFactor = isAwaitingTwoFactor(gateway, remaining);
@@ -155,8 +159,9 @@ export function GatewayStatus({
         <span className={`gw-dot ${tone}`} aria-hidden="true" />
         <strong>IB Gateway</strong>
         <span className={`badge ${tone}`}>{statusText}</span>
-        {canControl && (
-          <span className="gateway-actions">
+        <span className="gateway-actions">
+          {canControl && (
+            <>
             {processRunning && (
               <Button
                 type="button"
@@ -191,13 +196,28 @@ export function GatewayStatus({
                 setNotice(null);
               }}
             >
+              <Settings2 size={14} aria-hidden="true" />
               {configuring ? "Close" : "Configure"}
             </Button>}
-          </span>
-        )}
+            </>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={facts}
+            aria-controls="gw-facts"
+            title="Process, login, port, worker link and heartbeat"
+            onClick={() => setFacts(!facts)}
+          >
+            <Info size={14} aria-hidden="true" />
+            {facts ? "Hide details" : "Details"}
+            {facts ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+          </Button>
+        </span>
       </div>
 
-      <dl className="gw-facts">
+      {facts && <dl className="gw-facts" id="gw-facts">
         {isAdmin && (
           <div>
             <dt>Gateway process</dt>
@@ -252,7 +272,7 @@ export function GatewayStatus({
               : "—"}
           </dd>
         </div>
-      </dl>
+      </dl>}
 
       {canControl && awaitingTwoFactor && (
         <div className="two-factor" role="alert">

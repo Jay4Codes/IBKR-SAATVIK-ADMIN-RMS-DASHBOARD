@@ -10,6 +10,16 @@ def database():
     return client, client[settings.mongodb_database]
 
 
+def snapshot_id(tenant_id: str, account_id: str, report_date: str, bucket: str = "") -> str:
+    """One row per account per date, or per bucket within the day.
+
+    Flex owns the plain date: the broker's own end-of-day figure is the
+    authority for a finished session, so a backfill overwrites whatever the
+    worker sampled for that date rather than sitting beside it.
+    """
+    return f"{tenant_id}:{account_id}:{report_date}" + (f":{bucket}" if bucket else "")
+
+
 async def initialize(db):
     try:
         await _create_indexes(db)
@@ -56,6 +66,12 @@ async def _create_indexes(db):
     )
     await db.order_events.create_index([("tenant_id", ASCENDING), ("account_id", ASCENDING)])
     await db.audit_logs.create_index([("tenant_id", ASCENDING), ("timestamp", DESCENDING)])
+    # History is always read as one account's run of dates, or several accounts
+    # over one range, so the account leads and the date orders within it.
+    await db.account_snapshots.create_index(
+        [("tenant_id", ASCENDING), ("account_id", ASCENDING), ("report_date", ASCENDING)]
+    )
+    await db.account_snapshots.create_index([("tenant_id", ASCENDING), ("report_date", ASCENDING)])
     await db.visibility_tests.create_index([("tenant_id", ASCENDING), ("checked_at", DESCENDING)])
 
     for role in ("ADMIN", "TRADER"):

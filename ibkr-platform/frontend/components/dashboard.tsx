@@ -17,13 +17,14 @@ import {
   ChevronRight,
   LayoutGrid,
   LineChart,
+  TrendingUp,
   ListChecks,
   LogOut,
   Menu,
   Moon,
   Plug,
   Receipt,
-  Settings2,
+  UserRound,
   Sun,
   Users,
   Wallet,
@@ -50,7 +51,14 @@ import {
 import { GatewayStatus } from "./gateway-status";
 import { Diagnostics } from "./diagnostics";
 import { AllocationChart } from "./allocation-chart";
+import { Button } from "@/components/ui/button";
+import { SearchableSelect } from "./searchable-select";
 import { PayoffPanel } from "./payoff-panel";
+import { DayPnlPanel } from "./day-pnl";
+import { PerformancePanel } from "./performance";
+import { TimezonePicker, useZone } from "./timezone";
+import { formatClock } from "@/lib/timezone";
+import { CLOSING_SOON, countdown, marketState } from "@/lib/market";
 import { BrandMark } from "./brand";
 import { Connections } from "./connections";
 import { Members } from "./members";
@@ -61,12 +69,14 @@ type View =
   | "Overview"
   | "Accounts"
   | "Positions"
+  | "RMS"
   | "Orders"
   | "Executions"
   | "Connections"
   | "Members"
   | "Tenants"
-  | "Settings";
+  | "Performance"
+  | "Profile";
 
 type NavItem = {
   view: View;
@@ -84,8 +94,10 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { view: "Overview", icon: LayoutGrid },
       { view: "Accounts", icon: Wallet },
       { view: "Positions", icon: LineChart },
+      { view: "RMS", icon: Activity },
       { view: "Orders", icon: ListChecks },
       { view: "Executions", icon: Receipt },
+      { view: "Performance", icon: TrendingUp },
     ],
   },
   {
@@ -94,15 +106,35 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { view: "Connections", icon: Plug, admin: true },
       { view: "Members", icon: Users, admin: true },
       { view: "Tenants", icon: Building2, platform: true },
-      { view: "Settings", icon: Settings2 },
+      { view: "Profile", icon: UserRound },
     ],
   },
 ];
 
 const VIEWS = NAV.flatMap((section) => section.items.map((item) => item.view));
 
-/** Views that manage the platform rather than watch a broker session. */
-const ADMIN_VIEWS: View[] = ["Connections", "Members", "Tenants", "Settings"];
+/** An account's sections, shown one at a time instead of stacked end to end.
+ *  Ids match the sidebar's view names where they overlap, so "RMS" means the
+ *  same thing on the desk and inside an account. */
+const ACCOUNT_TABS = ["Summary", "Positions", "RMS", "Performance", "Orders", "Executions"] as const;
+type AccountTab = (typeof ACCOUNT_TABS)[number];
+
+/** The same glyph the sidebar uses, so a tab and its nav item read as one thing. */
+const TAB_ICONS: Record<AccountTab, typeof LayoutGrid> = {
+  Summary: LayoutGrid,
+  Positions: LineChart,
+  RMS: Activity,
+  Performance: TrendingUp,
+  Orders: ListChecks,
+  Executions: Receipt,
+};
+
+/** Views an ordinary member may not open; requesting one lands on Overview. */
+const ADMIN_VIEWS: View[] = ["Connections", "Members", "Tenants"];
+
+/** Views with no broker context, so no gateway panel, currency or account count.
+ *  Profile belongs here but not in ADMIN_VIEWS: everyone can read their own. */
+const PLATFORM_VIEWS: View[] = [...ADMIN_VIEWS, "Profile"];
 export default function Dashboard({
   accountId,
   diagnostics = false,
@@ -185,6 +217,13 @@ function Terminal({
   });
   const isAdmin = !!user.data?.is_super_admin;
   const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "Overview" : requestedView;
+  const zone = useZone();
+  const [tabs, setTabs] = useState<Record<string, AccountTab>>({});
+  const tab: AccountTab = (accountId && tabs[accountId]) || "Summary";
+  const setTab = (next: AccountTab) =>
+    accountId && setTabs(previous => ({ ...previous, [accountId]: next }));
+  /** Inside an account the tab decides; on the desk the sidebar still does. */
+  const shows = (name: string) => (accountId ? tab === name : view === name);
   const isPlatformAdmin = !!user.data?.is_super_admin;
   const allowed = isAdmin ? "*" : (accounts.data?.map((account) => account.account_id).join(",") ?? "");
   useEffect(() => {
@@ -195,11 +234,26 @@ function Terminal({
     if (!allowed) return;
     return connectLive(client, allowed.split(","), setConnected);
   }, [allowed, client]);
-  const currencies = [...new Set(selected.map((a) => a.currency))];
-  const activeCurrency = currencies.includes(currency)
-    ? currency
-    : currencies[0];
-  const monetary = selected.filter((a) => a.currency === activeCurrency);
+  /* "BASE" is not a currency: it is the placeholder an account carries until the
+     gateway reports a NetLiquidation tag naming a real one. IBKR's consolidated
+     "All" pseudo-account never reports one, so it sat in this list forever and
+     offered the reader a currency that does not exist. Placeholders are dropped;
+     an account still waiting on its first valuation simply has no currency yet. */
+  const currencies = [
+    ...new Set(selected.map((a) => a.currency).filter((c) => c && c !== "BASE")),
+  ];
+  const ALL = "All accounts";
+  const activeCurrency =
+    currency === ALL || currencies.includes(currency) ? currency : currencies[0];
+  const aggregating = activeCurrency === ALL;
+  const monetary = aggregating
+    ? selected
+    : selected.filter((a) => a.currency === activeCurrency);
+  /* Summing across base currencies is only arithmetic if there is one of them:
+     nothing in this platform converts FX, so a mixed total is not a real number
+     and says so rather than printing a confident figure. */
+  const mixed = aggregating && currencies.length > 1;
+  const currencyLabel = aggregating ? (mixed ? "MIXED" : (currencies[0] ?? "")) : activeCurrency;
   const sum = (field: keyof Account) =>
     monetary.length && monetary.every((a) => a[field] != null)
       ? monetary
@@ -253,10 +307,27 @@ function Terminal({
           >
             ● {connected ? "LIVE" : "OFFLINE"}
           </span>
-          <time>
-            {clock ? new Date(clock).toISOString().slice(11, 19) : "--:--:--"}{" "}
-            UTC
-          </time>
+          {clock > 0 && (() => {
+            const market = marketState(clock);
+            const urgent = market.openNow && market.until <= CLOSING_SOON;
+            return (
+              <span
+                className={`market-clock ${market.openNow ? "open" : "shut"} ${urgent ? "urgent" : ""}`}
+                title={`Cboe index options · ${market.label} session · ${
+                  market.openNow ? "closes" : "opens"
+                } ${market.atLabel} ET`}
+              >
+                <span className="market-dot" aria-hidden="true" />
+                {market.label}
+                <b>
+                  {market.openNow ? "closes in " : "opens in "}
+                  {countdown(market.until)}
+                </b>
+              </span>
+            );
+          })()}
+          <time>{clock ? formatClock(clock, zone) : "--:--:--"}</time>
+          <TimezonePicker />
           <span className="badge">{user.data?.role ?? "SESSION"}</span>
           <button
             type="button"
@@ -280,6 +351,15 @@ function Terminal({
           </button>
         </div>
       </header>
+      {menuOpen && (
+        <button
+          type="button"
+          className="nav-backdrop"
+          aria-label="Close navigation"
+          tabIndex={-1}
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
       <aside
         id="workspace-nav"
         className={`sidebar ${menuOpen ? "open" : ""}`}
@@ -358,25 +438,25 @@ function Terminal({
                 ? "ACCOUNT"
                 : diagnostics
                   ? "INTERNAL"
-                  : ADMIN_VIEWS.includes(view)
-                    ? "ADMINISTRATION"
-                    : "MONITOR"}
+                  : view === "Profile"
+                    ? "SESSION"
+                    : ADMIN_VIEWS.includes(view)
+                      ? "ADMINISTRATION"
+                      : "MONITOR"}
             </p>
             <h1>{title}</h1>
           </div>
           <div className="heading-actions">
-            {activeCurrency && !ADMIN_VIEWS.includes(view) && (
-              <select
-                aria-label="Reporting currency"
+            {/* Only worth a control when there is a genuine choice to make. */}
+            {activeCurrency && currencies.length > 1 && !PLATFORM_VIEWS.includes(view) && (
+              <SearchableSelect
+                label="Reporting currency"
                 value={activeCurrency}
-                onChange={(e) => setCurrency(e.target.value)}
-              >
-                {currencies.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
+                options={[ALL, ...currencies]}
+                onChange={setCurrency}
+              />
             )}
-            {!ADMIN_VIEWS.includes(view) && (
+            {!PLATFORM_VIEWS.includes(view) && (
               <span className="badge">
                 {selected.length} {selected.length === 1 ? "ACCOUNT" : "ACCOUNTS"}
               </span>
@@ -398,7 +478,7 @@ function Terminal({
           ))}
         {user.data && !diagnostics && (
           <>
-            {!ADMIN_VIEWS.includes(view) && (
+            {!PLATFORM_VIEWS.includes(view) && (
               <GatewayStatus
                 gateway={gateway.data}
                 clock={clock}
@@ -432,7 +512,7 @@ function Terminal({
               <>
                 <div className="kpis">
                   <div>
-                    <label>Total net liquidation · {activeCurrency}</label>
+                    <label>Total net liquidation · {currencyLabel}</label>
                     <strong>{money(sum("net_liquidation"))}</strong>
                     <small>Accessible accounts, selected currency</small>
                   </div>
@@ -458,7 +538,7 @@ function Terminal({
                     <small>Visible to API session</small>
                   </div>
                   <div>
-                    <label>Available funds · {activeCurrency}</label>
+                    <label>Available funds · {currencyLabel}</label>
                     <strong>{money(sum("available_funds"))}</strong>
                     <small>Broker reported</small>
                   </div>
@@ -472,6 +552,15 @@ function Terminal({
                     <small>Excess liquidity / net liquidation</small>
                   </div>
                 </div>
+                {mixed && (
+                  <p role="note" className="risk-warning">
+                    Aggregating {currencies.join(", ")} without FX conversion —
+                    these totals add different currencies together and are a
+                    count, not a valuation. Pick a single currency for a figure
+                    you can bank on.
+                  </p>
+                )}
+                {!accountId && <DayPnlPanel accounts={ids} />}
                 {!accountId && (
                   <section className="panel">
                     <h2>
@@ -497,7 +586,35 @@ function Terminal({
             {accountId && !selected.length && !accounts.isLoading && (
               <p role="alert">Account unavailable or access denied.</p>
             )}
-            {accountId && selected[0] && (
+            {accountId && !!selected.length && (
+              <div className="tabs" role="tablist" aria-label="Account sections">
+                {ACCOUNT_TABS.map((name) => {
+                  const Icon = TAB_ICONS[name];
+                  return (
+                  <button
+                    key={name}
+                    type="button"
+                    role="tab"
+                    id={`tab-${name}`}
+                    aria-selected={tab === name}
+                    aria-controls="account-panel"
+                    className={tab === name ? "active" : ""}
+                    onClick={() => setTab(name)}
+                  >
+                    <Icon size={14} aria-hidden="true" />
+                    {name === "RMS" ? "Payoff & risk" : name}
+                  </button>
+                  );
+                })}
+              </div>
+            )}
+            <div
+              id="account-panel"
+              {...(accountId
+                ? { role: "tabpanel", "aria-labelledby": `tab-${tab}`, tabIndex: -1 }
+                : {})}
+            >
+            {shows("Summary") && selected[0] && (
               <section className="panel">
                 <h2>Account summary</h2>
                 <div className="summary-grid">
@@ -520,7 +637,8 @@ function Terminal({
                 </div>
               </section>
             )}
-            {(accountId || view === "Positions") && (
+            {shows("Summary") && accountId && <DayPnlPanel accountId={accountId} accounts={ids} />}
+            {shows("Positions") && (
               <section className="panel">
                 <h2>Positions</h2>
                 <PositionsTable rows={positions.flatMap((p) => p.data ?? [])} />
@@ -531,7 +649,7 @@ function Terminal({
                 </p>
               </section>
             )}
-            {(accountId || view === "Overview" || view === "Positions") && (
+            {shows("RMS") && (
               <PayoffPanel
                 key={accountId ?? "desk"}
                 rows={positions.flatMap((p) => p.data ?? [])}
@@ -541,25 +659,38 @@ function Terminal({
                 light={light}
               />
             )}
-            {(accountId || view === "Orders") && (
+            {shows("Performance") && (
+              <PerformancePanel
+                key={accountId ?? "desk"}
+                accountId={accountId}
+                accounts={ids}
+                isAdmin={isAdmin || ["OWNER", "ADMIN"].includes(user.data.tenant?.role ?? "")}
+              />
+            )}
+            {shows("Orders") && (
               <section className="panel">
                 <h2>Open orders</h2>
                 <OrdersTable rows={orders.flatMap((p) => p.data ?? [])} />
               </section>
             )}
-            {(accountId || view === "Executions") && (
+            {shows("Executions") && (
               <section className="panel">
                 <h2>Recent executions</h2>
                 <ExecutionsTable
                   rows={executions.flatMap((p) => p.data ?? [])}
                 />
+                <p className="footnote">
+                  Gross rate is the broker execution price before commission.
+                  Commission is reported separately when available.
+                </p>
               </section>
             )}
-            {view === "Settings" && !accountId && (
+            </div>
+            {view === "Profile" && !accountId && (
               <>
                 <section className="panel">
                   <h2>
-                    Session
+                    Signed in as
                     <span>{user.data.email}</span>
                   </h2>
                   <div className="summary-grid">
@@ -612,6 +743,29 @@ function Terminal({
                     </div>
                   </section>
                 )}
+                <section className="panel">
+                  <h2>Session</h2>
+                  <div className="panel-body">
+                    <p className="muted">
+                      Signing out clears this browser&apos;s session and any cached
+                      broker data with it.
+                    </p>
+                    <div className="panel-actions">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          await api("/auth/logout", {});
+                          client.clear();
+                          router.replace("/login");
+                        }}
+                      >
+                        <LogOut size={14} aria-hidden="true" /> Sign out
+                      </Button>
+                    </div>
+                  </div>
+                </section>
                 {isAdmin && (
                   <section className="panel">
                     <h2>Administration</h2>
@@ -647,7 +801,7 @@ function Terminal({
           </>
         )}
         <footer>
-          SATTVIC WEALTH · RMS <span>UTC timestamps · Decimal precision</span>
+          SATTVIC WEALTH · RMS <span>{zone} timestamps · Decimal precision</span>
         </footer>
       </main>
     </div>

@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GatewayStatus } from "@/components/gateway-status";
-import { AccountsTable, PositionsTable, money } from "@/components/tables";
-import { Account, Position } from "@/lib/types";
+import { AccountsTable, ExecutionsTable, PositionsTable, money } from "@/components/tables";
+import { Account, Execution, Position } from "@/lib/types";
 
 const account = (id: string, nlv: string) =>
   ({
@@ -31,6 +31,9 @@ describe("gateway", () => {
       />,
     );
     expect(screen.getByText("Online")).toBeInTheDocument();
+    // The facts grid is collapsed until asked for.
+    expect(screen.queryByText(/2s ago/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText(/2s ago/)).toBeInTheDocument();
   });
   it("marks stale connected workers as degraded", () => {
@@ -100,5 +103,24 @@ describe("tables", () => {
   it("preserves decimal precision and missing values", () => {
     expect(money("9007199254740993.25")).toBe("9,007,199,254,740,993.25");
     expect(money(null)).toBe("—");
+  });
+  it("shows the traded rate gross and commission separately", () => {
+    const row = {
+      account_id: "DU1",
+      execution_id: "fill-1",
+      symbol: "AAPL",
+      side: "BOT",
+      quantity: "2",
+      price: "200.125",
+      commission: "0.35",
+      exchange: "NASDAQ",
+      order_id: 7,
+      executed_at: "2026-09-10T10:00:00Z",
+    } as Execution;
+    render(<ExecutionsTable rows={[row]} />);
+    expect(screen.getByRole("columnheader", { name: /Traded rate.*gross/i })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Commission/ })).toBeInTheDocument();
+    expect(screen.getByText("200.13")).toBeInTheDocument();
+    expect(screen.getByText("0.35")).toBeInTheDocument();
   });
 });

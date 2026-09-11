@@ -72,6 +72,11 @@ class Position(BaseModel):
     market_value: Decimal | None = None
     #: The underlying's live mark, from IB's option model ticks. Options only.
     underlying_price: Decimal | None = None
+    #: Which feed produced `underlying_price` — a Massive loader name, or
+    #: "ib_und_price". The panel labels the reference price from it, so a vendor
+    #: plan that can only serve a prior session's close cannot be mistaken for a
+    #: live mark.
+    underlying_source: str = ""
     unrealized_pnl: Decimal | None = None
     realized_pnl: Decimal | None = None
     updated_at: datetime = Field(default_factory=now)

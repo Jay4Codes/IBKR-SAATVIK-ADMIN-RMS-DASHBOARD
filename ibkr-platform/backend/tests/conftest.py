@@ -12,6 +12,10 @@ os.environ["IBKR_PORT"] = "4001"
 os.environ["IBC_CONFIG_PATH"] = "/opt/ibc/config.ini"
 os.environ["IBC_LOG_DIRECTORY"] = "/opt/ibc/logs"
 os.environ["GATEWAY_SERVICE"] = "ibkr-gateway.service"
+# A configured vendor feed on the developer's host must not reach into the suite
+# and start it polling; tests that want it on patch these in.
+os.environ["MASSIVE_API_KEY"] = ""
+os.environ["MASSIVE_UNDERLYINGS"] = ""
 
 import pytest
 from fakeredis.aioredis import FakeRedis

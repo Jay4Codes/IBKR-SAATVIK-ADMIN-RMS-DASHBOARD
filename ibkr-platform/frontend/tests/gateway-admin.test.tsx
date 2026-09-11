@@ -32,12 +32,36 @@ describe("gateway process and credentials", () => {
     for (const label of ["Start gateway", "Disconnect", "Configure"]) {
       expect(screen.queryByText(label)).toBeNull();
     }
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.queryByText(/apibot/)).toBeNull();
+    expect(screen.queryByText("Gateway process")).toBeNull();
+  });
+
+  it("collapses the connection facts until they are asked for", () => {
+    render(<GatewayStatus gateway={gateway()} clock={Date.now()} isAdmin />);
+    const toggle = screen.getByText("Details");
+    for (const row of ["Gateway process", "Login / mode", "API port", "Worker link", "Heartbeat"]) {
+      expect(screen.queryByText(row)).toBeNull();
+    }
+    expect(toggle.closest("button")).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByText("API port")).toBeTruthy();
+    expect(screen.getByText(/apibot · live/)).toBeTruthy();
+    expect(screen.getByText("Hide details").closest("button")).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByText("Hide details"));
+    expect(screen.queryByText("API port")).toBeNull();
+  });
+
+  it("lets a non-admin reach the facts too, minus the admin-only rows", () => {
+    render(<GatewayStatus gateway={gateway()} clock={Date.now()} />);
+    fireEvent.click(screen.getByText("Details"));
+    expect(screen.getByText("API port")).toBeTruthy();
     expect(screen.queryByText("Gateway process")).toBeNull();
   });
 
   it("shows process state and configured login to admins", () => {
     render(<GatewayStatus gateway={gateway()} clock={Date.now()} isAdmin />);
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText("Gateway process")).toBeTruthy();
     expect(screen.getByText("stopped")).toBeTruthy();
     expect(screen.getByText(/apibot · live/)).toBeTruthy();
@@ -51,6 +75,7 @@ describe("gateway process and credentials", () => {
         isAdmin
       />,
     );
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText(/not configured/)).toBeTruthy();
   });
 

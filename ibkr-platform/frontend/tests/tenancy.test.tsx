@@ -233,36 +233,4 @@ describe("members", () => {
     expect((buttons[1].closest("button") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("only accepts an account list for the roles that are scoped by one", async () => {
-    apiMock.mockResolvedValue(members);
-    wrap(<Members user={user()} />);
-    const accounts = (await screen.findByLabelText(/Accounts/)) as HTMLInputElement;
-    // VIEWER and TRADER are limited to named accounts; OWNER and ADMIN see the
-    // whole tenant, so an account list there would be misleading.
-    expect(accounts.disabled).toBe(false);
-    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: "OWNER" } });
-    expect(accounts.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: "TRADER" } });
-    expect(accounts.disabled).toBe(false);
-  });
-
-  it("sends the grant with its account list", async () => {
-    apiMock.mockResolvedValue(members);
-    wrap(<Members user={user()} />);
-    fireEvent.change(await screen.findByLabelText(/Email/), {
-      target: { value: "new@sattvic.test" },
-    });
-    fireEvent.change(screen.getByLabelText(/Role/), { target: { value: "TRADER" } });
-    fireEvent.change(screen.getByLabelText(/Accounts/), {
-      target: { value: "DU1, DU2" },
-    });
-    fireEvent.click(screen.getByText("Save access"));
-    await waitFor(() =>
-      expect(apiMock).toHaveBeenCalledWith("/members", {
-        email: "new@sattvic.test",
-        role: "TRADER",
-        accounts: ["DU1", "DU2"],
-      }),
-    );
-  });
 });

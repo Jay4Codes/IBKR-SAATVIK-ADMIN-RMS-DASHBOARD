@@ -5,9 +5,10 @@ import secrets as random_secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +17,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 from redis.asyncio import Redis
 
 from app import connections as registry
-from app import gateway_login, hostctl, provisioning, secrets, snaptrade
+from app import flex, gateway_login, hostctl, provisioning, secrets, snaptrade
 from app.auth import (
     COOKIE,
     DUMMY_HASH,
@@ -34,7 +35,7 @@ from app.auth import (
     subscriptions,
 )
 from app.config import settings
-from app.db import database, initialize
+from app.db import database, initialize, snapshot_id
 from app.domain import now
 from app.logging import configure
 from app.state import StateRepository
@@ -937,6 +938,179 @@ async def rows(account_id: str, request: Request, limit: int = 100, user: Princi
         )
         return ok(await cursor.sort("executed_at", -1).limit(max(1, min(limit, 500))).to_list())
     return ok(await repo.rows(account_id, kind))
+
+
+# ── History ───────────────────────────────────────────────────────────────────
+
+
+async def history_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
+    """Every account's daily close over a range, newest date last.
+
+    A day can hold several snapshots; the last one taken is the day's close, and
+    a Flex row for that date supersedes all of them. Both live in the same
+    collection, so ordering by `taken_at` and keeping the final row per
+    (account, date) resolves it without the caller knowing which source won.
+    """
+    window: dict[str, Any] = {}
+    if since:
+        window["$gte"] = since
+    if until:
+        window["$lte"] = until
+    query = user.scope({"account_id": {"$in": accounts}})
+    if window:
+        query["report_date"] = window
+    cursor = db.account_snapshots.find(query, {"_id": 0, "tenant_id": 0})
+    closes: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in await cursor.sort("taken_at", 1).to_list(200_000):
+        # Flex is the broker's own end-of-day word, so it always wins its date.
+        key = (row["account_id"], row["report_date"])
+        if row.get("source") == "flex" or closes.get(key, {}).get("source") != "flex":
+            closes[key] = row
+    return [closes[key] for key in sorted(closes)]
+
+
+def combine(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One portfolio line: each date's accounts added together.
+
+    A date is only reported once every requested account has a close for it —
+    a total that silently drops an account reads as a loss that never happened.
+    """
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_date.setdefault(row["report_date"], []).append(row)
+    expected = len({row["account_id"] for row in rows})
+    out = []
+    for date in sorted(by_date):
+        day = by_date[date]
+        if len(day) != expected:
+            continue
+        out.append(
+            {
+                "report_date": date,
+                "accounts": len(day),
+                "net_liquidation": str(sum(Decimal(r["net_liquidation"]) for r in day)),
+                "currencies": sorted({r.get("currency") or "BASE" for r in day}),
+            }
+        )
+    return out
+
+
+@app.get("/api/v1/accounts/{account_id}/history")
+async def account_history(
+    account_id: str,
+    request: Request,
+    since: str | None = None,
+    until: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    user.require_account(account_id)
+    rows = await history_rows(request.app.state.db, user, [account_id], since, until)
+    return ok(rows)
+
+
+@app.get("/api/v1/history")
+async def portfolio_history(
+    request: Request,
+    accounts: str = "",
+    since: str | None = None,
+    until: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    """History for any set of accounts, plus their combined line.
+
+    With no `accounts` this is the whole portfolio the caller can see.
+    """
+    repo = repository(request, user)
+    visible = sorted(a for a in await repo.accounts() if user.sees(a))
+    wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
+    for account in wanted:
+        user.require_account(account)
+    rows = await history_rows(request.app.state.db, user, wanted, since, until)
+    return ok({"accounts": wanted, "series": rows, "combined": combine(rows)})
+
+
+@app.get("/api/v1/history/intraday")
+async def intraday(
+    request: Request,
+    accounts: str = "",
+    date: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    """Every snapshot taken on one date, for a day-P&L curve.
+
+    Unlike `/history` this does not collapse to a daily close — the shape within
+    the session is the whole point. All accounts in a cycle are written with one
+    timestamp, so grouping by `taken_at` lines them up exactly and a combined
+    figure needs no interpolation.
+    """
+    repo = repository(request, user)
+    visible = sorted(a for a in await repo.accounts() if user.sees(a))
+    wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
+    for account in wanted:
+        user.require_account(account)
+    day = date or now().date().isoformat()
+    cursor = request.app.state.db.account_snapshots.find(
+        user.scope({"account_id": {"$in": wanted}, "report_date": day, "source": "snapshot"}),
+        {"_id": 0, "tenant_id": 0},
+    )
+    rows = await cursor.sort("taken_at", 1).to_list(50_000)
+    at: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        at.setdefault(row["taken_at"], []).append(row)
+    expected = len({row["account_id"] for row in rows})
+    combined = [
+        {
+            "taken_at": stamp,
+            "accounts": len(group),
+            "day_pnl": str(sum(Decimal(r["day_pnl"]) for r in group)),
+        }
+        for stamp, group in sorted(at.items())
+        # A total missing an account would read as a swing that never happened.
+        if len(group) == expected and all(r.get("day_pnl") is not None for r in group)
+    ]
+    return ok({"date": day, "accounts": wanted, "series": rows, "combined": combined})
+
+
+@app.post("/api/v1/admin/history/backfill")
+async def backfill(request: Request, user: Principal = Depends(require_tenant_admin)):
+    """Pull the broker's own daily net liquidation in, from before we watched.
+
+    Only accounts this tenant already owns are written: a Flex query is scoped
+    by token, not by tenant, and one tenant's statement must not seed another's
+    history.
+    """
+    db = request.app.state.db
+    repo = repository(request, user)
+    mine = {a for a in await repo.accounts() if user.sees(a)}
+    try:
+        points = await flex.fetch_history()
+    except flex.FlexError as exc:
+        raise HTTPException(502, f"Flex refused the request — {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Could not reach the Flex service — {exc}") from exc
+    written, skipped = 0, 0
+    for point in points:
+        if point.account_id not in mine:
+            skipped += 1
+            continue
+        await db.account_snapshots.update_one(
+            {"_id": snapshot_id(user.tenant_id, point.account_id, point.report_date)},
+            {
+                "$set": {
+                    "tenant_id": user.tenant_id,
+                    "account_id": point.account_id,
+                    "report_date": point.report_date,
+                    # Sorts after any same-day snapshot, so it wins the day.
+                    "taken_at": f"{point.report_date}T23:59:59.999999+00:00",
+                    "currency": point.currency,
+                    "net_liquidation": str(point.net_liquidation),
+                    "source": "flex",
+                }
+            },
+            upsert=True,
+        )
+        written += 1
+    return ok({"written": written, "skipped_other_tenants": skipped, "points": len(points)})
 
 
 # ── Diagnostics ───────────────────────────────────────────────────────────────

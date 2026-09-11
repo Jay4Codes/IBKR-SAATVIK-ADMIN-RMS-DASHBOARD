@@ -1,5 +1,39 @@
 # Deployment
 
+## Web releases
+
+`deploy.sh` never builds on top of the directory the live app is served from.
+`next build` empties `.next/` before it writes anything, so building inside the
+working tree while `ibkr-web` served from `frontend/.next/standalone` took every
+CSS file and JS chunk offline for the length of the build — the app answered
+`500` for its own assets and the dashboard rendered unstyled until the deploy
+finished. That is what "sometimes the CSS loads" was.
+
+Each build is now assembled into its own directory and swapped in atomically:
+
+| Path | Purpose |
+| --- | --- |
+| `/srv/ibkr-web/releases/<UTC stamp>/` | one self-contained standalone bundle |
+| `/srv/ibkr-web/current` | symlink to the release `ibkr-web` serves |
+
+`ibkr-web.service` runs `/srv/ibkr-web/current/server.js`, and nginx serves
+`/_next/static/` straight off `current` with a `try_files` fallback to the app,
+so hashed assets never depend on the Node process being up. The working tree is
+a build directory only; nothing in production reads from it. A failed build
+leaves the live release untouched.
+
+The last five releases are kept, so a rollback is one symlink flip:
+
+```
+ln -sfn /srv/ibkr-web/releases/<stamp> /srv/ibkr-web/current.tmp
+mv -Tf /srv/ibkr-web/current.tmp /srv/ibkr-web/current
+systemctl restart ibkr-web
+```
+
+Never leave `next dev` running against this checkout on a production host. It
+watches and rewrites `.next/`, and it binds `0.0.0.0` by default, which exposes
+an unauthenticated dev build of the dashboard to the internet.
+
 ## Per-connection IB Gateway instances
 
 `install-gateway-template.sh` installs `ibkr-gateway@.service`, the templated

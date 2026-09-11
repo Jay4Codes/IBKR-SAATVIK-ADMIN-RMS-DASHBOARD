@@ -2,6 +2,7 @@ import { Position } from "./types";
 
 export type Assumption = { spot: number; volatility: number; dividend: number };
 export type RiskLeg = { position: Position; quantity: number; cost: number; multiplier: number; strike: number; days: number };
+export const RMS_SHOCKS = [-5, -4, -3, -2, -1, 1, 2, 3, 4, 5] as const;
 export const underlyingKey = (p: Position) => `${p.currency}:${p.symbol}`;
 export function numeric(value: string | null | undefined): number | null {
   if (value == null || value.trim() === "") return null;
@@ -9,13 +10,27 @@ export function numeric(value: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** The broker's own mark for an underlying: a held stock's price, else the
- *  `undPrice` IB computes for any option on it. Undefined when neither is live. */
-export function brokerSpot(legs: RiskLeg[], key: string) {
+/** The reference mark for an underlying: a held stock's price, else whichever
+ *  feed stamped `underlying_price` on an option — IB's `undPrice`, or a Massive
+ *  loader. Undefined when neither is available.
+ *
+ *  The source travels with the price because they are not interchangeable: a
+ *  vendor plan entitled only to daily aggregates answers with the *previous
+ *  session's* close, which must not be presented as a live mark in a risk tool. */
+export function brokerSpot(legs: RiskLeg[], key: string): { price: number; source: string } | undefined {
   const stock = legs.find(l => underlyingKey(l.position) === key && l.position.sec_type === "STK" && (numeric(l.position.market_price) ?? 0) > 0);
-  if (stock) return numeric(stock.position.market_price)!;
+  if (stock) return { price: numeric(stock.position.market_price)!, source: "ib_stock_mark" };
   const quoted = legs.find(l => underlyingKey(l.position) === key && (numeric(l.position.underlying_price) ?? 0) > 0);
-  return quoted ? numeric(quoted.position.underlying_price)! : undefined;
+  if (!quoted) return undefined;
+  return { price: numeric(quoted.position.underlying_price)!, source: quoted.position.underlying_source || "ib_und_price" };
+}
+
+/** How a reference price should be described to whoever is reading the curve. */
+export function spotLabel(source: string): string {
+  if (source === "aggs_prev" || source === "stocks_snapshot_prev") return "Massive — previous session close, not a live mark";
+  if (source.startsWith("massive_") || ["indices_snapshot", "options_snapshot", "stocks_snapshot"].includes(source)) return "Massive live snapshot";
+  if (source === "ib_stock_mark") return "Live broker mark — held stock";
+  return "Live broker mark";
 }
 
 export function prepareLegs(positions: Position[], today: string) {
@@ -73,6 +88,11 @@ export function scenarioPnl(leg: RiskLeg, assumption: Assumption, shock: number,
 export function buildCurves(legs: RiskLeg[], assumptions: Record<string, Assumption>, range: number, horizon: number, rate: number) {
   const shocks = new Set(Array.from({ length: 81 }, (_, i) => -Math.min(range, 100) + (Math.min(range, 100) + range) * i / 80));
   shocks.add(0);
+  // These exact points drive the RMS table even when the chart's evenly spaced
+  // samples would otherwise fall between whole percentage levels.
+  for (const shock of RMS_SHOCKS) {
+    if (shock >= -Math.min(range, 100) && shock <= range) shocks.add(shock);
+  }
   for (const leg of legs) {
     if (leg.position.sec_type === "OPT") {
       const shock = (leg.strike / assumptions[underlyingKey(leg.position)].spot - 1) * 100;
