@@ -102,7 +102,10 @@ export function Chart({
     ) as Tokens;
     const bars = instance.getOption()?.dataZoom as { start?: number; end?: number }[] | undefined;
     const zoom = { start: bars?.[0]?.start ?? 0, end: bars?.[0]?.end ?? 100 };
-    instance.setOption(option(tokens, zoom), { replaceMerge: ["series"] });
+    // A complete option replacement prevents ECharts from retaining stale
+    // series data when only the live reference price changed. `zoom` is read
+    // above and included in the replacement, so the reader's window survives.
+    instance.setOption(option(tokens, zoom), { notMerge: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, ...deps]);
 

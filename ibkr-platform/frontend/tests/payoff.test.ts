@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCurves, optionValue, prepareLegs, scenarioPnl, underlyingKey, upsideRisks, validAssumption } from "@/lib/payoff";
+import { buildCurves, impliedVolatility, optionValue, prepareLegs, scenarioPnl, skewByExpiry, underlyingKey, upsideRisks, validAssumption } from "@/lib/payoff";
 import { Position } from "@/lib/types";
 
 const today = "2026-09-09";
@@ -55,6 +55,15 @@ describe("position payoff and desk aggregation", () => {
     expect(scenarioPnl(l, assumption, 0, 0, 0, false)).toBeGreaterThan(scenarioPnl(l, assumption, 0, 0, 0, true));
     expect(scenarioPnl(l, assumption, 0, 30, 0, false)).toBe(scenarioPnl(l, assumption, 0, 0, 0, true));
   });
+  it("anchors the current estimate to live broker P&L without changing terminal payoff", () => {
+    const first = leg({ underlying_price: "100", market_price: "6.25", unrealized_pnl: "125" });
+    const second = leg({ underlying_price: "100", market_price: "6.75", unrealized_pnl: "175" });
+    const firstPoint = buildCurves([first], { "USD:XYZ": assumption }, 5, 0, 0).find(point => point.shock === 0)!;
+    const secondPoint = buildCurves([second], { "USD:XYZ": assumption }, 5, 0, 0).find(point => point.shock === 0)!;
+    expect(firstPoint.modeled).toBeCloseTo(125, 8);
+    expect(secondPoint.modeled).toBeCloseTo(175, 8);
+    expect(secondPoint.terminal).toBe(firstPoint.terminal);
+  });
   it("flags naked calls and short stock without netting different expiries or underlyings", () => {
     expect(upsideRisks([leg({ quantity: "-1" })])).toEqual(["USD:XYZ"]);
     expect(upsideRisks([leg({ sec_type: "STK", quantity: "-1" })])).toEqual(["USD:XYZ"]);
@@ -62,6 +71,48 @@ describe("position payoff and desk aggregation", () => {
     expect(upsideRisks([leg({ quantity: "-1" }), leg({ symbol: "ABC" })])).toEqual(["USD:XYZ"]);
     expect(upsideRisks([leg({ quantity: "-1" }), leg({ sec_type: "STK", quantity: "100" })])).toEqual([]);
     expect(upsideRisks([leg(), leg({ sec_type: "STK", quantity: "-100" })])).toEqual([]);
+  });
+});
+
+describe("implied volatility inversion", () => {
+  it("recovers the volatility that priced a benchmark option", () => {
+    const price = optionValue(100, 100, "C", 1, 0.2, 0.05, 0);
+    expect(impliedVolatility(price, 100, 100, "C", 1, 0.05, 0)).toBeCloseTo(0.2, 4);
+    const put = optionValue(110, 100, "P", 0.7, 0.4, -0.02, 0.03);
+    expect(impliedVolatility(put, 110, 100, "P", 0.7, -0.02, 0.03)).toBeCloseTo(0.4, 4);
+  });
+  it("rejects a price below intrinsic value", () => {
+    expect(impliedVolatility(5, 150, 100, "C", 1, 0, 0)).toBe(null); // in-the-money call priced under parity
+  });
+  it("rejects a price no volatility up to 500% could produce", () => {
+    expect(impliedVolatility(1000, 100, 100, "C", 0.01, 0, 0)).toBe(null);
+  });
+  it("rejects an expired, non-positive or already-expired input", () => {
+    expect(impliedVolatility(5, 100, 100, "C", 0, 0, 0)).toBe(null);
+    expect(impliedVolatility(0, 100, 100, "C", 1, 0, 0)).toBe(null);
+    expect(impliedVolatility(5, 0, 100, "C", 1, 0, 0)).toBe(null);
+  });
+});
+
+describe("skew from the desk's own book", () => {
+  const held = (fields: Partial<Position> = {}) => position({
+    expiry: "20991219", strike: "100", right: "P", market_price: "8", underlying_price: "100", ...fields,
+  });
+  it("groups held contracts by expiry and inverts each one's own mark", () => {
+    const groups = skewByExpiry([
+      held({ con_id: 1, expiry: "20991219", strike: "95" }),
+      held({ con_id: 2, expiry: "20991219", strike: "105", right: "C", market_price: "9" }),
+      held({ con_id: 3, expiry: "20991226", strike: "100" }),
+    ], today, 0, 0);
+    expect([...groups.keys()]).toEqual(["2099-12-19", "2099-12-26"]);
+    const near = groups.get("2099-12-19")!;
+    expect(near.map(p => p.strike)).toEqual([95, 105]);
+    expect(near.every(p => p.iv !== null && p.iv > 0)).toBe(true);
+  });
+  it("skips a closed leg, a past expiry and a non-option position", () => {
+    expect(skewByExpiry([held({ quantity: "0" })], today, 0, 0).size).toBe(0);
+    expect(skewByExpiry([held({ expiry: "20200101" })], today, 0, 0).size).toBe(0);
+    expect(skewByExpiry([held({ sec_type: "STK" })], today, 0, 0).size).toBe(0);
   });
 });
 

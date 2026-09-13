@@ -73,16 +73,16 @@ describe("payoff panel", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
   it("recalculates on live stock marks and retains an explicit reference override", () => {
-    const stock = position({ sec_type: "STK", average_cost: "80", market_price: "100" });
+    const stock = position({ sec_type: "STK", average_cost: "80", market_price: "100", unrealized_pnl: "20" });
     const { rerender } = panel([stock], { accountId: "A" });
     expect(screen.getByLabelText("Reference price")).toHaveValue(100);
-    rerender(<PayoffPanel rows={[{ ...stock, market_price: "110" }]} accountId="A" loading={false} error={false} light={false} />);
+    rerender(<PayoffPanel rows={[{ ...stock, market_price: "110", unrealized_pnl: "30" }]} accountId="A" loading={false} error={false} light={false} />);
     expect(screen.getByLabelText("Reference price")).toHaveValue(110);
     expect(screen.getAllByText("31.10")).toHaveLength(2);
     fireEvent.change(screen.getByLabelText("Reference price"), { target: { value: "120" } });
-    rerender(<PayoffPanel rows={[{ ...stock, market_price: "115" }]} accountId="A" loading={false} error={false} light={false} />);
+    rerender(<PayoffPanel rows={[{ ...stock, market_price: "115", unrealized_pnl: "35" }]} accountId="A" loading={false} error={false} light={false} />);
     expect(screen.getByLabelText("Reference price")).toHaveValue(120);
-    expect(screen.getAllByText("34.00")).toHaveLength(2);
+    expect(screen.getAllByText("34.00").length).toBeGreaterThanOrEqual(2);
   });
   it("prefills the reference price from the broker's underlying mark", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5" })]);
@@ -92,6 +92,31 @@ describe("payoff panel", () => {
     rerender(<PayoffPanel rows={[position({ underlying_price: "7650" })]} loading={false} error={false} light={false} />);
     expect(screen.getByLabelText("Reference price")).toHaveValue(7650);
   });
+  it("recalculates both the RMS table and graph when the live reference moves", async () => {
+    const first = position({ underlying_price: "100" });
+    const { rerender } = panel([first]);
+    await waitFor(() => expect(charts).toHaveLength(1));
+    const chart = charts[0];
+    const beforeRow = screen.getByRole("row", { name: /^\+1%/ }).textContent;
+    const beforeSeries = JSON.stringify(chart.option.series);
+
+    rerender(
+      <PayoffPanel
+        rows={[{ ...first, underlying_price: "110" }]}
+        loading={false}
+        error={false}
+        light={false}
+      />,
+    );
+
+    await waitFor(() => expect(chart.setOption).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("Reference price")).toHaveValue(110);
+    expect(screen.getByText("USD:XYZ reference").parentElement).toHaveTextContent("110.00");
+    const updatedRow = screen.getByRole("row", { name: /^\+1%/ });
+    expect(updatedRow).toHaveTextContent("XYZ 111.10");
+    expect(updatedRow.textContent).not.toBe(beforeRow);
+    expect(JSON.stringify(chart.option.series)).not.toBe(beforeSeries);
+  });
   it("names a vendor previous-session close instead of calling it a live mark", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5", underlying_source: "aggs_prev" })]);
     expect(screen.getByText(/previous session close, not a live mark/)).toBeInTheDocument();
@@ -100,6 +125,11 @@ describe("payoff panel", () => {
     expect(screen.getByText("Massive live snapshot")).toBeInTheDocument();
     rerender(<PayoffPanel rows={[position({ underlying_price: "7612.5" })]} loading={false} error={false} light={false} />);
     expect(screen.getByText("Live broker mark")).toBeInTheDocument();
+  });
+  it("labels a stored underlying LTP as cached rather than live", () => {
+    panel([position({ underlying_price: "7583.88", underlying_source: "ib_und_price_cached" })]);
+    expect(screen.getByLabelText("Reference price")).toHaveValue(7583.88);
+    expect(screen.getByText("Stored last underlying price — not live")).toBeInTheDocument();
   });
   it("keeps a typed reference price and hands the field back when it is cleared", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5" })]);

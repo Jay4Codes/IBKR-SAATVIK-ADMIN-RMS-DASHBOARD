@@ -1,12 +1,52 @@
 import { QueryClient } from "@tanstack/react-query";
-import { Account, LiveEvent } from "./types";
+import { Account, Connection, Gateway, LiveEvent } from "./types";
+
+type DiagnosticsCache = {
+  gateway: Gateway;
+  last_events: Record<string, Record<string, string>>;
+  events: LiveEvent[];
+  visibility_tests: Record<string, unknown>[];
+};
 
 export function applyEvent(client: QueryClient, event: LiveEvent) {
   const { event_type: type, account_id: account, data } = event;
+  client.setQueryData<DiagnosticsCache>(["diagnostics"], (current) => {
+    if (!current) return current;
+    const category = type.split(".")[0];
+    const lastEvents =
+      account === "*"
+        ? current.last_events
+        : {
+            ...current.last_events,
+            [account]: {
+              ...current.last_events[account],
+              [category]: event.timestamp,
+            },
+          };
+    return {
+      ...current,
+      gateway:
+        type === "gateway.updated"
+          ? { ...current.gateway, ...data }
+          : current.gateway,
+      last_events: lastEvents,
+      events: [event, ...current.events.filter((row) => row.event_id !== event.event_id)].slice(
+        0,
+        100,
+      ),
+    };
+  });
   if (type === "gateway.updated") {
 
     client.setQueryData(["gateway"], (current) =>
       current ? { ...current, ...data } : data,
+    );
+    client.setQueryData<Connection[]>(["connections"], (rows) =>
+      rows?.map((row) =>
+        row.id === data.connection_id
+          ? { ...row, state: { ...row.state, ...data } as Gateway }
+          : row,
+      ),
     );
     return;
   }
@@ -24,6 +64,13 @@ export function applyEvent(client: QueryClient, event: LiveEvent) {
       queryKey: ["accounts"],
       refetchType: "none",
     });
+    return;
+  }
+  if (type === "snapshot.recorded") {
+    // History is persisted in MongoDB, not duplicated in browser state. The
+    // worker announces each completed snapshot so active charts refetch once.
+    void client.invalidateQueries({ queryKey: ["intraday"] });
+    void client.invalidateQueries({ queryKey: ["history"] });
     return;
   }
   const kind = type.startsWith("position.")

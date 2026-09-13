@@ -22,12 +22,14 @@ import {
   LogOut,
   Menu,
   Moon,
+  Percent,
   Plug,
   Receipt,
   UserRound,
   Sun,
   Users,
   Wallet,
+  Waves,
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -55,6 +57,8 @@ import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "./searchable-select";
 import { PayoffPanel } from "./payoff-panel";
 import { DayPnlPanel } from "./day-pnl";
+import { SkewPanel } from "./skew-panel";
+import { CommissionsPanel } from "./commissions-panel";
 import { PerformancePanel } from "./performance";
 import { TimezonePicker, useZone } from "./timezone";
 import { formatClock } from "@/lib/timezone";
@@ -70,8 +74,10 @@ type View =
   | "Accounts"
   | "Positions"
   | "RMS"
+  | "Skew"
   | "Orders"
   | "Executions"
+  | "Commissions"
   | "Connections"
   | "Members"
   | "Tenants"
@@ -95,8 +101,10 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { view: "Accounts", icon: Wallet },
       { view: "Positions", icon: LineChart },
       { view: "RMS", icon: Activity },
+      { view: "Skew", icon: Waves },
       { view: "Orders", icon: ListChecks },
       { view: "Executions", icon: Receipt },
+      { view: "Commissions", icon: Percent },
       { view: "Performance", icon: TrendingUp },
     ],
   },
@@ -116,7 +124,7 @@ const VIEWS = NAV.flatMap((section) => section.items.map((item) => item.view));
 /** An account's sections, shown one at a time instead of stacked end to end.
  *  Ids match the sidebar's view names where they overlap, so "RMS" means the
  *  same thing on the desk and inside an account. */
-const ACCOUNT_TABS = ["Summary", "Positions", "RMS", "Performance", "Orders", "Executions"] as const;
+const ACCOUNT_TABS = ["Summary", "Positions", "RMS", "Skew", "Performance", "Orders", "Executions", "Commissions"] as const;
 type AccountTab = (typeof ACCOUNT_TABS)[number];
 
 /** The same glyph the sidebar uses, so a tab and its nav item read as one thing. */
@@ -124,9 +132,11 @@ const TAB_ICONS: Record<AccountTab, typeof LayoutGrid> = {
   Summary: LayoutGrid,
   Positions: LineChart,
   RMS: Activity,
+  Skew: Waves,
   Performance: TrendingUp,
   Orders: ListChecks,
   Executions: Receipt,
+  Commissions: Percent,
 };
 
 /** Views an ordinary member may not open; requesting one lands on Overview. */
@@ -147,7 +157,14 @@ export default function Dashboard({
   const [client] = useState(
     () =>
       new QueryClient({
-        defaultOptions: { queries: { retry: 1, refetchInterval: 15000 } },
+        defaultOptions: {
+          queries: {
+            retry: 1,
+            staleTime: Infinity,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+          },
+        },
       }),
   );
   return (
@@ -659,6 +676,13 @@ function Terminal({
                 light={light}
               />
             )}
+            {shows("Skew") && (
+              <SkewPanel
+                rows={positions.flatMap((p) => p.data ?? [])}
+                loading={accounts.isPending || positions.some((p) => p.isPending)}
+                error={accounts.isError || positions.some((p) => p.isError)}
+              />
+            )}
             {shows("Performance") && (
               <PerformancePanel
                 key={accountId ?? "desk"}
@@ -685,6 +709,7 @@ function Terminal({
                 </p>
               </section>
             )}
+            {shows("Commissions") && <CommissionsPanel accountId={accountId} />}
             </div>
             {view === "Profile" && !accountId && (
               <>

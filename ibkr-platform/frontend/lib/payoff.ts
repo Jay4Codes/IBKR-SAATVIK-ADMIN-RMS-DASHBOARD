@@ -27,10 +27,19 @@ export function brokerSpot(legs: RiskLeg[], key: string): { price: number; sourc
 
 /** How a reference price should be described to whoever is reading the curve. */
 export function spotLabel(source: string): string {
+  if (source.endsWith("_cached")) return "Stored last underlying price — not live";
   if (source === "aggs_prev" || source === "stocks_snapshot_prev") return "Massive — previous session close, not a live mark";
   if (source.startsWith("massive_") || ["indices_snapshot", "options_snapshot", "stocks_snapshot"].includes(source)) return "Massive live snapshot";
   if (source === "ib_stock_mark") return "Live broker mark — held stock";
   return "Live broker mark";
+}
+
+/** "YYYYMMDD" (IBKR's expiry format) as "YYYY-MM-DD", or "" if it is not a real calendar date. */
+export function expiryDate(expiry: string): string {
+  const date = /^\d{8}$/.test(expiry) ? `${expiry.slice(0, 4)}-${expiry.slice(4, 6)}-${expiry.slice(6)}` : "";
+  if (!date) return "";
+  const timestamp = Date.parse(date);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === date ? date : "";
 }
 
 export function prepareLegs(positions: Position[], today: string) {
@@ -42,10 +51,9 @@ export function prepareLegs(positions: Position[], today: string) {
     let reason = "";
     const multiplier = p.sec_type === "STK" ? 1 : numeric(p.multiplier);
     const strike = numeric(p.strike);
-    const date = /^\d{8}$/.test(p.expiry) ? `${p.expiry.slice(0, 4)}-${p.expiry.slice(4, 6)}-${p.expiry.slice(6)}` : "";
-    const timestamp = Date.parse(date);
-    const validDate = Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === date;
-    const days = (timestamp - Date.parse(today)) / 86400000;
+    const date = expiryDate(p.expiry);
+    const validDate = date !== "";
+    const days = (Date.parse(date) - Date.parse(today)) / 86400000;
     if (!["STK", "OPT"].includes(p.sec_type)) reason = `Unsupported ${p.sec_type} contract`;
     else if (!p.currency || p.currency === "BASE" || !p.symbol) reason = "Missing instrument currency or underlying";
     else if (quantity === null || cost === null || cost < 0) reason = "Invalid quantity or average cost";
@@ -74,6 +82,57 @@ export function optionValue(spot: number, strike: number, right: string, years: 
   return Math.max(0, right === "C" ? s * cdf(d1) - k * cdf(d1 - v) : k * cdf(v - d1) - s * cdf(-d1));
 }
 
+/** The volatility that reprices to `price` under the same Black–Scholes model
+ *  `optionValue` uses, found by bisection since the price is monotonic in
+ *  volatility. Returns null for anything that cannot be inverted: an expired
+ *  or non-positive input, or a price below intrinsic value or above what even
+ *  500% volatility would produce (a stale or crossed broker mark). */
+export function impliedVolatility(price: number, spot: number, strike: number, right: string, years: number, rate: number, dividend: number): number | null {
+  if (!(price > 0) || !(spot > 0) || !(strike > 0) || !(years > 0)) return null;
+  const intrinsic = Math.max(right === "C" ? spot - strike : strike - spot, 0);
+  if (price < intrinsic) return null;
+  let lo = 0, hi = 5;
+  if (optionValue(spot, strike, right, years, hi, rate, dividend) < price) return null;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (optionValue(spot, strike, right, years, mid, rate, dividend) > price) hi = mid;
+    else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+export type SkewPoint = { strike: number; iv: number; right: string };
+
+/** Implied vol at each strike the desk actually holds, grouped by expiry.
+ *
+ *  Unlike a vendor chain this only covers strikes the account has a position
+ *  in — sparse, but it needs nothing beyond data already on the position: the
+ *  broker's own option mark is inverted against the same Black–Scholes model
+ *  `optionValue` prices with, using the broker's live underlying mark as spot.
+ *  Every held contract contributes its own point (not just the OTM side), so
+ *  a straddle shows both legs rather than only one surviving per strike. */
+export function skewByExpiry(positions: Position[], today: string, rate: number, dividend: number): Map<string, SkewPoint[]> {
+  const groups = new Map<string, SkewPoint[]>();
+  for (const p of positions) {
+    if (p.sec_type !== "OPT" || !["C", "P"].includes(p.right) || numeric(p.quantity) === 0) continue;
+    const date = expiryDate(p.expiry);
+    if (!date) continue;
+    const days = (Date.parse(date) - Date.parse(today)) / 86400000;
+    if (days <= 0) continue;
+    const strike = numeric(p.strike);
+    const price = numeric(p.market_price);
+    const spot = numeric(p.underlying_price);
+    if (strike === null || strike <= 0 || price === null || spot === null || spot <= 0) continue;
+    const iv = impliedVolatility(price, spot, strike, p.right, days / 365, rate, dividend);
+    if (iv === null) continue;
+    const points = groups.get(date) ?? [];
+    points.push({ strike, iv, right: p.right });
+    groups.set(date, points);
+  }
+  for (const points of groups.values()) points.sort((a, b) => a.strike - b.strike);
+  return groups;
+}
+
 export function validAssumption(a: Assumption | undefined): a is Assumption {
   return !!a && Number.isFinite(a.spot) && a.spot > 0 && Number.isFinite(a.volatility) && a.volatility >= 0 && a.volatility <= 5 && Number.isFinite(a.dividend) && a.dividend >= 0 && a.dividend <= 1;
 }
@@ -82,7 +141,30 @@ export function scenarioPnl(leg: RiskLeg, assumption: Assumption, shock: number,
   const spot = assumption.spot * (1 + shock / 100);
   const value = leg.position.sec_type === "STK" ? spot : optionValue(spot, leg.strike, leg.position.right, terminal ? 0 : Math.max(0, leg.days - horizon) / 365, assumption.volatility, rate, assumption.dividend);
   // IBKR derivative average cost already includes the contract multiplier.
-  return leg.quantity * (value * leg.multiplier - leg.cost);
+  const raw = leg.quantity * (value * leg.multiplier - leg.cost);
+  if (terminal) return raw;
+
+  // Anchor today's estimated curve to the broker's live marked P&L. A pure
+  // Black–Scholes value with one desk-wide volatility can be far away from the
+  // option's actual market mark, making the 0% metric look stale while IB P&L
+  // is moving. The correction decays to zero by expiry, where intrinsic payoff
+  // (and therefore the terminal curve) must remain authoritative.
+  const marked = numeric(leg.position.unrealized_pnl) ?? (() => {
+    const price = numeric(leg.position.market_price);
+    return price === null ? null : leg.quantity * (price * leg.multiplier - leg.cost);
+  })();
+  if (marked === null) return raw;
+  const anchorSpot = leg.position.sec_type === "STK"
+    ? numeric(leg.position.market_price) ?? assumption.spot
+    : numeric(leg.position.underlying_price) ?? assumption.spot;
+  const anchorValue = leg.position.sec_type === "STK"
+    ? anchorSpot
+    : optionValue(anchorSpot, leg.strike, leg.position.right, leg.days / 365, assumption.volatility, rate, assumption.dividend);
+  const rawAtAnchor = leg.quantity * (anchorValue * leg.multiplier - leg.cost);
+  const remaining = leg.position.sec_type === "OPT"
+    ? (leg.days > 0 ? Math.max(0, leg.days - horizon) / leg.days : 0)
+    : 1;
+  return raw + (marked - rawAtAnchor) * remaining;
 }
 
 export function buildCurves(legs: RiskLeg[], assumptions: Record<string, Assumption>, range: number, horizon: number, rate: number) {

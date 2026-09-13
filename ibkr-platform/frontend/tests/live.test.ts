@@ -39,6 +39,58 @@ describe("live cache", () => {
     expect(client.getQueryData(["gateway"])).toEqual({ status: "CONNECTED" });
   });
 
+  it("updates the matching connection from the gateway websocket event", () => {
+    const client = new QueryClient();
+    client.setQueryData(
+      ["connections"],
+      [
+        { id: "one", state: { status: "DISCONNECTED" } },
+        { id: "two", state: { status: "CONNECTED" } },
+      ],
+    );
+    applyEvent(
+      client,
+      event("gateway.updated", {
+        connection_id: "one",
+        status: "CONNECTED",
+      }),
+    );
+    expect(client.getQueryData<{ state: { status: string } }[]>(["connections"])?.[0].state.status).toBe(
+      "CONNECTED",
+    );
+    expect(client.getQueryData<{ state: { status: string } }[]>(["connections"])?.[1].state.status).toBe(
+      "CONNECTED",
+    );
+  });
+
+  it("updates diagnostics directly without polling or refetching", () => {
+    const client = new QueryClient();
+    client.setQueryData(["diagnostics"], {
+      gateway: { status: "CONNECTED" },
+      last_events: { DU1: {} },
+      events: [],
+      visibility_tests: [],
+    });
+    applyEvent(
+      client,
+      event("position.updated", { con_id: 1, symbol: "SPX" }),
+    );
+    const diagnostics = client.getQueryData<{
+      last_events: Record<string, Record<string, string>>;
+      events: LiveEvent[];
+    }>(["diagnostics"]);
+    expect(diagnostics?.last_events.DU1.position).toBe("");
+    expect(diagnostics?.events[0].event_type).toBe("position.updated");
+  });
+
+  it("refreshes history only when the worker announces a completed snapshot", () => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    applyEvent(client, event("snapshot.recorded", { report_date: "2026-09-11" }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["intraday"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["history"] });
+  });
+
   it("updates only the matching conId and account", () => {
     const client = new QueryClient();
     client.setQueryData(

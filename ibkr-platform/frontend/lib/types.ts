@@ -204,3 +204,10 @@ export type IntradayResponse = {
   series: (HistoryPoint & { day_pnl: string | null })[];
   combined: { taken_at: string; accounts: number; day_pnl: string }[];
 };
+
+export type CommissionSummary = {
+  total: string;
+  count: number;
+  by_day: { date: string; commission: string }[];
+  by_account: { account_id: string; commission: string }[];
+};

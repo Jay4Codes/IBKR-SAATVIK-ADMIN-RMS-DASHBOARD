@@ -22,7 +22,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import httpx
-from ib_async import IB, StartupFetch
+from ib_async import IB, Index, StartupFetch
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
@@ -180,6 +180,11 @@ class GatewaySession(Session):
         #: reconnect cannot wipe them and an option model tick cannot overwrite
         #: them. `underlying_of` prefers these.
         self.massive_prices = {}
+        #: Last successfully stored observation. This survives the end-of-day
+        #: session-list flush and is explicitly labeled as cached in RMS.
+        self.cached_prices = {}
+        #: Keys whose Redis value was written by a feed in this worker run.
+        self.live_underlyings = set()
         self.underlying_changed = set()
         self.state = GatewayState(
             gateway_id=self.connection_id,
@@ -318,18 +323,35 @@ class GatewaySession(Session):
         if item.sec_type != "OPT":
             return None
         key = self.underlying_key(item)
+        if item.currency == "USD" and item.symbol.upper() in settings.massive_symbols:
+            stored = self.cached_prices.get(key)
+            return stored.price if stored is not None else None
         vendor = self.massive_prices.get(key)
-        return vendor.price if vendor is not None else self.underlying_prices.get(key)
+        if vendor is not None:
+            return vendor.price
+        broker = self.underlying_prices.get(key)
+        if broker is not None:
+            return broker
+        cached = self.cached_prices.get(key)
+        return cached.price if cached is not None else None
 
     def underlying_source_of(self, item) -> str:
         """Which feed `underlying_of` would answer from, for the panel's label."""
         if item.sec_type != "OPT":
             return ""
         key = self.underlying_key(item)
+        if item.currency == "USD" and item.symbol.upper() in settings.massive_symbols:
+            stored = self.cached_prices.get(key)
+            if stored is None:
+                return ""
+            return stored.source if key in self.live_underlyings else f"{stored.source}_cached"
         vendor = self.massive_prices.get(key)
         if vendor is not None:
             return vendor.source
-        return "ib_und_price" if key in self.underlying_prices else ""
+        if key in self.underlying_prices:
+            return "ib_und_price"
+        cached = self.cached_prices.get(key)
+        return f"{cached.source}_cached" if cached is not None else ""
 
     def track_underlying(self, item, contract):
         """Note which leg should carry an underlying's market-data line.
@@ -382,9 +404,9 @@ class GatewaySession(Session):
                             self.redis, symbol, at=moment
                         )
                         key = f"USD:{symbol}"
-                        if archived and self.massive_prices.pop(key, None) is not None:
-                            # Do not carry yesterday's close as today's live RMS
-                            # reference while waiting for the next session.
+                        if archived and key in self.live_underlyings:
+                            self.live_underlyings.discard(key)
+                            self.massive_prices.pop(key, None)
                             self.underlying_changed.add(key)
                     except Exception:
                         # The source list remains/restores on failure, so the
@@ -399,6 +421,7 @@ class GatewaySession(Session):
                 answered = False
                 limited = False
                 for symbol in symbols:
+                    key = f"USD:{symbol}"
                     try:
                         spot = await massive.fetch_spot(client, symbol)
                     except massive.RateLimited as exc:
@@ -408,15 +431,33 @@ class GatewaySession(Session):
                         limited = True
                         break
                     if spot is None:
+                        # Massive is the preferred live producer. If it stops
+                        # answering, release that priority immediately and
+                        # persist the latest observed IB option-model value.
+                        # With neither feed, the retained Redis LTP remains.
+                        if self.massive_prices.pop(key, None) is not None:
+                            broker = self.underlying_prices.get(key)
+                            if broker is not None:
+                                self.enqueue_underlying_sample(
+                                    "USD", symbol, broker, "ib_und_price"
+                                )
+                            else:
+                                self.live_underlyings.discard(key)
+                                self.underlying_changed.add(key)
                         continue
                     answered = True
                     try:
                         await massive.record_sample(self.redis, symbol, spot, at=moment)
                     except Exception:
                         log.exception("massive.sample_store_failed symbol=%s", symbol)
-                    key = f"USD:{symbol}"
+                        continue
+                    stored = await massive.last_spot(self.redis, symbol)
+                    if stored is None:
+                        continue
+                    self.cached_prices[key] = stored
+                    self.live_underlyings.add(key)
                     if getattr(self.massive_prices.get(key), "price", None) != spot.price:
-                        self.massive_prices[key] = spot
+                        self.massive_prices[key] = stored
                         self.underlying_changed.add(key)
                         log.debug(
                             "massive.spot connection=%s underlying=%s price=%s source=%s",
@@ -459,32 +500,35 @@ class GatewaySession(Session):
             for account in list(self.accounts.values()):
                 if account.net_liquidation is None:
                     continue  # Nothing worth plotting until the broker has valued it.
+                snapshot = {
+                    "tenant_id": self.tenant_id,
+                    "account_id": account.account_id,
+                    "report_date": report_date,
+                    "taken_at": moment.isoformat(),
+                    "currency": account.currency,
+                    "net_liquidation": str(account.net_liquidation),
+                    "cash": None if account.cash is None else str(account.cash),
+                    "day_pnl": None if account.day_pnl is None else str(account.day_pnl),
+                    "realized_pnl": None
+                    if account.realized_pnl is None
+                    else str(account.realized_pnl),
+                    "unrealized_pnl": None
+                    if account.unrealized_pnl is None
+                    else str(account.unrealized_pnl),
+                    "source": "snapshot",
+                }
                 try:
                     await self.db.account_snapshots.update_one(
                         {"_id": snapshot_id(self.tenant_id, account.account_id, report_date, bucket)},
-                        {
-                            "$set": {
-                                "tenant_id": self.tenant_id,
-                                "account_id": account.account_id,
-                                "report_date": report_date,
-                                "taken_at": moment.isoformat(),
-                                "currency": account.currency,
-                                "net_liquidation": str(account.net_liquidation),
-                                "cash": None if account.cash is None else str(account.cash),
-                                # The broker's own daily figure, which resets at
-                                # its session boundary — the only way to draw an
-                                # intraday P&L curve after the fact.
-                                "day_pnl": None if account.day_pnl is None else str(account.day_pnl),
-                                "realized_pnl": None
-                                if account.realized_pnl is None
-                                else str(account.realized_pnl),
-                                "unrealized_pnl": None
-                                if account.unrealized_pnl is None
-                                else str(account.unrealized_pnl),
-                                "source": "snapshot",
-                            }
-                        },
+                        {"$set": snapshot},
                         upsert=True,
+                    )
+                    self.queue.put_nowait(
+                        Event(
+                            event_type="snapshot.recorded",
+                            account_id=account.account_id,
+                            data=snapshot,
+                        )
                     )
                 except Exception:
                     log.exception("snapshot.write_failed connection=%s account=%s",
@@ -492,6 +536,11 @@ class GatewaySession(Session):
 
     async def subscribe_underlyings(self):
         """Open the market-data lines `track_underlying` asked for.
+
+        SPX is subscribed as the index itself. An option model's `undPrice` only
+        changes when that particular option receives a model tick, while the
+        index line supplies an independent, continuously ticking reference for
+        RMS. Other underlyings retain the option-model fallback.
 
         Position events name a contract but no exchange, and `reqMktData` refuses
         one without it (error 321), so each contract is qualified first.
@@ -501,8 +550,11 @@ class GatewaySession(Session):
                 return
             if key in self.market_subscriptions or con_id not in self.contracts:
                 continue
-            wanted = copy.copy(self.contracts[con_id])
-            wanted.exchange = wanted.exchange or "SMART"
+            if key == "USD:SPX":
+                wanted = Index("SPX", "CBOE", "USD")
+            else:
+                wanted = copy.copy(self.contracts[con_id])
+                wanted.exchange = wanted.exchange or "SMART"
             try:
                 qualified = await asyncio.wait_for(
                     self.ib.qualifyContractsAsync(wanted), settings.connection_timeout
@@ -533,16 +585,45 @@ class GatewaySession(Session):
         self.market_wanted.clear()
 
     def ticker_value(self, tickers):
-        """Record `undPrice` off the option model ticks; publishing is batched."""
+        """Record a direct index LTP, falling back to option-model `undPrice`."""
         for ticker in tickers:
             greeks, contract = ticker.modelGreeks, ticker.contract
-            price = norm.decimal(getattr(greeks, "undPrice", None)) if greeks else None
+            direct = getattr(contract, "secType", "") == "IND"
+            price = norm.decimal(ticker.marketPrice()) if direct else (
+                norm.decimal(getattr(greeks, "undPrice", None)) if greeks else None
+            )
             if price is None or price <= 0 or contract is None:
                 continue
             key = f"{contract.currency}:{contract.symbol}"
             if self.underlying_prices.get(key) != price:
                 self.underlying_prices[key] = price
-                self.underlying_changed.add(key)
+                if contract.currency == "USD" and contract.symbol.upper() in settings.massive_symbols:
+                    # Massive owns the selected live mark while it is
+                    # answering. IB remains warm in `underlying_prices` and
+                    # takes over through Redis as soon as Massive fails.
+                    if key not in self.massive_prices:
+                        self.enqueue_underlying_sample(
+                            contract.currency,
+                            contract.symbol,
+                            price,
+                            "ib_index_ltp" if direct else "ib_und_price",
+                        )
+                else:
+                    self.underlying_changed.add(key)
+
+    def enqueue_underlying_sample(self, currency, symbol, price, source):
+        self.queue.put_nowait(
+            Event(
+                event_type="underlying.sampled",
+                account_id="*",
+                data={
+                    "currency": currency,
+                    "symbol": symbol,
+                    "price": str(price),
+                    "source": source,
+                },
+            )
+        )
 
     def flush_underlyings(self):
         """Publish a moved underlying mark even when no P&L update follows it."""
@@ -655,9 +736,50 @@ class GatewaySession(Session):
         while True:
             event = await self.queue.get()
             try:
-                await self.repo.publish(event)
+                if event.event_type == "underlying.sampled":
+                    data = event.data
+                    symbol = str(data["symbol"])
+                    await massive.record_sample(
+                        self.redis,
+                        symbol,
+                        massive.Spot(Decimal(str(data["price"])), str(data["source"])),
+                        at=event.timestamp,
+                    )
+                    stored = await massive.last_spot(self.redis, symbol)
+                    if stored is not None:
+                        key = f"{data['currency']}:{symbol}"
+                        self.cached_prices[key] = stored
+                        self.live_underlyings.add(key)
+                        self.underlying_changed.add(key)
+                        # The Redis round trip is complete, so publish the new
+                        # mark now. Waiting for the broker heartbeat here adds
+                        # avoidable latency to the dashboard WebSocket.
+                        self.flush_underlyings()
+                else:
+                    # P&L callbacks can be queued while the KeyDB write above
+                    # is awaiting I/O. Stamp every outgoing position event with
+                    # the newest *stored* reference at publish time so an older
+                    # callback cannot make RMS trail or regress after the LTP
+                    # has reached KeyDB.
+                    if event.event_type == "position.updated":
+                        item = self.positions.get(
+                            (event.account_id, int(event.data.get("con_id", 0)))
+                        )
+                        if item is not None:
+                            price = self.underlying_of(item)
+                            if price is not None:
+                                event.data["underlying_price"] = str(price)
+                                event.data["underlying_source"] = self.underlying_source_of(item)
+                    await self.repo.publish(event)
             finally:
                 self.queue.task_done()
+
+    async def load_cached_underlyings(self):
+        """Hydrate last stored LTPs before broker positions are synchronized."""
+        for symbol in settings.massive_symbols:
+            spot = await massive.last_spot(self.redis, symbol)
+            if spot is not None:
+                self.cached_prices[f"USD:{symbol}"] = spot
 
     async def sync(self):
         accounts = [a for a in self.ib.managedAccounts() if self.accept_account(a)]
@@ -745,6 +867,7 @@ class GatewaySession(Session):
                 self.market_subscriptions.clear()
                 self.market_data_denied = False
                 self.underlying_prices.clear()
+                self.live_underlyings.clear()
                 self.underlying_changed.clear()
                 self.accounts.clear()
                 self.positions.clear()
@@ -826,6 +949,7 @@ class GatewaySession(Session):
             return
         tasks = []
         try:
+            await self.load_cached_underlyings()
             tasks = [
                 asyncio.create_task(self.renew()),
                 asyncio.create_task(self.process()),

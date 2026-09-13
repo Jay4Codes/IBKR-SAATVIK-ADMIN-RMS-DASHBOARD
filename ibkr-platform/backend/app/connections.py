@@ -1,16 +1,3 @@
-"""Broker connections: one tenant's link to one broker session.
-
-A tenant may hold several. Each is either
-
-* `ibkr_gateway` — an IB Gateway process this platform provisions and drives
-  (its own IBC config directory, its own API port, its own systemd instance), or
-* `snaptrade`  — a SnapTrade-brokered link, polled over REST.
-
-The connection document is the single source of truth for where a session
-connects and which systemd unit and config file belong to it, so nothing in the
-worker or the API reads global gateway settings any more.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -31,15 +18,10 @@ class Provider(StrEnum):
 
 
 class ConnectionStatus(StrEnum):
-    #: Created but not yet provisioned — no config file, no unit, no session.
     DRAFT = "DRAFT"
-    #: Provisioned and supervised: the worker will hold a session for it.
     ENABLED = "ENABLED"
-    #: Provisioned but parked. Files and unit remain; no session is held.
     DISABLED = "DISABLED"
 
-
-#: Statuses the supervisor will start a broker session for.
 SUPERVISED = (ConnectionStatus.ENABLED.value,)
 
 
@@ -51,12 +33,8 @@ class BrokerConnection(BaseModel):
     name: str
     provider: Provider
     status: ConnectionStatus = ConnectionStatus.DRAFT
-    #: True when this platform created the IBC config and systemd unit and may
-    #: rewrite or remove them. False for a connection *adopted* from a
-    #: pre-tenancy installation, whose files predate us and are left alone.
     managed: bool = True
 
-    # IB Gateway
     host: str = "127.0.0.1"
     api_port: int = 0
     client_id: int = 17
@@ -68,7 +46,6 @@ class BrokerConnection(BaseModel):
     service_unit: str | None = None
     launcher_log: str | None = None
 
-    # SnapTrade
     snaptrade_user_id: str | None = None
     snaptrade_authorized: bool = False
     snaptrade_authorization_ids: list[str] = Field(default_factory=list)
@@ -82,8 +59,6 @@ class BrokerConnection(BaseModel):
     def is_gateway(self) -> bool:
         return self.provider is Provider.IBKR_GATEWAY
 
-
-#: Fields never returned to a client, whatever the caller's role.
 REDACTED = ("snaptrade_user_secret", "ibkr_password")
 
 
@@ -142,7 +117,6 @@ async def allocate_port(db, tenant_id: str) -> int:
         doc["api_port"]
         async for doc in db.broker_connections.find({"api_port": {"$gt": 0}}, {"api_port": 1})
     }
-    # The pre-tenancy gateway's port is reserved even before it is adopted.
     taken.add(settings.ibkr_port)
     for port in range(settings.gateway_port_range_start, settings.gateway_port_range_end + 1):
         if port not in taken:
@@ -155,11 +129,6 @@ async def allocate_port(db, tenant_id: str) -> int:
 
 
 async def allocate_client_id(db, tenant_id: str) -> int:
-    """A nonzero API client id, unique within the tenant.
-
-    Client 0 is refused everywhere in this platform: ib_async binds manual
-    orders for that client, and nothing here may bind a broker order.
-    """
     taken = {
         doc.get("client_id", 0)
         async for doc in db.broker_connections.find({"tenant_id": tenant_id}, {"client_id": 1})
@@ -186,7 +155,6 @@ def new_connection(tenant_id: str, name: str, provider: Provider, **extra: Any) 
 
 
 def unit_for(doc: dict[str, Any]) -> str:
-    """The systemd unit that runs this connection's gateway."""
     unit = doc.get("service_unit")
     if unit:
         return unit

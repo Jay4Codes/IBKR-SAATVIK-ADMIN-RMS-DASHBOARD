@@ -51,7 +51,6 @@ export function Connections() {
   const connections = useQuery({
     queryKey: ["connections"],
     queryFn: () => api<Connection[]>("/connections"),
-    refetchInterval: 10000,
   });
 
   function refresh(message: string) {

@@ -30,7 +30,6 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
         `/history/intraday?accounts=${encodeURIComponent(scope.join(","))}&date=${date}`,
       ),
     enabled: scope.length > 0,
-    refetchInterval: 60000,
   });
 
   const series = intraday.data?.series ?? [];

@@ -36,7 +36,9 @@ from app.config import settings
 
 log = logging.getLogger("app.massive")
 
-SAMPLE_PREFIX = "market:massive"
+# Both Massive and IBKR fallback observations share this session series. Each
+# row carries its own source, so the CSV never obscures provenance.
+SAMPLE_PREFIX = "market:underlying"
 CSV_FIELDS = ("timestamp_utc", "symbol", "price", "source")
 
 
@@ -100,8 +102,12 @@ def sample_key(symbol: str, day: date) -> str:
     return f"{SAMPLE_PREFIX}:{symbol.upper()}:{day.isoformat()}:samples"
 
 
+def last_quote_key(symbol: str) -> str:
+    return f"{SAMPLE_PREFIX}:{symbol.upper()}:last"
+
+
 async def record_sample(redis, symbol: str, spot: Spot, *, at: datetime | None = None) -> None:
-    """Append one successful quote to the symbol's dedicated session list."""
+    """Append a session sample and retain it separately as the latest LTP."""
     moment = at or datetime.now(UTC)
     payload = {
         "timestamp_utc": moment.astimezone(UTC).isoformat(),
@@ -109,7 +115,25 @@ async def record_sample(redis, symbol: str, spot: Spot, *, at: datetime | None =
         "price": str(spot.price),
         "source": spot.source,
     }
-    await redis.rpush(sample_key(symbol, session_day(moment)), json.dumps(payload))
+    encoded = json.dumps(payload)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.rpush(sample_key(symbol, session_day(moment)), encoded)
+        pipe.set(last_quote_key(symbol), encoded)
+        await pipe.execute()
+
+
+async def last_spot(redis, symbol: str) -> Spot | None:
+    """Load the last valid stored observation, independent of session flushing."""
+    raw = await redis.get(last_quote_key(symbol))
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+        price = _price(payload.get("price"))
+        source = str(payload.get("source") or "")
+    except (TypeError, ValueError):
+        return None
+    return Spot(price, source) if price and source else None
 
 
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:

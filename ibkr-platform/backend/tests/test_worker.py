@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app import massive
 from app.db import persist, scoped_id
 from app.domain import Event, GatewayStatus
 from app.tenancy import TenantKeys
@@ -408,16 +409,20 @@ async def test_one_market_data_line_prices_the_whole_chain(stores):
     assert list(worker.market_subscriptions) == ["USD:SPX"]
 
 
-async def test_a_position_contract_is_given_an_exchange_before_it_is_priced(stores):
+async def test_spx_uses_a_direct_index_market_data_line(stores):
     redis, db = stores
     ib = qualifying(MagicMock())
     worker = session(redis, db, ib)
     worker.position_value(held(con_id=1))
-    # IB sends position contracts with no exchange, and reqMktData rejects those.
+    # Do not depend on a single option leg receiving a model tick: SPX itself
+    # supplies the continuously updating RMS reference.
     assert worker.contracts[1].exchange == ""
     await worker.subscribe_underlyings()
-    assert ib.qualifyContractsAsync.call_args.args[0].exchange == "SMART"
-    assert ib.reqMktData.call_args.args[0].exchange == "SMART"
+    requested = ib.qualifyContractsAsync.call_args.args[0]
+    assert requested.secType == "IND"
+    assert requested.symbol == "SPX"
+    assert requested.exchange == "CBOE"
+    assert ib.reqMktData.call_args.args[0].secType == "IND"
     assert worker.contracts[1].exchange == "", "the stored contract must not be mutated"
 
 
@@ -446,6 +451,51 @@ async def test_underlying_price_reaches_positions(stores):
     assert not worker.underlying_changed
 
 
+async def test_direct_index_tick_is_selected_for_spx(stores):
+    redis, db = stores
+    worker = session(redis, db, qualifying(MagicMock()))
+    ticker = MagicMock()
+    ticker.contract.secType = "IND"
+    ticker.contract.symbol = "SPX"
+    ticker.contract.currency = "USD"
+    ticker.modelGreeks = None
+    ticker.marketPrice.return_value = 7673.13
+
+    with patch.object(massive.settings, "massive_underlyings", "SPX"):
+        worker.ticker_value([ticker])
+
+    event = worker.queue.get_nowait()
+    assert event.event_type == "underlying.sampled"
+    assert event.data == {
+        "currency": "USD",
+        "symbol": "SPX",
+        "price": "7673.13",
+        "source": "ib_index_ltp",
+    }
+    worker.queue.task_done()
+
+
+async def test_queued_position_event_is_stamped_with_latest_stored_spx(stores):
+    redis, db = stores
+    worker = session(redis, db, qualifying(MagicMock()))
+    worker.position_value(held(con_id=1))  # queued before the LTP write completes
+    await massive.record_sample(
+        redis, "SPX", massive.Spot(Decimal("7673.13"), "ib_index_ltp")
+    )
+    worker.cached_prices["USD:SPX"] = await massive.last_spot(redis, "SPX")
+    worker.live_underlyings.add("USD:SPX")
+
+    with patch.object(massive.settings, "massive_underlyings", "SPX"):
+        processor = asyncio.create_task(worker.process())
+        await asyncio.wait_for(worker.queue.join(), 1)
+        processor.cancel()
+        await asyncio.gather(processor, return_exceptions=True)
+
+    raw = await redis.hget(TenantKeys(TENANT).account_rows("U1", "positions"), "1")
+    assert '"underlying_price": "7673.13"' in raw
+    assert '"underlying_source": "ib_index_ltp"' in raw
+
+
 async def test_an_unmoved_underlying_publishes_nothing(stores):
     redis, db = stores
     worker = session(redis, db, qualifying(MagicMock()))
@@ -470,7 +520,7 @@ async def test_the_market_data_line_moves_to_a_leg_that_is_still_open(stores):
     assert ib.cancelMktData.call_count == 1
     assert worker.market_wanted == {"USD:SPX": 2}
     await worker.subscribe_underlyings()
-    assert worker.market_subscriptions["USD:SPX"].conId == 2
+    assert worker.market_subscriptions["USD:SPX"].secType == "IND"
 
 
 async def test_a_denied_market_data_feed_does_not_degrade_the_gateway(stores):

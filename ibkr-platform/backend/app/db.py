@@ -11,12 +11,6 @@ def database():
 
 
 def snapshot_id(tenant_id: str, account_id: str, report_date: str, bucket: str = "") -> str:
-    """One row per account per date, or per bucket within the day.
-
-    Flex owns the plain date: the broker's own end-of-day figure is the
-    authority for a finished session, so a backfill overwrites whatever the
-    worker sampled for that date rather than sitting beside it.
-    """
     return f"{tenant_id}:{account_id}:{report_date}" + (f":{bucket}" if bucket else "")
 
 
@@ -24,9 +18,6 @@ async def initialize(db):
     try:
         await _create_indexes(db)
     except (DuplicateKeyError, OperationFailure) as exc:
-        # Almost always a pre-tenancy database: the unique tenant-scoped indexes
-        # cannot be built while documents still lack a tenant_id. Say so, rather
-        # than letting a raw duplicate-key error crash-loop the service.
         raise RuntimeError(
             "Could not create the tenant-scoped indexes. If this database predates "
             "multi-tenancy, run `python -m app.migrate` before starting the API or "
@@ -35,16 +26,11 @@ async def initialize(db):
 
 
 async def _create_indexes(db):
-    # Platform scope: identity is shared across tenants so one person can hold
-    # memberships in several of them under a single login.
     await db.users.create_index("email", unique=True)
     await db.user_roles.create_index([("user_id", ASCENDING), ("role", ASCENDING)], unique=True)
 
     await db.tenants.create_index("slug", unique=True)
     await db.tenants.create_index("status")
-
-    # Tenant scope. Every index leads with tenant_id so a scoped query is also
-    # the fast query, and a query that forgot its scope cannot ride an index.
     await db.tenant_members.create_index(
         [("tenant_id", ASCENDING), ("user_id", ASCENDING)], unique=True
     )
@@ -66,8 +52,6 @@ async def _create_indexes(db):
     )
     await db.order_events.create_index([("tenant_id", ASCENDING), ("account_id", ASCENDING)])
     await db.audit_logs.create_index([("tenant_id", ASCENDING), ("timestamp", DESCENDING)])
-    # History is always read as one account's run of dates, or several accounts
-    # over one range, so the account leads and the date orders within it.
     await db.account_snapshots.create_index(
         [("tenant_id", ASCENDING), ("account_id", ASCENDING), ("report_date", ASCENDING)]
     )
@@ -85,11 +69,6 @@ def scoped_id(tenant_id: str, *parts: str) -> str:
 
 
 async def persist(db, event, *, tenant_id: str, connection_id: str):
-    """Write one live event into the tenant's durable history.
-
-    Idempotent by construction: order snapshots replace by key, order events and
-    executions insert-once. Replaying an unacknowledged stream entry is safe.
-    """
     data = {**event.data, "tenant_id": tenant_id, "connection_id": connection_id}
     kind = event.event_type
     if kind.startswith("gateway."):
@@ -135,8 +114,6 @@ async def persist(db, event, *, tenant_id: str, connection_id: str):
     elif kind == "execution.created":
         execution_id = scoped_id(tenant_id, data["execution_id"])
         await db.executions.update_one({"_id": execution_id}, {"$setOnInsert": data}, upsert=True)
-        # A late commission report enriches money fields only; the immutable
-        # facts of the fill are never rewritten.
         enrichment = {key: data[key] for key in ("commission", "realized_pnl") if data.get(key) is not None}
         if enrichment:
             await db.executions.update_one({"_id": execution_id}, {"$set": enrichment})

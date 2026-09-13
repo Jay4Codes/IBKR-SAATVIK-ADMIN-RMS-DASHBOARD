@@ -25,7 +25,6 @@ export function Diagnostics({ clock }: { clock: number }) {
   const query = useQuery({
     queryKey: ["diagnostics"],
     queryFn: () => api<Diagnostics>("/admin/diagnostics"),
-    refetchInterval: 3000,
   });
   const [result, setResult] = useState("");
   const [start, setStart] = useState("");

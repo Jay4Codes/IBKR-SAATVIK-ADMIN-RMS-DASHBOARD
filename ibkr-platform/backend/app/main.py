@@ -1071,6 +1071,77 @@ async def intraday(
     return ok({"date": day, "accounts": wanted, "series": rows, "combined": combined})
 
 
+# ── Commissions ─────────────────────────────────────────────────────────────
+
+
+async def commission_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
+    """Every execution that carries a commission, across the given accounts."""
+    query = user.scope({"account_id": {"$in": accounts}, "commission": {"$ne": None}})
+    window: dict[str, Any] = {}
+    if since:
+        window["$gte"] = since
+    if until:
+        window["$lte"] = until
+    if window:
+        query["executed_at"] = window
+    cursor = db.executions.find(query, {"_id": 0, "tenant_id": 0})
+    return await cursor.sort("executed_at", 1).to_list(200_000)
+
+
+def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Total spend, plus a breakdown by day and by account."""
+    total = Decimal(0)
+    by_day: dict[str, Decimal] = {}
+    by_account: dict[str, Decimal] = {}
+    for row in rows:
+        amount = Decimal(str(row["commission"]))
+        total += amount
+        by_day[str(row.get("executed_at") or "")[:10]] = (
+            by_day.get(str(row.get("executed_at") or "")[:10], Decimal(0)) + amount
+        )
+        account = row.get("account_id") or ""
+        by_account[account] = by_account.get(account, Decimal(0)) + amount
+    return {
+        "total": str(total),
+        "count": len(rows),
+        "by_day": [{"date": d, "commission": str(by_day[d])} for d in sorted(by_day)],
+        "by_account": [
+            {"account_id": a, "commission": str(by_account[a])} for a in sorted(by_account)
+        ],
+    }
+
+
+@app.get("/api/v1/accounts/{account_id}/commissions")
+async def account_commissions(
+    account_id: str,
+    request: Request,
+    since: str | None = None,
+    until: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    user.require_account(account_id)
+    rows = await commission_rows(request.app.state.db, user, [account_id], since, until)
+    return ok(commission_summary(rows))
+
+
+@app.get("/api/v1/commissions")
+async def portfolio_commissions(
+    request: Request,
+    accounts: str = "",
+    since: str | None = None,
+    until: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    """Commission spend across any set of accounts, or every account visible to the caller."""
+    repo = repository(request, user)
+    visible = sorted(a for a in await repo.accounts() if user.sees(a))
+    wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
+    for account in wanted:
+        user.require_account(account)
+    rows = await commission_rows(request.app.state.db, user, wanted, since, until)
+    return ok(commission_summary(rows))
+
+
 @app.post("/api/v1/admin/history/backfill")
 async def backfill(request: Request, user: Principal = Depends(require_tenant_admin)):
     """Pull the broker's own daily net liquidation in, from before we watched.
