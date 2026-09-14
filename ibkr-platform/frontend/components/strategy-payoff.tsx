@@ -215,10 +215,10 @@ function PayoffGraph({
           { type: "value", show: false, min: 0, max: Math.max(...density.map(d => d[1]), 1e-9) * 3.2 },
         ],
         visualMap: {
-          show: false, dimension: 1, seriesIndex: [1, 2],
+          show: false, type: "piecewise", dimension: 1, seriesIndex: [1, 2],
           pieces: [
-            { lte: 0, color: t.red },
-            { gt: 0, color: t.green },
+            { gt: -1e15, lte: 0, color: t.red },
+            { gt: 0, lte: 1e15, color: t.green },
           ],
         },
         series: [

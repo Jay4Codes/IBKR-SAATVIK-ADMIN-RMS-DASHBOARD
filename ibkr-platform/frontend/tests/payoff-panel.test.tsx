@@ -407,6 +407,17 @@ describe("payoff panel", () => {
     for (const name of names) expect(name).not.toMatch(/\d/);
   });
 
+  it("gives visualMap pieces finite bounds so the line renderer does not crash", async () => {
+    panel([position({ strike: "7650", underlying_price: "7650", market_price: "45", expiry: futureExpiry(4), average_cost: "4500" })]);
+    await waitFor(() => expect(charts).toHaveLength(1));
+    const option = charts[0].option as { visualMap: { pieces: { gt?: number; lte?: number }[] } };
+    expect(option.visualMap.pieces).toHaveLength(2);
+    for (const piece of option.visualMap.pieces) {
+      expect(Number.isFinite(piece.gt)).toBe(true);
+      expect(Number.isFinite(piece.lte)).toBe(true);
+    }
+  });
+
   it("registers the echarts components its option actually relies on", async () => {
     const echarts = await import("echarts/core");
     const used = (echarts.use as unknown as { mock: { calls: [unknown[]][] } }).mock.calls.flat(2);
