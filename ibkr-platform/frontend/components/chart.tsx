@@ -99,11 +99,7 @@ export function Chart({
     const bars = current?.dataZoom;
     const zoom = { start: bars?.[0]?.start ?? 0, end: bars?.[0]?.end ?? 100 };
     const selected = current?.legend?.[0]?.selected;
-    try {
-      instance.setOption(option(tokens, zoom, selected), { notMerge: true });
-    } catch {
-      setFailed(true);
-    }
+    instance.setOption(option(tokens, zoom, selected), { notMerge: true });
   }, [started, ...deps]);
 
   return failed ? (
