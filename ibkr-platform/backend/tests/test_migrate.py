@@ -1,5 +1,3 @@
-"""Adopting a pre-tenancy installation without disturbing its live gateway."""
-
 import json
 
 import pytest
@@ -14,13 +12,6 @@ SLUG = settings.bootstrap_tenant_slug
 
 @pytest.fixture
 async def raw_stores():
-    """Redis and MongoDB with no indexes created.
-
-    The shared `stores` fixture initialises the database, which is precisely what
-    a pre-tenancy database has *not* had done to it — and with the unique
-    tenant-scoped indexes already in place, the legacy documents below cannot
-    even be inserted.
-    """
     from fakeredis.aioredis import FakeRedis
     from mongomock_motor import AsyncMongoMockClient
 
@@ -31,21 +22,12 @@ async def raw_stores():
 
 @pytest.fixture
 async def legacy(raw_stores, monkeypatch):
-    """A database and Redis shaped the way the single-gateway platform left them.
-
-    Deliberately *not* initialised: the point of the fixture is a database whose
-    documents predate `tenant_id`, which is exactly the state in which the
-    tenant-scoped indexes cannot be built.
-    """
     redis, db = raw_stores
     await db.users.insert_one({"_id": "u-admin", "email": "admin@old.local", "password_hash": "x"})
     await db.users.insert_one({"_id": "u-trader", "email": "trader@old.local", "password_hash": "x"})
     await db.user_roles.insert_one({"user_id": "u-admin", "role": "ADMIN"})
     await db.user_roles.insert_one({"user_id": "u-trader", "role": "TRADER"})
     await db.account_users.insert_one({"user_id": "u-trader", "account_id": "DU1"})
-    # The pre-tenancy account shape: the account number *is* the _id, and there
-    # is no account_id field. Two of these collide as (null, null) on the new
-    # unique (tenant_id, account_id) index if the migration builds it too early.
     await db.ibkr_accounts.insert_one({"_id": "DU1", "gateway_id": "primary"})
     await db.ibkr_accounts.insert_one({"_id": "All", "gateway_id": "primary"})
     await db.orders.insert_one(
@@ -71,7 +53,6 @@ class _Closer:
 
 
 class _NoClose:
-    """Hands the shared fake Redis to the migration without closing it after."""
 
     def __new__(cls, redis):
         return redis
@@ -123,7 +104,6 @@ async def test_documents_are_stamped_and_re_keyed(legacy):
 
 
 async def test_live_state_is_copied_not_moved(legacy):
-    """The legacy keys survive, so a rollback does not need a restore."""
     redis, db = legacy
     await migrate.run(dry_run=False)
     tenant = await db.tenants.find_one({"slug": SLUG})
@@ -152,7 +132,6 @@ async def test_migration_is_idempotent(legacy):
 
 
 async def test_legacy_accounts_are_reshaped_before_the_unique_index_is_built(legacy):
-    """The failure this guards against locked the API out of its own database."""
     _, db = legacy
     await migrate.run(dry_run=False)
     tenant = await db.tenants.find_one({"slug": SLUG})
@@ -161,7 +140,6 @@ async def test_legacy_accounts_are_reshaped_before_the_unique_index_is_built(leg
     for account_id, doc in accounts.items():
         assert doc["tenant_id"] == tenant["_id"]
         assert doc["_id"] == scoped_id(tenant["_id"], account_id)
-    # The indexes the API needs at startup now exist.
     names = {index["name"] async for index in db.ibkr_accounts.list_indexes()}
     assert "tenant_id_1_account_id_1" in names
 
@@ -176,5 +154,52 @@ async def test_initialize_explains_itself_on_an_unmigrated_database(raw_stores):
         await initialize(db)
     except RuntimeError as error:
         assert "python -m app.migrate" in str(error)
-    except DuplicateKeyError:  # pragma: no cover - the mock may not enforce it
+    except DuplicateKeyError:
         pytest.skip("the in-memory MongoDB does not enforce this unique index")
+
+
+async def test_local_symbols_give_back_the_underlying_and_expiry():
+    from app.migrate import parse_local_symbol
+
+    assert parse_local_symbol("SPXW  260918P07485000") == {
+        "underlying": "SPX",
+        "sec_type": "OPT",
+        "expiry": "20260918",
+        "multiplier": "100",
+    }
+    assert parse_local_symbol("AAPL  260116C00150000")["underlying"] == "AAPL"
+    assert parse_local_symbol("SPX") is None
+    assert parse_local_symbol("28812380") is None
+    assert parse_local_symbol("") is None
+    assert parse_local_symbol("SPXW  2609XXP07485000") is None
+
+
+async def test_only_realized_fills_without_a_contract_are_stamped(stores):
+    from app.migrate import Report, backfill_execution_contracts
+
+    _, db = stores
+    await db.executions.insert_many(
+        [
+            {"_id": "t:e1", "symbol": "SPXW  260918P07480000", "realized_pnl": "-1265.36"},
+            {"_id": "t:e2", "symbol": "SPXW  260918C07750000", "realized_pnl": "0.0", "underlying": "SPX"},
+            {"_id": "t:e3", "symbol": "SPXW  260918C07730000", "realized_pnl": None},
+        ]
+    )
+    await backfill_execution_contracts(db, Report(dry_run=False))
+    stamped = await db.executions.find_one({"_id": "t:e1"})
+    assert stamped["underlying"] == "SPX"
+    assert stamped["expiry"] == "20260918"
+    assert stamped["currency"] == "USD"
+    assert (await db.executions.find_one({"_id": "t:e3"})).get("expiry") is None
+
+
+async def test_the_contract_backfill_is_a_no_op_on_a_dry_run(stores):
+    from app.migrate import Report, backfill_execution_contracts
+
+    _, db = stores
+    await db.executions.insert_one(
+        {"_id": "t:e1", "symbol": "SPXW  260918P07480000", "realized_pnl": "-1265.36"}
+    )
+    report = Report(dry_run=True)
+    await backfill_execution_contracts(db, report)
+    assert (await db.executions.find_one({"_id": "t:e1"})).get("underlying") is None

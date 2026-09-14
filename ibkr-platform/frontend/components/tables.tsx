@@ -32,11 +32,9 @@ type Column<T> = {
   render: (row: T) => ReactNode;
   value?: (row: T) => string | number | null;
 };
-/** A dropdown filter over one field, its options taken from the rows present. */
 type Facet<T> = { label: string; value: (row: T) => string | null | undefined };
 
 const ANY = "All";
-/** Narrow enough to still show a heading, wide enough to grab. */
 const MIN_COLUMN = 64;
 
 export function DataTable<T>({
@@ -99,10 +97,6 @@ export function DataTable<T>({
     [rows, columns, search, sort, facets, picked],
   );
 
-  /* Once one column is pinned the table switches to a fixed layout, so every
-     column needs a width or the browser divides the remainder evenly and the
-     untouched ones jump. Seeding from what is on screen keeps the drag local to
-     the divider the user actually grabbed. */
   function seed() {
     if (Object.keys(widths).length || !head.current) return {} as Record<string, number>;
     const measured: Record<string, number> = {};
@@ -196,8 +190,6 @@ export function DataTable<T>({
                     }
                   >
                     <span className="th-label">{col.label}</span>
-                    {/* Always rendered, dimmed until this is the sorted column,
-                        so it is obvious every heading can be clicked. */}
                     <span aria-hidden="true" className={`th-arrow ${sort.index === index ? "on" : ""}`}>
                       {sort.index === index ? (sort.asc ? "↑" : "↓") : "↕"}
                     </span>
@@ -374,7 +366,6 @@ export function positionLabel(r: Position) {
     ? `${r.symbol} ${expiry} ${r.strike ?? ""} ${r.right}`
     : r.local_symbol || r.symbol;
 }
-/** Expiry as the feed sends it (YYYYMMDD) rendered for a filter list. */
 const expiryLabel = (value: string) =>
   /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}` : value;
 
@@ -518,9 +509,24 @@ export function OrdersTable({ rows }: { rows: Order[] }) {
     />
   );
 }
+export function netRate(row: Execution): string | null {
+  const price = Number(row.price);
+  const commission = row.commission == null ? null : Number(row.commission);
+  const units = Number(row.quantity) * Number(row.multiplier ?? 1);
+  if (commission === null || !Number.isFinite(price) || !Number.isFinite(units) || units === 0) return null;
+  const perUnit = Math.abs(commission) / Math.abs(units);
+  return String(price + (row.side === "BOT" ? perUnit : -perUnit));
+}
+
 export function ExecutionsTable({ rows }: { rows: Execution[] }) {
   const zone = useZone();
+  const [withCommissions, setWithCommissions] = useState(false);
   return (
+    <>
+    <label className="commission-toggle table-toggle">
+      <input type="checkbox" checked={withCommissions} onChange={(e) => setWithCommissions(e.target.checked)} />
+      <span>Include commissions in traded rate</span>
+    </label>
     <DataTable
       rows={rows}
       id={(r) => r.execution_id}
@@ -547,9 +553,9 @@ export function ExecutionsTable({ rows }: { rows: Execution[] }) {
           value: (r) => r.quantity,
         },
         {
-          label: "Traded rate (gross)",
-          render: (r) => money(r.price),
-          value: (r) => r.price,
+          label: withCommissions ? "Traded rate (net)" : "Traded rate (gross)",
+          render: (r) => money(withCommissions ? netRate(r) ?? r.price : r.price),
+          value: (r) => (withCommissions ? netRate(r) ?? r.price : r.price),
         },
         {
           label: "Commission",
@@ -568,5 +574,6 @@ export function ExecutionsTable({ rows }: { rows: Execution[] }) {
         },
       ]}
     />
+    </>
   );
 }

@@ -72,13 +72,6 @@ async def lifespan(app):
 
 
 async def watch_gateway_logins(app):
-    """Poll every managed gateway's IBC logs for login and two-factor progress.
-
-    One loop covers every tenant. Each connection's snapshot is stored under its
-    own short-lived key and announced on its own tenant's stream, so a phase
-    change reaches the right dashboard without waiting for the 15s REST refresh.
-    A cross-process lock keeps two API replicas from polling the same connection.
-    """
     interval = max(1.0, settings.gateway_login_poll_seconds)
     ttl = max(15, int(interval * 4))
     redis, db = app.state.redis, app.state.db
@@ -154,9 +147,6 @@ def repository(request: Request, user: Principal) -> StateRepository:
     return StateRepository(request.app.state.redis, user.tenant_id)
 
 
-# ── Session ───────────────────────────────────────────────────────────────────
-
-
 class Login(BaseModel):
     email: str = Field(max_length=254)
     password: str = Field(max_length=1024)
@@ -200,8 +190,6 @@ async def login(body: Login, request: Request):
     }
     response.set_cookie(COOKIE, token, **cookie)
     if principal.active:
-        # Readable by the browser so the tenant switcher can show the current
-        # choice without a round trip; it carries no authority of its own.
         response.set_cookie(TENANT_COOKIE, principal.active.tenant_id, **{**cookie, "httponly": False})
     return response
 
@@ -227,16 +215,12 @@ async def health(request: Request):
     return ok({"status": "ok", "mongodb": "connected", "redis": "connected"})
 
 
-# ── Tenants ───────────────────────────────────────────────────────────────────
-
-
 class TenantSwitch(BaseModel):
     tenant: str = Field(min_length=1, max_length=64)
 
 
 @app.get("/api/v1/tenants")
 async def my_tenants(request: Request, user: Principal = Depends(require_user)):
-    """Tenants this login may act inside. A super admin sees every one."""
     if user.is_super_admin:
         rows = [doc async for doc in request.app.state.db.tenants.find().sort("name", 1)]
         mine = {m.tenant_id for m in user.memberships}
@@ -269,7 +253,6 @@ async def my_tenants(request: Request, user: Principal = Depends(require_user)):
 
 @app.post("/api/v1/tenants/switch")
 async def switch_tenant(body: TenantSwitch, request: Request, user: Principal = Depends(require_user)):
-    """Change the active tenant for this browser session."""
     principal = await identity(
         request.app.state.redis,
         request.app.state.db,
@@ -330,11 +313,6 @@ async def list_tenants(request: Request, user: Principal = Depends(require_super
 
 @app.post("/api/v1/admin/tenants")
 async def create_tenant(body: TenantCreate, request: Request, user: Principal = Depends(require_super_admin)):
-    """Onboard a client as a new tenant.
-
-    Optionally attaches an existing login as its OWNER, which is how a client
-    administrator gets in without a second account.
-    """
     db = request.app.state.db
     slug = normalize_slug(body.slug or body.name)
     if await db.tenants.find_one({"slug": slug}):
@@ -377,9 +355,6 @@ async def update_tenant(
     return ok(tenant_row(await db.tenants.find_one({"_id": tenant_id})))
 
 
-# ── Members ───────────────────────────────────────────────────────────────────
-
-
 class MemberUpsert(BaseModel):
     email: str = Field(max_length=254)
     role: Literal["OWNER", "ADMIN", "TRADER", "VIEWER"] = "VIEWER"
@@ -412,11 +387,6 @@ async def list_members(request: Request, user: Principal = Depends(require_tenan
 async def upsert_member(
     body: MemberUpsert, request: Request, user: Principal = Depends(require_tenant_admin)
 ):
-    """Grant or change a login's access inside the active tenant.
-
-    The login must already exist; this endpoint deliberately cannot create one,
-    so nobody can mint credentials for an address they do not control.
-    """
     db = request.app.state.db
     member = await db.users.find_one({"email": body.email.lower()})
     if not member:
@@ -454,16 +424,11 @@ async def remove_member(user_id: str, request: Request, user: Principal = Depend
     return ok({"removed": user_id})
 
 
-# ── Broker connections ────────────────────────────────────────────────────────
-
-
 class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     provider: Literal["ibkr_gateway", "snaptrade"] = "ibkr_gateway"
     trading_mode: Literal["live", "paper"] = "paper"
     account_filter: str = Field(default="", max_length=32)
-    #: Read-only logins skip IBKR's second factor entirely, which is what makes
-    #: an unattended start possible. This platform never places orders.
     read_only_login: bool = True
     second_factor_device: str = Field(default="", max_length=64)
 
@@ -496,13 +461,6 @@ async def list_connections(request: Request, user: Principal = Depends(require_t
 async def create_connection(
     body: ConnectionCreate, request: Request, user: Principal = Depends(require_tenant_admin)
 ):
-    """Register a broker connection for this tenant, and provision what it needs.
-
-    For `ibkr_gateway` that means allocating a free API port and client id,
-    writing the instance's own IBC config and launcher, and installing the
-    templated systemd unit — everything short of the IBKR login itself, which
-    arrives separately so credentials never ride along with configuration.
-    """
     db = request.app.state.db
     if await db.broker_connections.find_one(user.scope({"name": body.name.strip()})):
         raise HTTPException(409, f"This tenant already has a connection named '{body.name}'")
@@ -566,8 +524,7 @@ async def update_connection(
         if doc["provider"] == registry.Provider.IBKR_GATEWAY.value and not doc.get("api_port"):
             raise HTTPException(409, "This connection has no API port; provision it before enabling")
     merged = {**doc, **changes}
-    # A change to how the gateway logs in has to reach its config file, or the
-    # dashboard would report a setting the running instance never received.
+
     rewrite = doc.get("managed", True) and doc["provider"] == registry.Provider.IBKR_GATEWAY.value
     if rewrite and {"trading_mode", "read_only_login", "second_factor_device"} & set(changes):
         await asyncio.to_thread(provisioning.provision_files, merged)
@@ -581,7 +538,6 @@ async def update_connection(
 async def delete_connection(
     connection_id: str, request: Request, user: Principal = Depends(require_tenant_admin)
 ):
-    """Remove a connection, stopping and deleting anything provisioned for it."""
     db = request.app.state.db
     doc = await registry.by_id(db, user.tenant_id, connection_id)
     if doc["provider"] == registry.Provider.IBKR_GATEWAY.value and doc.get("managed", True):
@@ -604,7 +560,6 @@ async def delete_connection(
 
 
 async def guarded_command(request: Request, user: Principal, connection_id: str, action: str, payload: dict):
-    """Rate-limit and audit one operator command against one connection."""
     if action not in {"process_start", "process_stop", "process_restart", "reconnect"} or not user.can_control_gateway:
         user.require_tenant_admin()
     redis = request.app.state.redis
@@ -634,7 +589,6 @@ class GatewayTarget(BaseModel):
 
 
 async def gateway_connection(db, user: Principal, connection_id: str | None) -> dict:
-    """The connection a gateway command targets, defaulting to the tenant's primary."""
     if connection_id:
         return await registry.by_id(db, user.tenant_id, connection_id)
     doc = await registry.primary(db, user.tenant_id)
@@ -650,11 +604,6 @@ async def connection_credentials(
     request: Request,
     user: Principal = Depends(require_tenant_admin),
 ):
-    """Write an IBKR login into this connection's own IBC config.
-
-    The password goes to that file at 0600 and nowhere else — not MongoDB, not
-    this API's responses, not the logs.
-    """
     db = request.app.state.db
     doc = await registry.by_id(db, user.tenant_id, connection_id)
     if doc["provider"] != registry.Provider.IBKR_GATEWAY.value:
@@ -699,12 +648,6 @@ async def connection_process(
     request: Request,
     user: Principal = Depends(require_gateway_operator),
 ):
-    """Start, stop, or restart this connection's IB Gateway.
-
-    Stopping or restarting is refused while an IBKR push is still outstanding —
-    it would cancel a request the operator may be seconds from approving. Resend
-    with `force` to override; the audit record keeps the flag.
-    """
     db = request.app.state.db
     doc = await registry.by_id(db, user.tenant_id, connection_id)
     if doc["provider"] != registry.Provider.IBKR_GATEWAY.value:
@@ -736,7 +679,6 @@ async def connection_target(
     request: Request,
     user: Principal = Depends(require_tenant_admin),
 ):
-    """Override where the worker connects for this connection, then reconnect."""
     db = request.app.state.db
     await registry.by_id(db, user.tenant_id, connection_id)
     payload = body.model_dump()
@@ -768,12 +710,6 @@ async def connection_reconnect(
 async def snaptrade_link(
     connection_id: str, request: Request, user: Principal = Depends(require_tenant_admin)
 ):
-    """A one-time hosted-consent URL for the client to link their brokerage.
-
-    This is the whole point of the SnapTrade path: the client authorises their
-    own broker on IBKR's and SnapTrade's screens, and no IBKR password ever
-    reaches this platform or its operator.
-    """
     db = request.app.state.db
     doc = await registry.by_id(db, user.tenant_id, connection_id)
     if doc["provider"] != registry.Provider.SNAPTRADE.value:
@@ -817,9 +753,6 @@ async def snaptrade_status(
     return ok({"authorizations": linked})
 
 
-# ── Gateway (the active tenant's primary connection) ──────────────────────────
-
-
 @app.get("/api/v1/gateway")
 @app.get("/api/v1/gateway/status")
 async def gateway(request: Request, connection_id: str | None = None, user: Principal = Depends(require_tenant)):
@@ -835,7 +768,6 @@ async def gateway(request: Request, connection_id: str | None = None, user: Prin
     state["connection_name"] = doc.get("name")
     state["provider"] = doc.get("provider")
     if not user.can_control_gateway:
-        # Traders see liveness, not host configuration or login progress.
         return ok(
             {
                 key: state.get(key)
@@ -856,13 +788,6 @@ async def gateway(request: Request, connection_id: str | None = None, user: Prin
     state["managed"] = doc.get("managed", True)
     state["service_unit"] = registry.unit_for(doc)
     return ok(state)
-
-
-# ── Gateway aliases for the tenant's primary connection ───────────────────────
-#
-# A tenant with one gateway — the common case — should not have to name its id
-# on every call. These resolve the primary connection and delegate, so the same
-# handler, guard rails, and audit trail cover both surfaces.
 
 
 @app.post("/api/v1/gateway/credentials")
@@ -893,9 +818,6 @@ async def primary_target(
 async def primary_reconnect(request: Request, user: Principal = Depends(require_gateway_operator)):
     doc = await gateway_connection(request.app.state.db, user, None)
     return await connection_reconnect(doc["_id"], request, user)
-
-
-# ── Accounts ──────────────────────────────────────────────────────────────────
 
 
 @app.get("/api/v1/accounts")
@@ -940,17 +862,7 @@ async def rows(account_id: str, request: Request, limit: int = 100, user: Princi
     return ok(await repo.rows(account_id, kind))
 
 
-# ── History ───────────────────────────────────────────────────────────────────
-
-
 async def history_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
-    """Every account's daily close over a range, newest date last.
-
-    A day can hold several snapshots; the last one taken is the day's close, and
-    a Flex row for that date supersedes all of them. Both live in the same
-    collection, so ordering by `taken_at` and keeping the final row per
-    (account, date) resolves it without the caller knowing which source won.
-    """
     window: dict[str, Any] = {}
     if since:
         window["$gte"] = since
@@ -962,7 +874,6 @@ async def history_rows(db, user: Principal, accounts: list[str], since: str | No
     cursor = db.account_snapshots.find(query, {"_id": 0, "tenant_id": 0})
     closes: dict[tuple[str, str], dict[str, Any]] = {}
     for row in await cursor.sort("taken_at", 1).to_list(200_000):
-        # Flex is the broker's own end-of-day word, so it always wins its date.
         key = (row["account_id"], row["report_date"])
         if row.get("source") == "flex" or closes.get(key, {}).get("source") != "flex":
             closes[key] = row
@@ -970,11 +881,6 @@ async def history_rows(db, user: Principal, accounts: list[str], since: str | No
 
 
 def combine(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One portfolio line: each date's accounts added together.
-
-    A date is only reported once every requested account has a close for it —
-    a total that silently drops an account reads as a loss that never happened.
-    """
     by_date: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         by_date.setdefault(row["report_date"], []).append(row)
@@ -1016,10 +922,6 @@ async def portfolio_history(
     until: str | None = None,
     user: Principal = Depends(require_tenant),
 ):
-    """History for any set of accounts, plus their combined line.
-
-    With no `accounts` this is the whole portfolio the caller can see.
-    """
     repo = repository(request, user)
     visible = sorted(a for a in await repo.accounts() if user.sees(a))
     wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
@@ -1036,13 +938,6 @@ async def intraday(
     date: str | None = None,
     user: Principal = Depends(require_tenant),
 ):
-    """Every snapshot taken on one date, for a day-P&L curve.
-
-    Unlike `/history` this does not collapse to a daily close — the shape within
-    the session is the whole point. All accounts in a cycle are written with one
-    timestamp, so grouping by `taken_at` lines them up exactly and a combined
-    figure needs no interpolation.
-    """
     repo = repository(request, user)
     visible = sorted(a for a in await repo.accounts() if user.sees(a))
     wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
@@ -1065,17 +960,12 @@ async def intraday(
             "day_pnl": str(sum(Decimal(r["day_pnl"]) for r in group)),
         }
         for stamp, group in sorted(at.items())
-        # A total missing an account would read as a swing that never happened.
         if len(group) == expected and all(r.get("day_pnl") is not None for r in group)
     ]
     return ok({"date": day, "accounts": wanted, "series": rows, "combined": combined})
 
 
-# ── Commissions ─────────────────────────────────────────────────────────────
-
-
 async def commission_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
-    """Every execution that carries a commission, across the given accounts."""
     query = user.scope({"account_id": {"$in": accounts}, "commission": {"$ne": None}})
     window: dict[str, Any] = {}
     if since:
@@ -1089,7 +979,6 @@ async def commission_rows(db, user: Principal, accounts: list[str], since: str |
 
 
 def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Total spend, plus a breakdown by day and by account."""
     total = Decimal(0)
     by_day: dict[str, Decimal] = {}
     by_account: dict[str, Decimal] = {}
@@ -1132,7 +1021,6 @@ async def portfolio_commissions(
     until: str | None = None,
     user: Principal = Depends(require_tenant),
 ):
-    """Commission spend across any set of accounts, or every account visible to the caller."""
     repo = repository(request, user)
     visible = sorted(a for a in await repo.accounts() if user.sees(a))
     wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
@@ -1142,14 +1030,77 @@ async def portfolio_commissions(
     return ok(commission_summary(rows))
 
 
+async def realized_rows(
+    db, user: Principal, accounts: list[str], expiries: list[str], active_on: str | None
+):
+    query = user.scope({"account_id": {"$in": accounts}, "realized_pnl": {"$ne": None}})
+    if expiries:
+        query["expiry"] = {"$in": expiries}
+    elif active_on:
+        query["expiry"] = {"$gte": active_on}
+    cursor = db.executions.find(query, {"_id": 0, "tenant_id": 0})
+    return await cursor.sort("executed_at", 1).to_list(200_000)
+
+
+def realized_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = Decimal(0)
+    commission = Decimal(0)
+    by_account: dict[str, Decimal] = {}
+    by_leg: list[dict[str, Any]] = []
+    for row in rows:
+        amount = Decimal(str(row["realized_pnl"]))
+        if not amount:
+            continue
+        total += amount
+        commission += Decimal(str(row.get("commission") or 0))
+        account = row.get("account_id") or ""
+        by_account[account] = by_account.get(account, Decimal(0)) + amount
+        by_leg.append(
+            {
+                "symbol": row.get("symbol"),
+                "underlying": row.get("underlying"),
+                "currency": row.get("currency"),
+                "expiry": row.get("expiry"),
+                "account_id": account,
+                "side": row.get("side"),
+                "quantity": str(row.get("quantity") or ""),
+                "price": str(row.get("price") or ""),
+                "realized_pnl": str(amount),
+                "commission": str(row.get("commission") or 0),
+                "executed_at": row.get("executed_at"),
+            }
+        )
+    return {
+        "total": str(total),
+        "commission": str(commission),
+        "count": len(by_leg),
+        "by_account": [
+            {"account_id": a, "realized_pnl": str(by_account[a])} for a in sorted(by_account)
+        ],
+        "legs": by_leg,
+    }
+
+
+@app.get("/api/v1/realized")
+async def portfolio_realized(
+    request: Request,
+    accounts: str = "",
+    expiries: str = "",
+    active_on: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    repo = repository(request, user)
+    visible = sorted(a for a in await repo.accounts() if user.sees(a))
+    wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
+    for account in wanted:
+        user.require_account(account)
+    cycles = [e.strip() for e in expiries.split(",") if e.strip()]
+    rows = await realized_rows(request.app.state.db, user, wanted, cycles, active_on)
+    return ok(realized_summary(rows))
+
+
 @app.post("/api/v1/admin/history/backfill")
 async def backfill(request: Request, user: Principal = Depends(require_tenant_admin)):
-    """Pull the broker's own daily net liquidation in, from before we watched.
-
-    Only accounts this tenant already owns are written: a Flex query is scoped
-    by token, not by tenant, and one tenant's statement must not seed another's
-    history.
-    """
     db = request.app.state.db
     repo = repository(request, user)
     mine = {a for a in await repo.accounts() if user.sees(a)}
@@ -1171,7 +1122,6 @@ async def backfill(request: Request, user: Principal = Depends(require_tenant_ad
                     "tenant_id": user.tenant_id,
                     "account_id": point.account_id,
                     "report_date": point.report_date,
-                    # Sorts after any same-day snapshot, so it wins the day.
                     "taken_at": f"{point.report_date}T23:59:59.999999+00:00",
                     "currency": point.currency,
                     "net_liquidation": str(point.net_liquidation),
@@ -1182,9 +1132,6 @@ async def backfill(request: Request, user: Principal = Depends(require_tenant_ad
         )
         written += 1
     return ok({"written": written, "skipped_other_tenants": skipped, "points": len(points)})
-
-
-# ── Diagnostics ───────────────────────────────────────────────────────────────
 
 
 @app.get("/api/v1/admin/diagnostics")
@@ -1306,9 +1253,6 @@ async def visibility(body: VisibilityTest, request: Request, user: Principal = D
     return ok({k: v for k, v in result.items() if k != "tenant_id"})
 
 
-# ── Live stream ───────────────────────────────────────────────────────────────
-
-
 @app.websocket("/ws/live")
 async def live(ws: WebSocket):
     if ws.headers.get("origin") not in settings.origins:
@@ -1323,9 +1267,7 @@ async def live(ws: WebSocket):
     if user.active is None:
         await ws.close(code=1008)
         return
-    # The stream this socket reads is fixed at the tenant the handshake resolved.
-    # Re-resolving identity below can revoke access; it can never widen it to a
-    # different tenant's stream.
+
     tenant_id = user.tenant_id
     stream = user.keys.events
     await ws.accept()

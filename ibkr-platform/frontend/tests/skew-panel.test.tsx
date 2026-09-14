@@ -14,7 +14,7 @@ vi.mock("echarts/core", () => ({
   }),
 }));
 vi.mock("echarts/charts", () => ({ LineChart: {} }));
-vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {} }));
+vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {}, AxisPointerComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ SVGRenderer: {} }));
 afterEach(() => { vi.unstubAllGlobals(); options.length = 0; });
 

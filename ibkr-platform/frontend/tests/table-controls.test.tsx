@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { PositionsTable } from "@/components/tables";
+import { ExecutionsTable, netRate, PositionsTable } from "@/components/tables";
 import { SearchableSelect } from "@/components/searchable-select";
-import { Position } from "@/lib/types";
+import { Execution, Position } from "@/lib/types";
 
 function position(fields: Partial<Position> = {}): Position {
   return {
@@ -107,5 +107,35 @@ describe("searchable dropdown", () => {
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
     fireEvent.keyDown(trigger, { key: "Enter" });
     expect(chosen).toEqual(["Put"]);
+  });
+});
+
+describe("traded rate commissions", () => {
+  function execution(fields: Partial<Execution> = {}): Execution {
+    return {
+      account_id: "U1", execution_id: "e1", symbol: "SPXW  260918P07480000",
+      side: "BOT", quantity: "1", price: "11.83", commission: "1.73",
+      multiplier: "100", exchange: "CBOE", order_id: 1,
+      executed_at: "2026-09-11T19:17:22Z", ...fields,
+    };
+  }
+
+  it("spreads a whole-fill commission across the units traded", () => {
+    expect(Number(netRate(execution()))).toBeCloseTo(11.8473, 4);
+    expect(Number(netRate(execution({ side: "SLD" })))).toBeCloseTo(11.8127, 4);
+  });
+
+  it("leaves the rate alone when there is nothing to spread", () => {
+    expect(netRate(execution({ commission: null }))).toBeNull();
+    expect(netRate(execution({ quantity: "0" }))).toBeNull();
+  });
+
+  it("shows the gross rate until commissions are asked for", () => {
+    render(<ExecutionsTable rows={[execution()]} />);
+    expect(screen.getByText("Traded rate (gross)")).toBeInTheDocument();
+    expect(screen.getByText("11.83")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Include commissions in traded rate"));
+    expect(screen.getByText("Traded rate (net)")).toBeInTheDocument();
+    expect(screen.getByText("11.85")).toBeInTheDocument();
   });
 });

@@ -1,5 +1,3 @@
-"""The SnapTrade provider: signing, normalisation, and secret handling."""
-
 import base64
 import hashlib
 import hmac
@@ -83,7 +81,6 @@ def test_positions_are_normalised_with_derived_valuations():
 
 
 def test_a_position_without_a_price_leaves_valuations_blank():
-    """A missing broker mark stays missing rather than becoming a zero."""
     position = snaptrade.normalize_position("U1", {"symbol": "AAPL", "units": "3", "price": None})
     assert position.market_price is None
     assert position.market_value is None
@@ -98,7 +95,6 @@ def test_account_normalisation_leaves_unreported_margin_fields_blank():
     assert account.account_id == "U1"
     assert str(account.net_liquidation) == "1250.75"
     assert str(account.cash) == "300"
-    # SnapTrade does not report these; they must not be invented.
     assert account.buying_power is None
     assert account.maintenance_margin is None
 

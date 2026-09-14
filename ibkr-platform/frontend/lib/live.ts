@@ -67,8 +67,6 @@ export function applyEvent(client: QueryClient, event: LiveEvent) {
     return;
   }
   if (type === "snapshot.recorded") {
-    // History is persisted in MongoDB, not duplicated in browser state. The
-    // worker announces each completed snapshot so active charts refetch once.
     void client.invalidateQueries({ queryKey: ["intraday"] });
     void client.invalidateQueries({ queryKey: ["history"] });
     return;

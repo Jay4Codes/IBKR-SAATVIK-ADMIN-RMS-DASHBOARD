@@ -39,8 +39,6 @@ export function GatewayStatus({
   const [notice, setNotice] = useState<string | null>(null);
   const [configuring, setConfiguring] = useState(false);
   const [confirming, setConfirming] = useState<Interrupt | null>(null);
-  // Collapsed by default: the head already carries the state anyone glances at,
-  // and the rows below it spell out the login, host and port on a shared screen.
   const [facts, setFacts] = useState(false);
 
   const remaining = twoFactorRemaining(gateway, clock);

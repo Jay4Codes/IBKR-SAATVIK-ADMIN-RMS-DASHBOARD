@@ -1,13 +1,3 @@
-"""Tenant identity, scoping, and key namespacing.
-
-Isolation model: one MongoDB database, shared collections, and a `tenant_id`
-discriminator on every tenant-owned document, with compound indexes that lead
-with `tenant_id`. Redis follows the same shape through `TenantKeys`, so a
-tenant's live state, event stream, and gateway leases can never be read by the
-scope of another tenant even if a query forgets its filter — because the key
-prefix is built from the resolved tenant, not passed in by the caller.
-"""
-
 from __future__ import annotations
 
 import re
@@ -28,8 +18,6 @@ def is_super_admin_email(email: str) -> bool:
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 
-# Collections carrying a tenant_id. Anything not listed here is platform-wide
-# (users, roles) and is deliberately never scoped.
 TENANT_COLLECTIONS = (
     "tenant_members",
     "broker_connections",
@@ -49,7 +37,6 @@ class TenantStatus(StrEnum):
 
 
 class TenantRole(StrEnum):
-    """Role within one tenant. Platform super admins are a separate axis."""
 
     OWNER = "OWNER"
     ADMIN = "ADMIN"
@@ -57,9 +44,7 @@ class TenantRole(StrEnum):
     VIEWER = "VIEWER"
 
 
-#: Roles allowed to change tenant configuration and drive broker connections.
 TENANT_ADMIN_ROLES = frozenset({TenantRole.OWNER, TenantRole.ADMIN})
-#: Roles that may see every account in the tenant without an explicit grant.
 TENANT_ALL_ACCOUNT_ROLES = TENANT_ADMIN_ROLES
 
 
@@ -94,11 +79,6 @@ def new_tenant(name: str, slug: str | None = None, **extra: Any) -> dict[str, An
 
 @dataclass(frozen=True, slots=True)
 class TenantKeys:
-    """Every Redis key this platform touches, namespaced by tenant.
-
-    Built from a tenant id rather than accepting formatted keys, so no call site
-    can accidentally address another tenant's namespace.
-    """
 
     tenant_id: str
 
@@ -106,9 +86,6 @@ class TenantKeys:
     def prefix(self) -> str:
         return f"t:{self.tenant_id}"
 
-    # Live per-tenant event stream. Per-tenant rather than global so that the
-    # WebSocket fan-out, the durable MongoDB consumer, and the diagnostics
-    # window all read a stream that only ever contained this tenant's events.
     @property
     def events(self) -> str:
         return f"{self.prefix}:events"
@@ -126,7 +103,6 @@ class TenantKeys:
     def diagnostics(self, account: str) -> str:
         return f"{self.prefix}:diagnostics:{account}"
 
-    # Per broker connection.
     def connection(self, connection_id: str) -> str:
         return f"{self.prefix}:c:{connection_id}"
 
@@ -149,11 +125,6 @@ class TenantKeys:
         return f"{self.connection(connection_id)}:command:{action}"
 
     def connection_accounts(self, connection_id: str) -> str:
-        """Accounts last reported by one connection.
-
-        The tenant-wide account set is the union across its connections, so
-        removing an account needs to know which connection used to own it.
-        """
         return f"{self.connection(connection_id)}:accounts"
 
     @property
@@ -161,8 +132,6 @@ class TenantKeys:
         return "mongo-history-v2"
 
 
-#: Broadcast channel for operator commands. The payload names the tenant and
-#: connection; the supervisor routes it to the session that owns them.
 COMMAND_CHANNEL = "platform.commands"
 
 
@@ -196,14 +165,12 @@ class Membership:
 
 @dataclass(frozen=True, slots=True)
 class Principal:
-    """The authenticated caller, resolved against one active tenant."""
 
     id: str
     email: str
     is_super_admin: bool
     memberships: tuple[Membership, ...]
     active: Membership | None
-    #: True when a super admin is acting inside a tenant they are not a member of.
     impersonating: bool = False
 
     @property
@@ -226,7 +193,6 @@ class Principal:
 
     @property
     def role(self) -> str:
-        """Legacy role surface: ADMIN or TRADER, as the Phase 1 UI expects."""
         return "ADMIN" if self.is_tenant_admin else "TRADER"
 
     def sees(self, account: str) -> bool:
@@ -247,7 +213,6 @@ class Principal:
             raise HTTPException(403, "Platform administrator access required")
 
     def scope(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        """A MongoDB filter pinned to the active tenant."""
         return {"tenant_id": self.tenant_id, **(extra or {})}
 
     def as_dict(self) -> dict[str, Any]:
@@ -300,7 +265,6 @@ async def memberships_for(db, user_id: str, *, include_suspended: bool = False) 
 
 
 def membership_for_super_admin(tenant: dict[str, Any]) -> Membership:
-    """A synthetic OWNER membership so a super admin can act inside any tenant."""
     return Membership(
         tenant_id=tenant["_id"],
         slug=tenant["slug"],
@@ -317,12 +281,6 @@ async def resolve_active(
     memberships: list[Membership],
     requested: str | None,
 ) -> tuple[Membership | None, bool]:
-    """Pick the tenant this request acts inside.
-
-    `requested` is a tenant id or slug from the client. A super admin may name
-    any tenant; everyone else is held to their memberships. Returns the
-    membership and whether it is a super admin acting outside their own.
-    """
     is_super = bool(user.get("is_super_admin"))
     by_key = {m.tenant_id: m for m in memberships} | {m.slug: m for m in memberships}
 

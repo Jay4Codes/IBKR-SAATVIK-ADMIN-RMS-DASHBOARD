@@ -1,31 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Position } from "@/lib/types";
 import { skewByExpiry, SkewPoint } from "@/lib/payoff";
-import { todayIn } from "@/lib/timezone";
 import { Chart } from "./chart";
 import { SearchableSelect } from "./searchable-select";
-import { useZone } from "./timezone";
 
 const SYMBOL = "SPX";
 
-/** SPX implied-vol skew for any two expiries the reader picks, from the desk's
- *  own book.
- *
- *  Not a market-wide chain: each point is one held contract's own broker mark,
- *  inverted against Black–Scholes for the volatility that reprices it — so the
- *  strikes shown are only the ones the desk actually has a position in. That
- *  keeps this independent of a market-data vendor, using data already flowing
- *  through the position feed.
- */
 export function SkewPanel({ rows, loading, error }: { rows: Position[]; loading: boolean; error: boolean }) {
-  const zone = useZone();
-  const today = todayIn(zone);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const [rate, setRate] = useState(0);
   const [dividend, setDividend] = useState(0);
   const spx = rows.filter(p => p.symbol.toUpperCase() === SYMBOL && p.sec_type === "OPT");
-  const groups = skewByExpiry(spx, today, rate / 100, dividend / 100);
+  const groups = skewByExpiry(spx, now, rate / 100, dividend / 100);
   const available = [...groups.keys()].sort();
 
   const [firstChoice, setFirstChoice] = useState("");

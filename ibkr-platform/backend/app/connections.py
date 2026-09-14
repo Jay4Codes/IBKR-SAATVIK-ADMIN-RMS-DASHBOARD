@@ -26,7 +26,6 @@ SUPERVISED = (ConnectionStatus.ENABLED.value,)
 
 
 class BrokerConnection(BaseModel):
-    """Serialisable view of one connection. Secrets are never included."""
 
     id: str
     tenant_id: str
@@ -81,7 +80,6 @@ async def list_for(db, tenant_id: str) -> list[dict[str, Any]]:
 
 
 async def supervised(db) -> list[dict[str, Any]]:
-    """Every connection the worker should currently hold a session for."""
     active = [t["_id"] async for t in db.tenants.find({"status": "ACTIVE"}, {"_id": 1})]
     if not active:
         return []
@@ -92,11 +90,6 @@ async def supervised(db) -> list[dict[str, Any]]:
 
 
 async def primary(db, tenant_id: str) -> dict[str, Any] | None:
-    """The connection the tenant's single-gateway UI surfaces.
-
-    Prefers an enabled one, so the dashboard's gateway panel keeps pointing at a
-    live session rather than a parked draft.
-    """
     for status in (ConnectionStatus.ENABLED.value, ConnectionStatus.DISABLED.value, None):
         query: dict[str, Any] = {"tenant_id": tenant_id}
         if status:
@@ -108,11 +101,6 @@ async def primary(db, tenant_id: str) -> dict[str, Any] | None:
 
 
 async def allocate_port(db, tenant_id: str) -> int:
-    """Pick a free API port for a newly provisioned gateway.
-
-    Ports are unique across the whole host, not per tenant: two tenants'
-    gateways are two processes on one machine and cannot share a listener.
-    """
     taken = {
         doc["api_port"]
         async for doc in db.broker_connections.find({"api_port": {"$gt": 0}}, {"api_port": 1})

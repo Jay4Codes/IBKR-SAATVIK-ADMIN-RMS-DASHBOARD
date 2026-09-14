@@ -1,5 +1,3 @@
-"""Automated IB Gateway provisioning: what lands on disk for a new tenant."""
-
 import os
 import stat
 from pathlib import Path
@@ -35,7 +33,6 @@ exec java -jar "$IBC_PATH/IBC.jar"
 
 @pytest.fixture
 def host(tmp_path, monkeypatch):
-    """A throwaway IBC installation and instance root."""
     ibc = tmp_path / "ibc"
     ibc.mkdir()
     (ibc / "config.ini").write_text(CONFIG_TEMPLATE)
@@ -77,13 +74,11 @@ def test_provisioning_creates_a_private_isolated_instance(host):
     assert "TradingMode=paper" in text
     assert "ReadOnlyLogin=yes" in text
     assert "ExistingSessionDetectedAction=primary" in text
-    # The template's credentials must never be inherited by a new tenant.
     assert "IbLoginId=" in text and "template-user" not in text
     assert "template-secret" not in text
 
 
 def test_the_launcher_points_at_this_instances_own_files(host):
-    """IBC's stock launcher assigns IBC_INI, so it must be rewritten, not env-set."""
     layout = provisioning.provision_files(connection())
     launcher = Path(layout["launcher_path"]).read_text()
     assert f"IBC_INI={layout['ibc_config_path']}" in launcher
@@ -91,7 +86,6 @@ def test_the_launcher_points_at_this_instances_own_files(host):
     assert f"TWS_SETTINGS_PATH={layout['settings_path']}" in launcher
     assert "TRADING_MODE=paper" in launcher
     assert "IBC_INI=/opt/ibc/config.ini" not in launcher
-    # Host-specific values it did not ask to change survive.
     assert "TWS_PATH=/root/Jts" in launcher
     assert "TWS_MAJOR_VRSN=1045" in launcher
     assert stat.S_IMODE(os.stat(layout["launcher_path"]).st_mode) == 0o700
@@ -108,7 +102,6 @@ def test_two_connections_get_fully_separate_instances(host):
 
 
 def test_reprovisioning_keeps_the_password_already_on_disk(host):
-    """Changing a port must not silently blank a working login."""
     layout = provisioning.provision_files(connection(), password="live-secret")
     assert "IbPassword=live-secret" in Path(layout["ibc_config_path"]).read_text()
     provisioning.provision_files(connection(api_port=4200))

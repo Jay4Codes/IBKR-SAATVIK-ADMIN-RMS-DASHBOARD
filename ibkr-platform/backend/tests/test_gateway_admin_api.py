@@ -17,7 +17,6 @@ def as_user(role):
 
 @pytest.fixture
 async def config(tmp_path, stores):
-    """Point the tenant's connection at a throwaway IBC config."""
     _, db = stores
     path = tmp_path / "config.ini"
     path.write_text(TEMPLATE)
@@ -63,7 +62,6 @@ async def test_credentials_written_and_never_echoed(client, config, stores):
     assert record["user_id"] == "ADMIN"
     assert record["tenant_id"] == TENANT
     assert SECRET not in str(record)
-    # The password is not mirrored into the connection document either.
     stored = await db.broker_connections.find_one({"_id": CONNECTION})
     assert SECRET not in str(stored)
     assert stored["ibkr_username"] == "apibot"
@@ -154,11 +152,6 @@ async def test_process_failure_reports_503(client, config, monkeypatch):
 
 
 async def test_a_tenant_cannot_drive_another_tenants_connection(client, config):
-    """Naming a connection id belonging to another tenant is a 404, not a 403.
-
-    The scoped lookup never finds it, so the endpoint cannot even confirm that
-    the id exists.
-    """
     from tests.conftest import OTHER_CONNECTION
 
     response = await client.post(

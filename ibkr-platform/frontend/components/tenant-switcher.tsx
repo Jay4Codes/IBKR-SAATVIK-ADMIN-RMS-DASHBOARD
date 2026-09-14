@@ -7,13 +7,6 @@ import { Tenant, User } from "@/lib/types";
 
 type TenantList = { active: Tenant | null; tenants: Tenant[] };
 
-/**
- * Switches which tenant the dashboard is looking at.
- *
- * Switching replaces the whole data set, so it clears the query cache rather
- * than letting the previous tenant's rows linger under the new tenant's name
- * while refetches land one by one.
- */
 export function TenantSwitcher({ user }: { user?: User }) {
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -39,8 +32,6 @@ export function TenantSwitcher({ user }: { user?: User }) {
 
   const active = user?.tenant;
   const tenants = user?.tenants ?? [];
-  // A super admin may act inside tenants they are not a member of, so the list
-  // comes from the server rather than from their own memberships.
   const [all, setAll] = useState<Tenant[] | null>(null);
   const choices = all ?? tenants;
 
@@ -64,8 +55,6 @@ export function TenantSwitcher({ user }: { user?: User }) {
       await api("/tenants/switch", { tenant: tenant.tenant_id });
       client.clear();
       setOpen(false);
-      // A hard reload keeps nothing from the previous tenant: no cached rows,
-      // no in-flight sockets bound to the old stream.
       window.location.reload();
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : "Switch failed");

@@ -1,11 +1,3 @@
-"""Sessions, identity, and tenant resolution.
-
-Identity is platform-wide: one login can hold memberships in several tenants.
-Authorization is per tenant, resolved on every request from MongoDB rather than
-cached in the session, so revoking a membership takes effect immediately —
-including on an already-open WebSocket, which re-resolves on each batch.
-"""
-
 import asyncio
 import getpass
 import hashlib
@@ -29,8 +21,6 @@ from app.tenancy import (
 passwords = PasswordHash.recommended()
 DUMMY_HASH = passwords.hash("dummy-password-for-timing")
 COOKIE = "ibkr_session"
-#: Client-selected active tenant. A cookie so it survives a reload, and a header
-#: so a single page can address another tenant without disturbing that choice.
 TENANT_COOKIE = "ibkr_tenant"
 TENANT_HEADER = "x-tenant"
 
@@ -40,7 +30,6 @@ def digest(token):
 
 
 def requested_tenant(request) -> str | None:
-    """The tenant this request asks to act inside, if it named one."""
     header = request.headers.get(TENANT_HEADER)
     if header:
         return header.strip() or None
@@ -58,7 +47,6 @@ async def identity(redis, db, token, tenant: str | None = None) -> Principal:
     if user.get("status") == "DISABLED":
         raise HTTPException(403, "This account has been disabled")
 
-    # Stored flags and legacy roles cannot grant platform administration.
     is_super = is_super_admin_email(user["email"])
     user = {**user, "is_super_admin": is_super}
     memberships = await memberships_for(db, user_id)
@@ -83,7 +71,6 @@ async def require_user(request: Request) -> Principal:
 
 
 async def require_tenant(request: Request) -> Principal:
-    """A caller who has an active tenant. Everything account-scoped needs this."""
     user = await require_user(request)
     if user.active is None:
         raise HTTPException(
@@ -112,7 +99,6 @@ async def require_super_admin(request: Request) -> Principal:
 
 
 def subscriptions(user: Principal, accounts):
-    """Validate a WebSocket subscription request against the caller's grants."""
     if not accounts or len(accounts) > 100 or any(not isinstance(a, str) for a in accounts):
         raise HTTPException(422, "Provide 1–100 account identifiers")
     if accounts == ["*"]:
@@ -140,7 +126,6 @@ async def audit(db, user: Principal, action: str, data: dict | None = None):
 
 
 async def ensure_tenant(db, slug: str, name: str) -> dict:
-    """Get or create a tenant by slug. Used by bootstrap and the CLI."""
     slug = normalize_slug(slug)
     existing = await db.tenants.find_one({"slug": slug})
     if existing:
@@ -151,11 +136,6 @@ async def ensure_tenant(db, slug: str, name: str) -> dict:
 
 
 async def create_user():
-    """Operator CLI: create a login and place it in a tenant.
-
-    Phase 1 has no user-management UI, so this stays the way accounts and
-    memberships are created.
-    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Create a platform user and tenant membership")

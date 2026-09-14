@@ -1,10 +1,3 @@
-"""Host-side control of one connection's IB Gateway: its config file and unit.
-
-Every function takes the path or unit explicitly. Nothing here reads a global
-gateway setting, because in a multi-tenant install there is no such thing as
-"the" gateway — there is one per broker connection.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -43,12 +36,6 @@ def read_username(path: str | None) -> str | None:
 
 
 def write_atomic(path: str, text: str, mode: int = stat.S_IRUSR | stat.S_IWUSR) -> None:
-    """Replace a file's contents without ever exposing a half-written config.
-
-    Written to a temporary file in the same directory, fsynced, permissions set
-    before the rename, then moved into place. A crash mid-write leaves the old
-    file intact rather than a config the Gateway would refuse to start on.
-    """
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     temporary = tempfile.NamedTemporaryFile("w", dir=directory, delete=False)
@@ -75,11 +62,6 @@ def write_credentials(
     read_only_login: bool | None = None,
     second_factor_device: str | None = None,
 ) -> None:
-    """Write an IBKR login into one connection's IBC config, in place.
-
-    The password reaches disk at 0600 and is never written to MongoDB, returned
-    by the API, or logged.
-    """
     with open(path) as handle:
         text = handle.read()
     values = {

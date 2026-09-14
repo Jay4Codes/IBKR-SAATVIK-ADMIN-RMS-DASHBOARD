@@ -6,7 +6,6 @@ import { api } from "@/lib/api";
 import { TenantSummary } from "@/lib/types";
 import { Button } from "./ui/button";
 
-/** Platform administration: onboarding a client as a tenant, and suspending one. */
 export function TenantsAdmin() {
   const client = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);

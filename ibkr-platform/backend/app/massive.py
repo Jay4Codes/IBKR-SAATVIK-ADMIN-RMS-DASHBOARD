@@ -1,19 +1,3 @@
-"""Massive market data: the underlying spot behind the payoff panel.
-
-Massive is a Polygon-compatible vendor — REST at `https://api.massive.com`,
-authenticated with an `apiKey` query parameter. This is a port of
-US-Trading-Infra's `market_data/massive/rest.py`, kept deliberately close to it
-so both projects resolve a spot the same way. In particular the loader order in
-`LOADERS` is the one that project settled on: indices first, because a cash
-index like SPX has no tradable ticker of its own and only appears under the
-`I:` prefix, then progressively weaker sources ending at yesterday's close.
-
-Adapted in two ways. The calls are async, because this process is an event loop
-rather than that project's threaded producer; and prices are `Decimal`, matching
-every other price in the domain model. The day high/low that project tracks are
-dropped — nothing here consumes them.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -36,22 +20,13 @@ from app.config import settings
 
 log = logging.getLogger("app.massive")
 
-# Both Massive and IBKR fallback observations share this session series. Each
-# row carries its own source, so the CSV never obscures provenance.
 SAMPLE_PREFIX = "market:underlying"
 CSV_FIELDS = ("timestamp_utc", "symbol", "price", "source")
 
 
 class RateLimited(Exception):
-    """The vendor refused for quota, not entitlement.
+    pass
 
-    Raised rather than returned because the loader chain must abort on it: every
-    further loader would spend another request against an already-empty budget.
-    Entry-level plans allow only a handful of requests a minute, so one 429 means
-    the whole cycle is over.
-    """
-
-#: Cash indices have no tradable ticker; Massive prefixes them with `I:`.
 INDEX_UNDERLYINGS = frozenset({"SPX", "NDX", "RUT", "VIX"})
 
 
@@ -61,11 +36,6 @@ def index_ticker(underlying: str) -> str | None:
 
 
 def ticker_matches(underlying: str, ticker: str) -> bool:
-    """Whether a snapshot row's ticker names this underlying.
-
-    A blank ticker counts as a match: some snapshot rows omit it, and the row
-    was already selected by an underlying-scoped path.
-    """
     ul, given = underlying.upper(), (ticker or "").upper()
     if not given or given == ul:
         return True
@@ -76,7 +46,6 @@ def ticker_matches(underlying: str, ticker: str) -> bool:
 @dataclass(frozen=True, slots=True)
 class Spot:
     price: Decimal
-    #: Which loader produced it, so a stale or surprising number is traceable.
     source: str
 
 
@@ -85,7 +54,6 @@ def _clock(value: str) -> time:
 
 
 def session_day(at: datetime) -> date:
-    """The New York trading date containing this timestamp."""
     return at.astimezone(ZoneInfo(settings.massive_session_timezone)).date()
 
 
@@ -107,7 +75,6 @@ def last_quote_key(symbol: str) -> str:
 
 
 async def record_sample(redis, symbol: str, spot: Spot, *, at: datetime | None = None) -> None:
-    """Append a session sample and retain it separately as the latest LTP."""
     moment = at or datetime.now(UTC)
     payload = {
         "timestamp_utc": moment.astimezone(UTC).isoformat(),
@@ -123,7 +90,6 @@ async def record_sample(redis, symbol: str, spot: Spot, *, at: datetime | None =
 
 
 async def last_spot(redis, symbol: str) -> Spot | None:
-    """Load the last valid stored observation, independent of session flushing."""
     raw = await redis.get(last_quote_key(symbol))
     if not raw:
         return None
@@ -137,7 +103,6 @@ async def last_spot(redis, symbol: str) -> Spot | None:
 
 
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
-    """Merge and atomically replace a session CSV."""
     path.parent.mkdir(parents=True, exist_ok=True)
     merged: dict[tuple[str, str, str, str], dict[str, str]] = {}
     if path.exists():
@@ -169,11 +134,6 @@ def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
 async def archive_due_samples(
     redis, symbol: str, *, at: datetime | None = None, directory: str | None = None
 ) -> list[Path]:
-    """Archive closed sessions and delete only their isolated sample keys.
-
-    A source key is renamed before it is read, so a late producer recreates the
-    source key rather than losing a sample between LRANGE and DELETE.
-    """
     moment = at or datetime.now(UTC)
     local = moment.astimezone(ZoneInfo(settings.massive_session_timezone))
     today = local.date()
@@ -192,7 +152,6 @@ async def archive_due_samples(
         try:
             await redis.rename(key, staging)
         except Exception as exc:
-            # Another collector may have moved the same global key first.
             if "no such key" in str(exc).lower():
                 continue
             raise
@@ -203,7 +162,6 @@ async def archive_due_samples(
         try:
             await asyncio.to_thread(_write_csv, target, rows)
         except Exception:
-            # Restore the batch for retry; never flush data before a durable CSV.
             await redis.rename(staging, key)
             raise
         await redis.delete(staging)
@@ -213,7 +171,6 @@ async def archive_due_samples(
 
 
 def _price(value: Any) -> Decimal | None:
-    """A positive Decimal, or None for anything unusable."""
     if value is None:
         return None
     try:
@@ -226,12 +183,6 @@ def _price(value: Any) -> Decimal | None:
 async def get_json(
     client: httpx.AsyncClient, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
-    """One authenticated GET. Returns None for anything but a 200 with JSON.
-
-    Every caller treats None as "this loader has nothing" and falls through to
-    the next one, so a vendor outage degrades to IB's own mark rather than
-    raising into the session.
-    """
     base = settings.massive_rest_url.rstrip("/")
     url = path if path.startswith("http") else f"{base}/{path.lstrip('/')}"
     query = {**(params or {}), "apiKey": settings.massive_api_key}
@@ -243,7 +194,6 @@ async def get_json(
     if response.status_code == 429:
         raise RateLimited(path)
     if response.status_code != 200:
-        # The key rides in the query string, so log the path only, never the URL.
         log.warning("massive.request_rejected path=%s status=%s", path, response.status_code)
         return None
     try:
@@ -267,7 +217,6 @@ async def _from_indices(client: httpx.AsyncClient, underlying: str) -> Spot | No
 
 
 async def _from_options(client: httpx.AsyncClient, underlying: str) -> Spot | None:
-    """The underlying price Massive stamps on an option chain snapshot."""
     body = await get_json(client, f"/v3/snapshot/options/{underlying.upper()}", {"limit": 50})
     for row in (body or {}).get("results") or []:
         asset = row.get("underlying_asset") or {}
@@ -293,14 +242,10 @@ async def _from_stocks(client: httpx.AsyncClient, underlying: str) -> Spot | Non
     return Spot(price, "stocks_snapshot") if price else None
 
 
-#: Non-index fallbacks, strongest source first. Configured cash-index option
-#: underlyings intentionally use only the option-chain snapshot: its documented
-#: `underlying_asset.price` supplies the RMS reference in one API request.
 NON_INDEX_LOADERS = (_from_options, _from_prev_close, _from_stocks)
 
 
 async def fetch_spot(client: httpx.AsyncClient, underlying: str) -> Spot | None:
-    """Fetch one option-chain snapshot for an index, or a non-index fallback."""
     if index_ticker(underlying):
         return await _from_options(client, underlying)
     for loader in NON_INDEX_LOADERS:

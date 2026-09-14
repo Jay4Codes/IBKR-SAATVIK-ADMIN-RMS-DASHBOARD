@@ -100,7 +100,6 @@ async def test_the_combined_line_adds_the_accounts_together(client, stores):
 
 
 async def test_a_day_missing_an_account_is_left_out_of_the_total(client, stores):
-    """A total that drops an account reads as a loss that never happened."""
     _, db = stores
     await snapshot(db, TENANT, "DU1", "2026-09-01", "100")
     await snapshot(db, TENANT, "DU2", "2026-09-01", "50")
@@ -220,7 +219,6 @@ async def test_intraday_skips_a_point_the_broker_never_valued(client, stores):
 
 
 async def test_intraday_excludes_a_flex_row(client, stores):
-    """Flex is a daily close; it has no place on an intraday curve."""
     _, db = stores
     await intraday_point(db, TENANT, "DU1", "09:35", "10")
     await snapshot(db, TENANT, "DU1", "2026-09-10", "5000", source="flex")

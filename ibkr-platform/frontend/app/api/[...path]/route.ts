@@ -2,7 +2,6 @@ import { type NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-/** Headers forwarded verbatim; anything else the browser sends is dropped. */
 const FORWARDED = ["cookie", "origin", "x-requested-with", "x-tenant"] as const;
 
 const WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
@@ -36,9 +35,6 @@ async function proxy(
       headers,
     });
 
-    // The login and tenant-switch responses each set a cookie; getSetCookie()
-    // keeps them as separate headers instead of folding them into one string,
-    // which browsers would parse as a single malformed cookie.
     const outgoing = new Headers({
       "content-type":
         response.headers.get("content-type") ?? "application/json",

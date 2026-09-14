@@ -48,7 +48,6 @@ async def test_immutable_fill_with_commission_enrichment(stores):
 
 
 async def test_same_fill_id_in_two_tenants_stays_two_records(stores):
-    """Broker identifiers are only unique within a broker, not across tenants."""
     _, db = stores
     data = {"execution_id": "shared", "account_id": "DU1", "price": "1"}
     event = Event(event_type="execution.created", account_id="DU1", data=data)
@@ -99,7 +98,6 @@ async def test_a_held_lease_stops_a_second_session(stores):
 
 
 async def test_leases_are_per_connection(stores):
-    """A gateway held for one tenant must not block another tenant's gateway."""
     redis, db = stores
     first = session(redis, db)
     assert await first.acquire()
@@ -355,6 +353,34 @@ async def test_a_broken_farm_degrades_until_it_reconnects(stores):
     assert worker.state.subscriptions == {"accounts": "ACTIVE", "positions": "ACTIVE"}
 
 
+async def test_restored_connectivity_does_not_tear_down_the_session(stores):
+    redis, db = stores
+    worker = session(redis, db)
+    worker.state.status = GatewayStatus.CONNECTED
+    worker.state.subscriptions = {"accounts": "ACTIVE", "positions": "ACTIVE"}
+    worker.broker_error(-1, 2103, "Market data farm connection is broken:usfarm", None)
+    worker.broker_error(-1, 2104, "Market data farm connection is OK:usfarm", None)
+    worker.broker_error(
+        -1,
+        1102,
+        "Connectivity between IBKR and Trader Workstation has been restored - data maintained.",
+        None,
+    )
+    assert not worker.fault.is_set()
+    assert worker.state.status == GatewayStatus.CONNECTED
+    assert worker.state.last_error is None
+    assert worker.state.subscriptions == {"accounts": "ACTIVE", "positions": "ACTIVE"}
+
+
+async def test_lost_connectivity_still_rebuilds_the_session(stores):
+    redis, db = stores
+    worker = session(redis, db)
+    worker.state.status = GatewayStatus.CONNECTED
+    worker.broker_error(-1, 1100, "Connectivity between IBKR and TWS has been lost.", None)
+    assert worker.fault.is_set()
+    assert worker.state.status == GatewayStatus.DEGRADED
+
+
 async def test_a_farm_notice_does_not_clear_a_real_error(stores):
     redis, db = stores
     worker = session(redis, db)
@@ -392,7 +418,6 @@ def tick(con_id, und_price, symbol="SPX", currency="USD"):
 
 
 def qualifying(ib):
-    """Make qualifyContractsAsync echo the contract back, exchange and all."""
     ib.qualifyContractsAsync = AsyncMock(side_effect=lambda contract: [contract])
     return ib
 
@@ -414,8 +439,6 @@ async def test_spx_uses_a_direct_index_market_data_line(stores):
     ib = qualifying(MagicMock())
     worker = session(redis, db, ib)
     worker.position_value(held(con_id=1))
-    # Do not depend on a single option leg receiving a model tick: SPX itself
-    # supplies the continuously updating RMS reference.
     assert worker.contracts[1].exchange == ""
     await worker.subscribe_underlyings()
     requested = ib.qualifyContractsAsync.call_args.args[0]
@@ -478,7 +501,7 @@ async def test_direct_index_tick_is_selected_for_spx(stores):
 async def test_queued_position_event_is_stamped_with_latest_stored_spx(stores):
     redis, db = stores
     worker = session(redis, db, qualifying(MagicMock()))
-    worker.position_value(held(con_id=1))  # queued before the LTP write completes
+    worker.position_value(held(con_id=1))
     await massive.record_sample(
         redis, "SPX", massive.Spot(Decimal("7673.13"), "ib_index_ltp")
     )
@@ -547,7 +570,6 @@ async def test_a_request_error_on_our_own_market_data_line_spares_the_gateway(st
     ib.wrapper.reqId2Ticker = {7: object()}
     worker = session(redis, db, ib)
     worker.state.status = GatewayStatus.CONNECTED
-    # 321 is a generic validation error; what makes it ours is the request id.
     worker.broker_error(7, 321, "Error validating request. cause - Please enter exchange", None)
     assert worker.state.status == GatewayStatus.CONNECTED
     assert worker.state.last_error is None

@@ -1,25 +1,3 @@
-"""Automated IB Gateway provisioning, one instance per broker connection.
-
-Adding a tenant's IBKR link is otherwise a manual host task: copy IBC, edit a
-config, pick a free port, write a systemd unit, remember which is which. This
-module does all of it from the connection document, so onboarding a client is an
-API call rather than an SSH session.
-
-Each managed connection gets its own directory under `GATEWAY_INSTANCE_ROOT`:
-
-    <root>/<connection id>/config.ini        IBC settings, 0600 (holds the login)
-    <root>/<connection id>/gatewaystart.sh   IBC launcher, header rewritten
-    <root>/<connection id>/settings/         TWS settings, private to the instance
-    /var/log/ibc/<connection id>/            IBC logs the login poller reads
-
-and runs under the templated unit `ibkr-gateway@<connection id>.service`.
-
-The launcher is copied and rewritten rather than driven by environment
-variables, because IBC's stock `gatewaystart.sh` **assigns** `IBC_INI` near the
-top of the file and so silently ignores an `IBC_INI` inherited from the unit —
-which would point every instance at the same config, and the same credentials.
-"""
-
 from __future__ import annotations
 
 import os
@@ -33,8 +11,6 @@ from fastapi import HTTPException
 from app import hostctl
 from app.config import settings
 
-#: Launcher variables rewritten per instance. Anything not listed keeps the
-#: template's value, so a host-specific TWS_PATH or JAVA_PATH survives.
 LAUNCHER_VARIABLES = ("IBC_INI", "LOG_PATH", "TWS_SETTINGS_PATH", "TRADING_MODE")
 
 UNIT_TEMPLATE = """\
@@ -62,18 +38,11 @@ KillSignal=SIGTERM
 WantedBy=multi-user.target
 """
 
-#: IBC settings every provisioned instance gets, whatever the template said.
 BASE_SETTINGS = {
-    # This platform is read-only throughout, and a read-only login skips the
-    # second factor entirely — which is what makes an unattended start possible.
-    # Set read_only_login=False on the connection to restore 2FA.
     "ReadOnlyLogin": "yes",
     "AcceptIncomingConnectionAction": "accept",
     "TrustedTwsApiClientIPs": "127.0.0.1",
-    # Reclaim the session rather than queueing behind a stale one.
     "ExistingSessionDetectedAction": "primary",
-    # Keep retrying after a second-factor timeout instead of exiting, so a
-    # missed push does not leave the instance dead until someone notices.
     "ReloginAfterSecondFactorAuthenticationTimeout": "yes",
     "ExitAfterSecondFactorAuthenticationTimeout": "no",
     "AcceptNonBrokerageAccountWarning": "yes",
@@ -86,7 +55,6 @@ def instance_root(connection_id: str) -> Path:
 
 
 def paths(connection_id: str) -> dict[str, str]:
-    """Where a managed instance's files live. Pure — creates nothing."""
     root = instance_root(connection_id)
     return {
         "ibc_config_path": str(root / "config.ini"),
@@ -98,12 +66,10 @@ def paths(connection_id: str) -> dict[str, str]:
 
 
 def rewrite_launcher(text: str, values: dict[str, str]) -> str:
-    """Point a copy of IBC's launcher at one instance's own files."""
     return hostctl.apply_settings(text, {k: v for k, v in values.items() if k in LAUNCHER_VARIABLES})
 
 
 def _template_launcher() -> str:
-    """The stock launcher to copy, taken from beside the template config."""
     candidate = Path(settings.gateway_template_config).parent / "gatewaystart.sh"
     try:
         return candidate.read_text()
@@ -137,12 +103,6 @@ def build_config(
     second_factor_device: str | None = None,
     two_factor_timeout: int | None = None,
 ) -> str:
-    """Render one instance's IBC config from the template.
-
-    A connection may be provisioned before its credentials are known; the login
-    fields are then left blank rather than inherited from the template, so a new
-    tenant's gateway can never start up under another tenant's IBKR login.
-    """
     values = dict(BASE_SETTINGS)
     values["OverrideTwsApiPort"] = str(port)
     values["TradingMode"] = trading_mode
@@ -167,11 +127,6 @@ def _require_enabled() -> None:
 
 
 def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict[str, str]:
-    """Create or refresh one connection's IBC directory. Blocking; run in a thread.
-
-    Idempotent: re-provisioning an existing instance rewrites its config and
-    launcher and leaves its settings directory and logs alone.
-    """
     _require_enabled()
     connection_id = doc["_id"]
     layout = paths(connection_id)
@@ -180,8 +135,6 @@ def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict
     template = _template_config()
     launcher = _template_launcher()
 
-    # Preserve a password already written to this instance's config: rewriting
-    # the file for a port or mode change must not silently blank the login.
     existing_password = password
     if existing_password is None and os.path.exists(layout["ibc_config_path"]):
         existing_password = hostctl.read_setting("IbPassword", layout["ibc_config_path"])
@@ -220,13 +173,7 @@ def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict
 
 
 def write_unit_template() -> str:
-    """Install the `ibkr-gateway@.service` template unit. Blocking.
-
-    One template serves every instance; `%i` is the connection id.
-    """
     _require_enabled()
-    # systemd names a template unit by its instance-less filename: formatting
-    # the configured pattern with an empty instance yields "ibkr-gateway@.service".
     path = Path("/etc/systemd/system") / settings.gateway_instance_unit.format(instance="")
     body = UNIT_TEMPLATE.format(
         root=settings.gateway_instance_root, logs=settings.gateway_log_root
@@ -238,7 +185,6 @@ def write_unit_template() -> str:
 
 
 def remove_files(doc: dict[str, Any]) -> None:
-    """Delete a managed instance's directory. Never touches an adopted one."""
     if not doc.get("managed", True):
         return
     shutil.rmtree(instance_root(doc["_id"]), ignore_errors=True)

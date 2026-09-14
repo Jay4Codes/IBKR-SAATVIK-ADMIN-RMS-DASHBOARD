@@ -1,21 +1,3 @@
-"""SnapTrade provider: a brokerage link that needs no gateway process.
-
-SnapTrade aggregates brokerage connections (Interactive Brokers among them)
-behind one REST API, so a client can be onboarded by clicking through a hosted
-consent screen instead of handing over IBKR credentials and waiting for a
-gateway to be provisioned. It is a *polling* source — there is no streaming
-socket — so the session refreshes on an interval rather than reacting to
-callbacks.
-
-Requests are signed the way SnapTrade requires: `clientId` and a millisecond
-`timestamp` on the query string, plus a `Signature` header carrying an
-HMAC-SHA256 of the canonical request under the partner consumer key.
-
-The provider stays unavailable until `SNAPTRADE_CLIENT_ID` and
-`SNAPTRADE_CONSUMER_KEY` are configured — half-configured would mean silent
-failures at 3am rather than a clear message at setup time.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -47,12 +29,6 @@ def require_configured() -> None:
 
 
 def sign(path: str, query: dict[str, str], body: Any | None) -> str:
-    """SnapTrade's request signature.
-
-    The signed content is a JSON object of the request's content, path, and
-    query, serialised with sorted keys and no whitespace, HMAC-SHA256 under the
-    consumer key, base64url encoded.
-    """
     content = json.dumps(
         {"content": body, "path": path, "query": "&".join(f"{k}={v}" for k, v in sorted(query.items()))},
         separators=(",", ":"),
@@ -65,7 +41,6 @@ def sign(path: str, query: dict[str, str], body: Any | None) -> str:
 
 
 class SnapTradeClient:
-    """Thin signed-REST client. One instance per broker connection."""
 
     def __init__(self, user_id: str | None = None, user_secret: str | None = None, client: Any = None):
         require_configured()
@@ -118,17 +93,11 @@ class SnapTradeClient:
         return response.json() if response.content else None
 
     async def register_user(self, user_id: str) -> dict[str, Any]:
-        """Create the SnapTrade user backing one connection.
-
-        Returns the `userSecret`, which is the only credential that can act for
-        that user; it is stored encrypted and never returned by this API.
-        """
         return await self.request(
             "POST", "/snapTrade/registerUser", body={"userId": user_id}, authenticated=False
         )
 
     async def login_link(self, redirect_uri: str | None = None) -> str:
-        """A one-time hosted-consent URL for the client to link their brokerage."""
         body: dict[str, Any] = {}
         target = redirect_uri or settings.snaptrade_redirect_uri
         if target:
@@ -177,7 +146,6 @@ def _decimal(value: Any) -> Decimal | None:
 
 
 def _symbol(row: dict[str, Any]) -> dict[str, Any]:
-    """SnapTrade nests the instrument differently per endpoint; normalise it."""
     symbol = row.get("symbol") or {}
     if isinstance(symbol, dict):
         inner = symbol.get("symbol")
@@ -189,13 +157,6 @@ def _symbol(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_account(row: dict[str, Any], balances: list[dict[str, Any]]) -> AccountState:
-    """Map a SnapTrade account and its balances onto this platform's domain.
-
-    SnapTrade reports far less than IBKR's account summary: margin figures and
-    buying power are frequently absent. They stay `None` rather than being
-    invented, and the dashboard renders a blank the same way it does for an
-    IBKR valuation the broker declined to supply.
-    """
     totals = row.get("balance") or {}
     currency = "USD"
     cash = None
@@ -221,8 +182,6 @@ def normalize_position(account_id: str, row: dict[str, Any]) -> Position:
     average = _decimal(row.get("average_purchase_price")) or Decimal(0)
     return Position(
         account_id=account_id,
-        # SnapTrade has no IBKR conId; a stable hash of its symbol id keeps the
-        # positive-integer identity the rest of the platform indexes on.
         con_id=abs(hash(str(symbol.get("id") or symbol.get("symbol") or ""))) % (2**31),
         symbol=str(symbol.get("symbol") or ""),
         local_symbol=str(symbol.get("description") or ""),
@@ -244,8 +203,6 @@ def normalize_order(account_id: str, row: dict[str, Any], index: int) -> Order:
     return Order(
         account_id=account_id,
         order_id=index,
-        # SnapTrade order ids are opaque strings; the platform's order identity
-        # is a positive integer, so a stable hash stands in for the permId.
         perm_id=abs(hash(str(row.get("brokerage_order_id") or index))) % (2**31),
         client_id=0,
         con_id=abs(hash(str(symbol.get("id") or symbol.get("symbol") or ""))) % (2**31),

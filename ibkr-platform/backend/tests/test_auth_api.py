@@ -145,7 +145,6 @@ async def test_live_visibility_requires_correlated_quantity_change(client, store
 
 
 async def test_tenant_data_never_crosses_the_boundary(client):
-    """The other tenant's account exists, and is invisible from this one."""
     assert {a["account_id"] for a in (await client.get("/api/v1/accounts")).json()["data"]} == {"DU1", "DU2"}
     assert (await client.get("/api/v1/accounts/DU9")).status_code == 404
 
@@ -157,7 +156,6 @@ async def test_tenant_data_never_crosses_the_boundary(client):
 
 
 async def test_membership_is_required_to_name_a_tenant(client):
-    """Naming another tenant's id does not grant access to it."""
     client.cookies.set(COOKIE, "TRADER")
     client.cookies.set(TENANT_COOKIE, OTHER_TENANT)
     response = await client.get("/api/v1/accounts")
@@ -191,6 +189,4 @@ async def test_suspended_tenant_is_refused(client, stores):
     client.cookies.set(COOKIE, "TRADER")
     await db.tenants.update_one({"_id": TENANT}, {"$set": {"status": "SUSPENDED"}})
     response = await client.get("/api/v1/accounts")
-    # With its only tenant suspended, the membership disappears and there is
-    # nothing left to act inside.
     assert response.status_code == 403

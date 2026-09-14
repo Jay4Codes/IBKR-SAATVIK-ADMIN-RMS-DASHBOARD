@@ -25,13 +25,6 @@ function since(days: number): string | undefined {
   return from.toISOString().slice(0, 10);
 }
 
-/** Net liquidation over time, per account and combined.
- *
- *  Two sources feed this: the worker's own snapshots from the day it was
- *  switched on, and an IBKR Flex backfill of the broker's daily figures from
- *  before that. The API resolves which one owns a date, so a curve can cross
- *  the boundary without a step.
- */
 export function PerformancePanel({
   accountId,
   accounts,
@@ -87,9 +80,6 @@ export function PerformancePanel({
     return { absolute: last.minus(first), percent: last.minus(first).div(first).mul(100) };
   })();
 
-  /* Flex is the only source of anything from before the first snapshot, and
-     IBKR rate-limits statement requests hard, so this is a deliberate action
-     rather than something the page does on its own. */
   const backfill = useMutation({
     mutationFn: () => api<{ written: number; points: number }>("/admin/history/backfill", {}),
     onSuccess: () => client.invalidateQueries({ queryKey: ["history"] }),
@@ -127,8 +117,6 @@ export function PerformancePanel({
         </p>
       )}
       <div className="risk-controls">
-        {/* Not a <label>: it labels a group of buttons, not one control, and
-            wrapping them swallowed their accessible names. */}
         <div className="control-group">
           <span className="control-caption">Range</span>
           <span className="tabs range-tabs" role="tablist" aria-label="History range">
@@ -169,7 +157,6 @@ export function PerformancePanel({
                   setChosen((current) => {
                     const base = current.length ? current : accounts;
                     const next = event.target.checked ? [...base, id] : base.filter((a) => a !== id);
-                    // Empty means "everything", so never store an empty list.
                     return next.length ? [...new Set(next)] : accounts;
                   })
                 }

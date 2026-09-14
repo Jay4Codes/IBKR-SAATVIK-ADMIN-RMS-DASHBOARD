@@ -67,7 +67,6 @@ async def test_unbound_manual_orders_do_not_collide(repo):
 
 
 async def test_two_tenants_never_share_live_state(stores):
-    """The same account identifier in two tenants must stay two separate rows."""
     redis, _ = stores
     one = StateRepository(redis, TENANT, CONNECTION)
     two = StateRepository(redis, OTHER_TENANT, OTHER_CONNECTION)
@@ -81,13 +80,11 @@ async def test_two_tenants_never_share_live_state(stores):
         )
     assert (await one.rows("DU1", "positions"))[0]["quantity"] == "5"
     assert (await two.rows("DU1", "positions"))[0]["quantity"] == "9"
-    # Each tenant's stream carries only its own events.
     assert len(await redis.xrange(one.keys.events)) == 1
     assert len(await redis.xrange(two.keys.events)) == 1
 
 
 async def test_reconciliation_only_drops_the_reporting_connection_accounts(stores):
-    """One connection going quiet must not erase a sibling connection's accounts."""
     redis, _ = stores
     first = StateRepository(redis, TENANT, CONNECTION)
     second = StateRepository(redis, TENANT, OTHER_CONNECTION)

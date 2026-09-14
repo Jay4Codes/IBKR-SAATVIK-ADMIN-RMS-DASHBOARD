@@ -105,7 +105,6 @@ async def test_members_are_managed_within_the_active_tenant(client, stores):
     assert added.status_code == 200
     member = await db.tenant_members.find_one({"tenant_id": TENANT, "user_id": "OUTSIDER"})
     assert member["role"] == "TRADER" and member["accounts"] == ["DU2"]
-    # The grant is scoped: their membership of the other tenant is untouched.
     assert await db.tenant_members.find_one({"tenant_id": OTHER_TENANT, "user_id": "OUTSIDER"})
 
 

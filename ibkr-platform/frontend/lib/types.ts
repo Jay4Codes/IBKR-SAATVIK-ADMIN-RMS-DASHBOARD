@@ -19,15 +19,12 @@ export type Account = {
 };
 export type Gateway = {
   status: string;
-  /** Null until the tenant has registered a broker connection. */
   connection_id?: string | null;
   connection_name?: string;
   provider?: Provider;
   configured?: boolean;
-  /** False for a gateway adopted from a pre-tenancy install. */
   managed?: boolean;
   service_unit?: string;
-  /** A read-only login skips IBKR's second factor, so no push is coming. */
   read_only_login?: boolean;
   host?: string;
   port?: number;
@@ -66,8 +63,8 @@ export type Position = {
   market_value: Money;
   unrealized_pnl: Money;
   underlying_price?: Money;
-  /** Which feed produced `underlying_price`: a Massive loader name, or "ib_und_price". */
   underlying_source?: string;
+  underlying_prev_close?: Money;
 };
 export type Order = {
   account_id: string;
@@ -93,6 +90,7 @@ export type Execution = {
   price: string;
   commission?: Money;
   realized_pnl?: Money;
+  multiplier?: Money;
   exchange: string;
   order_id: number;
   executed_at: string;
@@ -100,13 +98,11 @@ export type Execution = {
 export type User = {
   id: string;
   email: string;
-  /** Effective role inside the active tenant, collapsed for the dashboard. */
   role: "ADMIN" | "TRADER";
   is_super_admin: boolean;
   accounts: string[];
   tenant: Tenant | null;
   tenants: Tenant[];
-  /** True when a super admin is acting inside a tenant they do not belong to. */
   impersonating: boolean;
 };
 export type LiveEvent = {
@@ -126,7 +122,6 @@ export type Tenant = {
   status: "ACTIVE" | "SUSPENDED";
   role: TenantRole;
   accounts: string[];
-  /** False when a super admin is listing a tenant they do not belong to. */
   member?: boolean;
 };
 
@@ -157,7 +152,6 @@ export type Connection = {
   name: string;
   provider: Provider;
   status: "DRAFT" | "ENABLED" | "DISABLED";
-  /** False for a gateway adopted from a pre-tenancy install; its files are left alone. */
   managed: boolean;
   host: string;
   api_port: number;
@@ -178,7 +172,6 @@ export type SnapTradeAuthorization = {
   disabled: boolean;
 };
 
-/** One account's net liquidation on one report date. */
 export type HistoryPoint = {
   account_id: string;
   report_date: string;
@@ -188,7 +181,6 @@ export type HistoryPoint = {
   cash?: string | null;
   realized_pnl?: string | null;
   unrealized_pnl?: string | null;
-  /** "snapshot" when this platform recorded it, "flex" when the broker did. */
   source: string;
 };
 
@@ -203,6 +195,26 @@ export type IntradayResponse = {
   accounts: string[];
   series: (HistoryPoint & { day_pnl: string | null })[];
   combined: { taken_at: string; accounts: number; day_pnl: string }[];
+};
+
+export type RealizedSummary = {
+  total: string;
+  commission: string;
+  count: number;
+  by_account: { account_id: string; realized_pnl: string }[];
+  legs: {
+    symbol: string | null;
+    underlying: string | null;
+    currency: string | null;
+    expiry: string | null;
+    account_id: string;
+    side: string | null;
+    quantity: string;
+    price: string;
+    realized_pnl: string;
+    commission: string;
+    executed_at: string | null;
+  }[];
 };
 
 export type CommissionSummary = {

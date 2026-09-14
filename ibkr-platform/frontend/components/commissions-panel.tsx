@@ -5,7 +5,6 @@ import { api } from "@/lib/api";
 import { CommissionSummary } from "@/lib/types";
 import { money } from "./tables";
 
-/** How much has been spent in commissions, scoped to one account or the desk. */
 export function CommissionsPanel({ accountId }: { accountId?: string }) {
   const path = accountId ? `/accounts/${accountId}/commissions` : "/commissions";
   const commissions = useQuery({

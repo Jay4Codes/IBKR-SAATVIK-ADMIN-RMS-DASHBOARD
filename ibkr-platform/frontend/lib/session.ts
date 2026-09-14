@@ -1,20 +1,3 @@
-/**
- * Server-side route protection.
- *
- * The API guards every endpoint, so an unauthenticated visitor could never read
- * data — but until this existed the pages themselves rendered for anyone, and
- * the bounce to /login only happened once a client-side fetch came back 401.
- * That put the whole operations UI, diagnostics included, on the public web and
- * made "am I signed in?" a question the browser answered.
- *
- * These helpers answer it on the server, before a protected page renders, by
- * asking the API who the caller is. A cookie is not treated as proof: only a
- * session the API still recognises counts, so a revoked or expired session is
- * turned away on the next navigation rather than after a failed fetch.
- */
-// No `server-only` guard: it is not a dependency here, and importing
-// `next/headers` already makes this module fail to build inside a client
-// component, which is the same protection.
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -30,16 +13,6 @@ export type Principal = {
   impersonating: boolean;
 };
 
-/**
- * A post-sign-in destination that cannot leave this origin.
- *
- * `next` reaches us from a URL the visitor controls, and handing it to
- * `redirect()` unchecked turns the login page into an open redirect. Only a
- * single-slash absolute path survives: `//evil.com` and `/\evil.com` are both
- * protocol-relative URLs in a browser, and a backslash is a slash to some
- * parsers, so anything past the first character that is not a path character
- * is rejected outright.
- */
 export function safeNext(next: string | undefined, fallback = "/dashboard"): string {
   if (!next || !next.startsWith("/")) return fallback;
   if (next.startsWith("//") || next.startsWith("/\\")) return fallback;
@@ -54,12 +27,6 @@ export function loginUrl(pathname: string, search = ""): string {
     : `/login?next=${encodeURIComponent(target)}`;
 }
 
-/**
- * The signed-in caller, or null. Never throws: an API that is down or slow
- * leaves the visitor unauthenticated, which the callers below turn into a
- * redirect to /login. Failing closed is the only safe direction here — a
- * 502 must not become "render the admin page".
- */
 export async function sessionPrincipal(): Promise<Principal | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -82,7 +49,6 @@ export async function sessionPrincipal(): Promise<Principal | null> {
   }
 }
 
-/** Gate a page on being signed in. Redirects to /login when not. */
 export async function requireSession(
   pathname: string,
   search = "",
@@ -92,11 +58,6 @@ export async function requireSession(
   return principal;
 }
 
-/**
- * Gate a page on tenant administration — the same bar
- * `require_tenant_admin` sets on the endpoints these pages call, so the UI
- * stops offering a screen whose every request would come back 403.
- */
 export async function requireTenantAdmin(
   pathname: string,
   search = "",

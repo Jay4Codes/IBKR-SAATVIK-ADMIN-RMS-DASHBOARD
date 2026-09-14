@@ -1,20 +1,3 @@
-/** CBOE index-option trading sessions, and how long until the next boundary.
- *
- *  The desk trades SPX, so the clock that matters is Cboe's index-option
- *  session rather than the equity market's:
- *
- *    Global Trading Hours   20:15 → 09:15 ET, Sunday evening to Friday morning
- *    Regular Trading Hours  09:30 → 16:15 ET, weekdays
- *
- *  Index options run fifteen minutes past the equity close, and the two sessions
- *  do not touch — there is a fifteen-minute gap before the open and just over
- *  four hours after the close. Early-close days end RTH at 13:15.
- *
- *  Holiday and early-close dates are the tables the US-Trading-Infra project
- *  maintains for the same desk, so both systems agree on which days are dark.
- *  They are literal dates and need extending each year.
- */
-
 export const ET_ZONE = "America/New_York";
 
 export const FULL_HOLIDAYS = new Set([
@@ -28,7 +11,6 @@ export const EARLY_CLOSE = new Set([
   "2025-07-03", "2025-11-28", "2025-12-24", "2026-11-27", "2026-12-24",
 ]);
 
-/** Minutes past ET midnight. */
 const GTH_OPEN = 20 * 60 + 15;
 const GTH_CLOSE = 9 * 60 + 15;
 const RTH_OPEN = 9 * 60 + 30;
@@ -39,19 +21,14 @@ export type Session = "rth" | "gth" | "closed";
 
 export type MarketState = {
   session: Session;
-  /** What to call the session in the header. */
   label: string;
-  /** Whether the countdown is to a close (open now) or to an open. */
   openNow: boolean;
-  /** Milliseconds until the session ends, or until the next one begins. */
   until: number;
-  /** The boundary being counted down to, as an ET wall-clock time. */
   atLabel: string;
 };
 
 type EtNow = { date: string; minutes: number; weekday: number };
 
-/** The ET wall clock for an instant: its calendar date, minute of day and weekday. */
 export function etNow(at: number): EtNow {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: ET_ZONE,
@@ -74,14 +51,12 @@ export function etNow(at: number): EtNow {
   };
 }
 
-/** How far ET is from UTC at this instant, in minutes. */
 function etOffset(at: number): number {
   const et = new Date(new Date(at).toLocaleString("en-US", { timeZone: ET_ZONE }));
   const utc = new Date(new Date(at).toLocaleString("en-US", { timeZone: "UTC" }));
   return Math.round((et.getTime() - utc.getTime()) / 60000);
 }
 
-/** The instant of an ET wall-clock time, `addDays` after the ET date of `at`. */
 function instantAt(at: number, minutes: number, addDays = 0): number {
   const { date } = etNow(at);
   const [year, month, day] = date.split("-").map(Number);
@@ -101,7 +76,6 @@ function clock(minutes: number): string {
   return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** Days ahead (1-7) of the next day that trades RTH. */
 function nextTradingDay(at: number): number {
   for (let ahead = 1; ahead <= 8; ahead += 1) {
     const probe = etNow(at + ahead * 86400000);
@@ -110,7 +84,6 @@ function nextTradingDay(at: number): number {
   return 1;
 }
 
-/** Which session is running, and how long until that changes. */
 export function marketState(at: number = Date.now()): MarketState {
   const { date, minutes, weekday } = etNow(at);
   const trading = isTradingDay(date, weekday);
@@ -126,8 +99,6 @@ export function marketState(at: number = Date.now()): MarketState {
     };
   }
 
-  // GTH runs overnight, so before 09:15 it belongs to the session that opened
-  // the evening before — which only counts if that evening actually traded.
   const yesterday = etNow(at - 86400000);
   if (minutes < GTH_CLOSE && isTradingDay(yesterday.date, yesterday.weekday) && trading) {
     return {
@@ -139,7 +110,6 @@ export function marketState(at: number = Date.now()): MarketState {
     };
   }
   if (minutes >= GTH_OPEN && trading) {
-    // The evening session belongs to the next day's trading.
     const ahead = nextTradingDay(at);
     return {
       session: "gth",
@@ -150,7 +120,6 @@ export function marketState(at: number = Date.now()): MarketState {
     };
   }
 
-  // Closed: count down to whichever opens next.
   if (trading && minutes < RTH_OPEN) {
     return {
       session: "closed",
@@ -170,8 +139,6 @@ export function marketState(at: number = Date.now()): MarketState {
     };
   }
   const ahead = nextTradingDay(at);
-  // The evening before the next trading day opens GTH, unless today already
-  // passed its own evening open without trading (a weekend or holiday).
   const eveningBefore = instantAt(at, GTH_OPEN, ahead - 1);
   const target = eveningBefore > at ? eveningBefore : instantAt(at, RTH_OPEN, ahead);
   return {
@@ -183,7 +150,6 @@ export function marketState(at: number = Date.now()): MarketState {
   };
 }
 
-/** A countdown a trader can read at a glance: 4h 12m, 12m 30s, 45s. */
 export function countdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(total / 3600);
@@ -195,5 +161,4 @@ export function countdown(ms: number): string {
   return `${seconds}s`;
 }
 
-/** True once a close is near enough to matter to someone holding risk. */
 export const CLOSING_SOON = 30 * 60 * 1000;

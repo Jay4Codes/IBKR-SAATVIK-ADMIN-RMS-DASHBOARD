@@ -4,13 +4,6 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
-/**
- * Buttons are styled from the same design tokens as inputs and selects (see
- * `app/globals.css`), not from Tailwind's palette. Hard-coded utility colours
- * looked right in the dark theme and unreadable in the light one, and a
- * `rounded-lg`/`h-10` button never lined up with a `--control-height` input
- * sitting beside it in a form row.
- */
 const buttonVariants = cva("btn", {
   variants: {
     variant: {

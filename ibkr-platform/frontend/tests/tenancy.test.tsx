@@ -87,8 +87,6 @@ describe("tenant switcher", () => {
   });
 
   it("switches through the API rather than assuming the change locally", async () => {
-    // The switcher reloads so nothing from the previous tenant survives; jsdom
-    // has no navigation, so stub it rather than let it warn.
     const reload = vi.fn();
     Object.defineProperty(window, "location", {
       configurable: true,
@@ -145,8 +143,6 @@ describe("broker connections", () => {
   });
 
   it("creates a gateway connection with the chosen options", async () => {
-    // Routed by path: the list refetch that follows the create must still get a
-    // list, not the newly created row.
     apiMock.mockImplementation((path: string, body?: unknown) =>
       path === "/connections" && body !== undefined
         ? Promise.resolve(connection({ id: "c2", api_port: 4102 }))

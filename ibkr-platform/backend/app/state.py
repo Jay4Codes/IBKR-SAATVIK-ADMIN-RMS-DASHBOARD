@@ -1,10 +1,3 @@
-"""Live state and the event stream, namespaced per tenant.
-
-Every key is derived from a `TenantKeys` built at construction, so a repository
-handed to one tenant's request or worker session physically cannot address
-another tenant's live state.
-"""
-
 import json
 from datetime import datetime
 
@@ -13,8 +6,6 @@ from app.tenancy import TenantKeys
 
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 
-#: A worker heartbeat older than this means the session is no longer proving
-#: itself alive, whatever the last state it managed to publish said.
 STALE_HEARTBEAT_SECONDS = 35
 
 
@@ -35,11 +26,6 @@ class StateRepository:
         return chosen
 
     async def publish(self, event: Event, connection_id: str | None = None):
-        """Apply one event to live state and append it to the tenant's stream.
-
-        The state write and the stream append share a transaction, so a reader
-        never sees a stream entry describing state that was not written.
-        """
         connection = self._connection(connection_id)
         data = event.data
         account = event.account_id
@@ -48,10 +34,6 @@ class StateRepository:
             if event.event_type.startswith("gateway."):
                 pipe.set(keys.gateway(connection), json.dumps(data))
             elif event.event_type == "accounts.reconciled":
-                # Reconciliation is scoped to the connection that reported it:
-                # accounts belonging to the tenant's *other* connections must
-                # survive, so only this connection's departed accounts are
-                # dropped from the tenant-wide set.
                 current = set(data["accounts"])
                 dropped = set(await self.redis.smembers(keys.connection_accounts(connection))) - current
                 if dropped:
@@ -110,11 +92,6 @@ class StateRepository:
         await self.redis.delete(self.keys.login(connection_id))
 
     async def stream_gateway(self, connection_id: str, state: dict):
-        """Push a gateway change onto the stream without rewriting worker state.
-
-        The login poller and the worker each own half of the gateway picture;
-        this lets the poller announce its half without clobbering the other.
-        """
         event = Event(event_type="gateway.login", account_id="*", data=state)
         await self.redis.xadd(
             self.keys.events, {"event": event.model_dump_json(), "connection_id": connection_id}

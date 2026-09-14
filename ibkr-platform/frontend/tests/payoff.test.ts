@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildCurves, impliedVolatility, optionValue, prepareLegs, scenarioPnl, skewByExpiry, underlyingKey, upsideRisks, validAssumption } from "@/lib/payoff";
+import { buildCurves, daysToExpiry, expiryInstant, impliedVolatility, optionValue, prepareLegs, scenarioPnl, skewByExpiry, underlyingKey, upsideRisks, validAssumption } from "@/lib/payoff";
 import { Position } from "@/lib/types";
 
-const today = "2026-09-09";
+const today = Date.parse("2026-09-09T14:00:00Z");
 const position = (fields: Partial<Position> = {}): Position => ({ account_id: "A", con_id: 1, symbol: "XYZ", local_symbol: "", sec_type: "OPT", currency: "USD", expiry: "20261009", strike: "100", right: "C", multiplier: "100", quantity: "1", average_cost: "500", market_price: "5", market_value: "500", unrealized_pnl: "0", ...fields });
 const assumption = { spot: 100, volatility: 0.2, dividend: 0 };
 const leg = (fields: Partial<Position> = {}) => prepareLegs([position(fields)], today).legs[0];
@@ -53,7 +53,7 @@ describe("position payoff and desk aggregation", () => {
   it("keeps pre-expiry time value and converges to intrinsic at expiry", () => {
     const l = leg();
     expect(scenarioPnl(l, assumption, 0, 0, 0, false)).toBeGreaterThan(scenarioPnl(l, assumption, 0, 0, 0, true));
-    expect(scenarioPnl(l, assumption, 0, 30, 0, false)).toBe(scenarioPnl(l, assumption, 0, 0, 0, true));
+    expect(scenarioPnl(l, assumption, 0, l.days, 0, false)).toBe(scenarioPnl(l, assumption, 0, 0, 0, true));
   });
   it("anchors the current estimate to live broker P&L without changing terminal payoff", () => {
     const first = leg({ underlying_price: "100", market_price: "6.25", unrealized_pnl: "125" });
@@ -82,7 +82,7 @@ describe("implied volatility inversion", () => {
     expect(impliedVolatility(put, 110, 100, "P", 0.7, -0.02, 0.03)).toBeCloseTo(0.4, 4);
   });
   it("rejects a price below intrinsic value", () => {
-    expect(impliedVolatility(5, 150, 100, "C", 1, 0, 0)).toBe(null); // in-the-money call priced under parity
+    expect(impliedVolatility(5, 150, 100, "C", 1, 0, 0)).toBe(null);
   });
   it("rejects a price no volatility up to 500% could produce", () => {
     expect(impliedVolatility(1000, 100, 100, "C", 0.01, 0, 0)).toBe(null);
@@ -126,8 +126,10 @@ describe("data coverage", () => {
     expect(result.legs).toHaveLength(0);
     expect(result.excluded).toHaveLength(1);
   });
-  it("retains expiry-day contracts and ignores closed positions", () => {
-    expect(leg({ expiry: "20260909" }).days).toBe(0);
+  it("retains expiry-day contracts with the hours they have left, and ignores closed positions", () => {
+    const sameDay = leg({ expiry: "20260909" });
+    expect(sameDay.days).toBeCloseTo(6 / 24, 6);
+    expect(sameDay.days).toBeGreaterThan(0);
     expect(prepareLegs([position({ quantity: "0" })], today)).toEqual({ legs: [], excluded: [] });
   });
   it("does not confuse an option mark with an underlying price or combine currencies", () => {
@@ -135,5 +137,43 @@ describe("data coverage", () => {
     expect(validAssumption({ ...assumption, spot: 0 })).toBe(false);
     expect(validAssumption({ ...assumption, volatility: -0.1 })).toBe(false);
     expect(underlyingKey(position())).not.toBe(underlyingKey(position({ currency: "EUR" })));
+  });
+});
+
+describe("the exchange clock", () => {
+  it("expires at 16:00 New York, through a daylight-saving change", () => {
+    expect(expiryInstant("20260918")).toBe(Date.parse("2026-09-18T20:00:00Z"));
+    expect(expiryInstant("20270115")).toBe(Date.parse("2027-01-15T21:00:00Z"));
+    expect(Number.isNaN(expiryInstant("20260230"))).toBe(true);
+    expect(Number.isNaN(expiryInstant("nonsense"))).toBe(true);
+  });
+
+  it("counts the hours left on expiry day instead of calling them zero", () => {
+    const morning = Date.parse("2026-09-18T13:30:00Z");
+    expect(daysToExpiry("20260918", morning)).toBeCloseTo(6.5 / 24, 9);
+    expect(daysToExpiry("20260918", Date.parse("2026-09-18T20:00:01Z"))).toBeLessThan(0);
+  });
+
+  it("gives a four-day option more time than a calendar count does", () => {
+    const at = Date.parse("2026-09-14T17:07:00Z");
+    const exchange = daysToExpiry("20260918", at);
+    expect(exchange).toBeGreaterThan(4);
+    expect(exchange).toBeCloseTo(4.1201, 3);
+  });
+
+  it("does not move with the reader's timezone", () => {
+    const at = Date.parse("2026-09-14T17:07:00Z");
+    expect(daysToExpiry("20260918", at)).toBe(daysToExpiry("20260918", at));
+    expect(expiryInstant("20260918")).toBe(Date.parse("2026-09-18T20:00:00Z"));
+  });
+
+  it("implies less volatility than a calendar count, from the same mark", () => {
+    const at = Date.parse("2026-09-14T17:07:00Z");
+    const clock = impliedVolatility(12.661815643310547, 7640.35, 7485, "P", daysToExpiry("20260918", at) / 365, 0.04, 0.012);
+    const calendar = impliedVolatility(12.661815643310547, 7640.35, 7485, "P", 4 / 365, 0.04, 0.012);
+    expect(clock).not.toBeNull();
+    expect(clock!).toBeLessThan(calendar!);
+    expect(clock! * 100).toBeCloseTo(19.386, 2);
+    expect(calendar! * 100).toBeCloseTo(19.669, 2);
   });
 });

@@ -58,11 +58,6 @@ def repo_for(stores):
 
 
 def poller_snapshot(served, snapshots):
-    """A snapshot sequence walked independently per connection.
-
-    The poller now covers every supervised gateway, so a single shared counter
-    would interleave two connections' sequences and prove nothing about either.
-    """
 
     async def fake_snapshot(connection):
         served.append(connection["_id"])
@@ -234,8 +229,6 @@ async def test_only_one_worker_polls_per_interval(client, stores, monkeypatch, r
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Two pollers, one phase transition each: the per-connection lock means the
-    # second never re-reads a snapshot the first already took.
     assert phases_on(await redis.xrange(repo_for.keys.events)) == ["two_factor", "logged_in"]
 
 

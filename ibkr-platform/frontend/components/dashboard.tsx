@@ -87,9 +87,7 @@ type View =
 type NavItem = {
   view: View;
   icon: typeof LayoutGrid;
-  /** Tenant administrators only. */
   admin?: boolean;
-  /** Platform administrators only. */
   platform?: boolean;
 };
 
@@ -97,10 +95,10 @@ const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Monitor",
     items: [
+      { view: "RMS", icon: Activity },
       { view: "Overview", icon: LayoutGrid },
       { view: "Accounts", icon: Wallet },
       { view: "Positions", icon: LineChart },
-      { view: "RMS", icon: Activity },
       { view: "Skew", icon: Waves },
       { view: "Orders", icon: ListChecks },
       { view: "Executions", icon: Receipt },
@@ -121,13 +119,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
 
 const VIEWS = NAV.flatMap((section) => section.items.map((item) => item.view));
 
-/** An account's sections, shown one at a time instead of stacked end to end.
- *  Ids match the sidebar's view names where they overlap, so "RMS" means the
- *  same thing on the desk and inside an account. */
-const ACCOUNT_TABS = ["Summary", "Positions", "RMS", "Skew", "Performance", "Orders", "Executions", "Commissions"] as const;
+const ACCOUNT_TABS = ["RMS", "Summary", "Positions", "Skew", "Performance", "Orders", "Executions", "Commissions"] as const;
 type AccountTab = (typeof ACCOUNT_TABS)[number];
 
-/** The same glyph the sidebar uses, so a tab and its nav item read as one thing. */
 const TAB_ICONS: Record<AccountTab, typeof LayoutGrid> = {
   Summary: LayoutGrid,
   Positions: LineChart,
@@ -139,16 +133,13 @@ const TAB_ICONS: Record<AccountTab, typeof LayoutGrid> = {
   Commissions: Percent,
 };
 
-/** Views an ordinary member may not open; requesting one lands on Overview. */
 const ADMIN_VIEWS: View[] = ["Connections", "Members", "Tenants"];
 
-/** Views with no broker context, so no gateway panel, currency or account count.
- *  Profile belongs here but not in ADMIN_VIEWS: everyone can read their own. */
 const PLATFORM_VIEWS: View[] = [...ADMIN_VIEWS, "Profile"];
 export default function Dashboard({
   accountId,
   diagnostics = false,
-  initialView = "Overview",
+  initialView = "RMS",
 }: {
   accountId?: string;
   diagnostics?: boolean;
@@ -189,7 +180,7 @@ function Terminal({
   const router = useRouter(),
     client = useQueryClient();
   const [requestedView, setView] = useState<View>(
-    VIEWS.includes(initialView as View) ? (initialView as View) : "Overview",
+    VIEWS.includes(initialView as View) ? (initialView as View) : "RMS",
   );
   const [clock, setClock] = useState(0),
     [connected, setConnected] = useState(false),
@@ -233,13 +224,12 @@ function Terminal({
     })),
   });
   const isAdmin = !!user.data?.is_super_admin;
-  const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "Overview" : requestedView;
+  const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "RMS" : requestedView;
   const zone = useZone();
   const [tabs, setTabs] = useState<Record<string, AccountTab>>({});
-  const tab: AccountTab = (accountId && tabs[accountId]) || "Summary";
+  const tab: AccountTab = (accountId && tabs[accountId]) || "RMS";
   const setTab = (next: AccountTab) =>
     accountId && setTabs(previous => ({ ...previous, [accountId]: next }));
-  /** Inside an account the tab decides; on the desk the sidebar still does. */
   const shows = (name: string) => (accountId ? tab === name : view === name);
   const isPlatformAdmin = !!user.data?.is_super_admin;
   const allowed = isAdmin ? "*" : (accounts.data?.map((account) => account.account_id).join(",") ?? "");
@@ -251,11 +241,6 @@ function Terminal({
     if (!allowed) return;
     return connectLive(client, allowed.split(","), setConnected);
   }, [allowed, client]);
-  /* "BASE" is not a currency: it is the placeholder an account carries until the
-     gateway reports a NetLiquidation tag naming a real one. IBKR's consolidated
-     "All" pseudo-account never reports one, so it sat in this list forever and
-     offered the reader a currency that does not exist. Placeholders are dropped;
-     an account still waiting on its first valuation simply has no currency yet. */
   const currencies = [
     ...new Set(selected.map((a) => a.currency).filter((c) => c && c !== "BASE")),
   ];
@@ -266,9 +251,6 @@ function Terminal({
   const monetary = aggregating
     ? selected
     : selected.filter((a) => a.currency === activeCurrency);
-  /* Summing across base currencies is only arithmetic if there is one of them:
-     nothing in this platform converts FX, so a mixed total is not a real number
-     and says so rather than printing a confident figure. */
   const mixed = aggregating && currencies.length > 1;
   const currencyLabel = aggregating ? (mixed ? "MIXED" : (currencies[0] ?? "")) : activeCurrency;
   const sum = (field: keyof Account) =>
@@ -464,7 +446,6 @@ function Terminal({
             <h1>{title}</h1>
           </div>
           <div className="heading-actions">
-            {/* Only worth a control when there is a genuine choice to make. */}
             {activeCurrency && currencies.length > 1 && !PLATFORM_VIEWS.includes(view) && (
               <SearchableSelect
                 label="Reporting currency"

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_ZONE, formatClock, formatDateTime, formatTime, isZoneId, todayIn, ZONES, zoneOf } from "@/lib/timezone";
 
-// 2026-09-09T23:30:00Z — chosen so the calendar date differs by zone: still the
-// 9th in the Americas, already the 10th in UTC and India.
 const LATE = "2026-09-09T23:30:00Z";
 
 describe("display timezone", () => {

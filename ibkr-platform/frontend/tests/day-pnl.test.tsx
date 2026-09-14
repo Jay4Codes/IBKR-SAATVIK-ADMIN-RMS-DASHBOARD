@@ -18,10 +18,9 @@ vi.mock("echarts/core", () => ({
   }),
 }));
 vi.mock("echarts/charts", () => ({ LineChart: {} }));
-vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {} }));
+vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {}, AxisPointerComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ SVGRenderer: {} }));
 
-// 13:35 and 13:40 UTC = 09:35 and 09:40 in New York.
 function tick(account: string, stamp: string, pnl: string | null) {
   return {
     account_id: account, report_date: "2026-09-10", taken_at: `2026-09-10T${stamp}:00+00:00`,

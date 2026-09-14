@@ -1,5 +1,3 @@
-"""Registering, provisioning, and retiring a tenant's broker connections."""
-
 import pytest
 
 from app import connections as registry
@@ -15,7 +13,6 @@ def as_user(role):
 
 @pytest.fixture
 def provisioned(monkeypatch, tmp_path):
-    """Capture provisioning instead of writing to the host."""
     calls = []
 
     def fake_provision(doc, password=None):
@@ -54,7 +51,6 @@ async def test_adding_an_ibkr_gateway_provisions_an_isolated_instance(client, st
     assert created["provider"] == "ibkr_gateway"
     assert created["status"] == "DRAFT"
     assert created["managed"] is True
-    # A free port and a nonzero client id are chosen without the operator asking.
     assert settings.gateway_port_range_start <= created["api_port"] <= settings.gateway_port_range_end
     assert created["api_port"] != 4101, "must not collide with the tenant's existing gateway"
     assert created["client_id"] > 0
@@ -66,7 +62,6 @@ async def test_adding_an_ibkr_gateway_provisions_an_isolated_instance(client, st
 
 
 async def test_ports_are_unique_across_tenants(client, stores, provisioned):
-    """Two tenants' gateways are two processes on one host; they cannot share a port."""
     ports = set()
     for name in ("One", "Two", "Three"):
         response = await client.post("/api/v1/connections", json={"name": name})
@@ -107,7 +102,6 @@ async def test_changing_the_login_shape_rewrites_the_instance_config(client, sto
 
 
 async def test_an_adopted_connection_is_never_rewritten(client, stores, provisioned):
-    """The pre-tenancy gateway's files predate us; provisioning must leave them alone."""
     response = await client.post(f"/api/v1/connections/{CONNECTION}", json={"trading_mode": "live"})
     assert response.status_code == 200
     assert provisioned == []
@@ -193,7 +187,6 @@ async def test_a_snaptrade_connection_registers_a_user_and_seals_its_secret(
     created = response.json()["data"]
     assert created["provider"] == "snaptrade"
     assert registered["user_id"].startswith(TENANT)
-    # The user secret is never echoed and never stored in the clear.
     assert "top-secret-user-key" not in response.text
     stored = await db.broker_connections.find_one({"_id": created["id"]})
     assert stored["snaptrade_user_secret"].startswith("v1:")

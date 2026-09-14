@@ -31,7 +31,6 @@ describe("gateway", () => {
       />,
     );
     expect(screen.getByText("Online")).toBeInTheDocument();
-    // The facts grid is collapsed until asked for.
     expect(screen.queryByText(/2s ago/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText(/2s ago/)).toBeInTheDocument();

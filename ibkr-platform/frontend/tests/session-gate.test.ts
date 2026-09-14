@@ -11,8 +11,6 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-// redirect() throws in Next so nothing after it runs; mirror that here, or a
-// test could pass while the real page carried on rendering past the gate.
 class Redirected extends Error {
   constructor(readonly to: string) {
     super(`redirect:${to}`);
@@ -69,7 +67,6 @@ describe("sessionPrincipal", () => {
     expect(await sessionPrincipal()).toBeNull();
   });
 
-  // The important one: an unreachable API must not become "render the page".
   it("fails closed when the API is down", async () => {
     vi.stubGlobal(
       "fetch",

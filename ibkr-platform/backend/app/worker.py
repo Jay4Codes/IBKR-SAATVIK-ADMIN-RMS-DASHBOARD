@@ -1,16 +1,3 @@
-"""The broker worker: one supervised session per enabled connection.
-
-Before tenancy this process held a single IB Gateway session against a single
-set of environment variables. It is now a *supervisor*: it watches
-`broker_connections`, and for every enabled connection in an active tenant it
-runs one session — an IB Gateway session over ib_async, or a SnapTrade polling
-session — plus one durable MongoDB consumer per tenant.
-
-Each session takes a Redis lease on its own connection key, so running two
-worker processes is safe: the second finds the lease held and waits, and a
-session that loses its lease stops touching the broker rather than racing.
-"""
-
 import asyncio
 import contextlib
 import copy
@@ -20,6 +7,7 @@ import random
 import signal
 from decimal import Decimal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 from ib_async import IB, Index, StartupFetch
@@ -41,23 +29,14 @@ log = logging.getLogger("ibkr-worker")
 RENEW = "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end"
 RELEASE = "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end"
 
-#: How often the supervisor re-reads the connection registry.
 SUPERVISE_INTERVAL = 10.0
 LEASE_SECONDS = 20
 
-#: Farm/connectivity notices IB emits in the 2100s. These are status chatter, not
-#: faults: a farm that is connecting (2119) or idle (2107/2108) still serves the
-#: account, position and order feeds this worker subscribes to.
 BROKER_NOTICES = (2104, 2106, 2107, 2108, 2119, 2158)
-#: A farm dropping out degrades the feed until its matching OK notice arrives.
 BROKER_FARM_FAULTS = (2103, 2105, 2157)
-#: Notices that clear an outstanding farm fault.
 BROKER_FARM_RECOVERED = (2104, 2106, 2119, 2158)
-#: Codes that mean the session itself is gone and must be rebuilt.
-BROKER_FATAL = (1100, 1101, 1102, 1300, 326, 502, 504)
-#: Market-data entitlement refusals. Accounts, positions and orders do not depend
-#: on a market-data subscription, so these cost us the underlying mark and nothing
-#: else: warn, stop asking, and leave the gateway healthy.
+BROKER_FATAL = (1100, 1101, 1300, 326, 502, 504)
+BROKER_RESTORED = 1102
 BROKER_MARKET_DATA = (354, 10089, 10090, 10091, 10167, 10168, 10197)
 
 
@@ -66,11 +45,6 @@ def backoff(attempt):
 
 
 async def durable_consumer(redis, db, tenant_id: str, stop: asyncio.Event):
-    """Drain one tenant's event stream into MongoDB, acknowledging only on success.
-
-    Entries are acknowledged after the write, so a crash between the two replays
-    the entry rather than losing it; every write in `persist` is idempotent.
-    """
     keys = TenantKeys(tenant_id)
     group = keys.consumer_group
     try:
@@ -106,7 +80,6 @@ async def durable_consumer(redis, db, tenant_id: str, stop: asyncio.Event):
 
 
 class Session:
-    """Common lease, command, and shutdown handling for any broker session."""
 
     def __init__(self, redis, db, tenant_id: str, connection: dict):
         self.redis, self.db = redis, db
@@ -118,7 +91,6 @@ class Session:
         self.stop = asyncio.Event()
         self.reconnect = asyncio.Event()
         self.token = str(uuid4())
-        #: Set by the supervisor; a change means this session must be rebuilt.
         self.fingerprint = ""
 
     @property
@@ -145,18 +117,16 @@ class Session:
             await self.redis.eval(RELEASE, 1, self.keys.lease(self.connection_id), self.token)
 
     def command(self, message: dict):
-        """Route one operator command. Called by the supervisor's subscriber."""
         if message.get("command") == "reconnect":
             log.info("command.reconnect_requested connection=%s", self.label)
             self.reconnect.set()
             self.on_reconnect()
 
     def on_reconnect(self):
-        """Hook for a session that must interrupt an in-flight broker call."""
+        pass
 
 
 class GatewaySession(Session):
-    """An IB Gateway session: subscriptions, snapshots, and reconnection."""
 
     def __init__(self, redis, db, tenant_id: str, connection: dict, ib=None):
         super().__init__(redis, db, tenant_id, connection)
@@ -176,14 +146,9 @@ class GatewaySession(Session):
         self.market_subscriptions = {}
         self.market_data_denied = False
         self.underlying_prices = {}
-        #: Vendor marks as `massive.Spot`, held apart from IB's so a gateway
-        #: reconnect cannot wipe them and an option model tick cannot overwrite
-        #: them. `underlying_of` prefers these.
+        self.previous_closes = {}
         self.massive_prices = {}
-        #: Last successfully stored observation. This survives the end-of-day
-        #: session-list flush and is explicitly labeled as cached in RMS.
         self.cached_prices = {}
-        #: Keys whose Redis value was written by a feed in this worker run.
         self.live_underlyings = set()
         self.underlying_changed = set()
         self.state = GatewayState(
@@ -266,6 +231,7 @@ class GatewaySession(Session):
         item.quantity_changed = previous is None or previous.quantity != item.quantity
         item.underlying_price = self.underlying_of(item)
         item.underlying_source = self.underlying_source_of(item)
+        item.underlying_prev_close = self.previous_close_of(item)
         self.positions[key] = item
         self.track_underlying(item, value.contract)
         self.enqueue("position.closed" if item.quantity == 0 else "position.updated", item)
@@ -288,6 +254,7 @@ class GatewaySession(Session):
                 "quantity_changed": False,
                 "underlying_price": self.underlying_of(item),
                 "underlying_source": self.underlying_source_of(item),
+                "underlying_prev_close": self.previous_close_of(item),
                 "market_value": norm.decimal(value.value),
                 "unrealized_pnl": norm.decimal(value.unrealizedPnL),
                 "realized_pnl": norm.decimal(value.realizedPnL),
@@ -315,11 +282,6 @@ class GatewaySession(Session):
         return f"{item.currency}:{item.symbol}"
 
     def underlying_of(self, item):
-        """The live underlying mark for an option, or None for anything else.
-
-        Massive wins when it has a quote; IB's option-model `undPrice` keeps the
-        RMS curve available when the vendor is unavailable or unauthorized.
-        """
         if item.sec_type != "OPT":
             return None
         key = self.underlying_key(item)
@@ -335,8 +297,49 @@ class GatewaySession(Session):
         cached = self.cached_prices.get(key)
         return cached.price if cached is not None else None
 
+    def previous_close_of(self, item):
+        if item.sec_type != "OPT":
+            return None
+        found = self.previous_closes.get(self.underlying_key(item))
+        return found[1] if found else None
+
+    async def refresh_previous_closes(self):
+        today = now().astimezone(ZoneInfo(settings.massive_session_timezone)).date().isoformat()
+        for key, con_id in list(self.market_wanted.items()) + [
+            (k, None) for k in self.market_subscriptions
+        ]:
+            stamped = self.previous_closes.get(key)
+            if stamped and stamped[0] == today:
+                continue
+            contract = self.market_subscriptions.get(key) or self.contracts.get(con_id)
+            if contract is None:
+                continue
+            try:
+                bars = await asyncio.wait_for(
+                    self.ib.reqHistoricalDataAsync(
+                        contract, endDateTime="", durationStr="5 D", barSizeSetting="1 day",
+                        whatToShow="TRADES", useRTH=True, formatDate=1,
+                    ),
+                    settings.connection_timeout,
+                )
+            except Exception as exc:
+                log.warning(
+                    "underlying.previous_close_unavailable connection=%s key=%s error=%s",
+                    self.label, key, exc,
+                )
+                self.previous_closes[key] = (today, self.previous_closes.get(key, (None, None))[1])
+                continue
+            prior = [b for b in bars if str(b.date) < today]
+            if not prior:
+                self.previous_closes[key] = (today, None)
+                continue
+            self.previous_closes[key] = (today, norm.decimal(prior[-1].close))
+            log.info(
+                "underlying.previous_close connection=%s key=%s close=%s",
+                self.label, key, self.previous_closes[key][1],
+            )
+
     def underlying_source_of(self, item) -> str:
-        """Which feed `underlying_of` would answer from, for the panel's label."""
         if item.sec_type != "OPT":
             return ""
         key = self.underlying_key(item)
@@ -354,13 +357,6 @@ class GatewaySession(Session):
         return f"{cached.source}_cached" if cached is not None else ""
 
     def track_underlying(self, item, contract):
-        """Note which leg should carry an underlying's market-data line.
-
-        IB's option model tick carries `undPrice`, so one subscribed contract
-        prices the whole chain: six SPX legs need one line, not six. Opening it
-        needs an await, so this callback only records the intent and
-        `subscribe_underlyings` acts on it from the loop.
-        """
         if item.sec_type != "OPT" or self.market_data_denied or not contract:
             return
         key = self.underlying_key(item)
@@ -372,7 +368,6 @@ class GatewaySession(Session):
             del self.market_wanted[key]
         if (subscribed := self.market_subscriptions.pop(key, None)) is not None:
             self.ib.cancelMktData(subscribed)
-        # Hand the line to another leg on the same underlying, if one is open.
         for other in self.positions.values():
             if (
                 other.sec_type == "OPT"
@@ -384,16 +379,9 @@ class GatewaySession(Session):
                 return
 
     async def spot(self):
-        """Poll Massive for the configured underlyings until the session stops.
-
-        Runs beside `live` rather than inside it: the vendor feed has nothing to
-        do with the IB socket, so it keeps its marks across a reconnect. Moved
-        prices are queued onto `underlying_changed`, and the heartbeat loop's
-        existing `flush_underlyings` publishes them on its next pass.
-        """
         symbols = settings.massive_symbols
         if not symbols:
-            await self.stop.wait()  # Unconfigured, but `run` waits on the first task to finish.
+            await self.stop.wait()
             return
         async with httpx.AsyncClient(timeout=10) as client:
             while not self.stop.is_set():
@@ -409,8 +397,6 @@ class GatewaySession(Session):
                             self.massive_prices.pop(key, None)
                             self.underlying_changed.add(key)
                     except Exception:
-                        # The source list remains/restores on failure, so the
-                        # next idle pass can safely retry the archive.
                         log.exception("massive.archive_failed symbol=%s", symbol)
                 if not settings.massive_api_key or not massive.session_is_open(moment):
                     with contextlib.suppress(TimeoutError):
@@ -425,16 +411,10 @@ class GatewaySession(Session):
                     try:
                         spot = await massive.fetch_spot(client, symbol)
                     except massive.RateLimited as exc:
-                        # Quota is per minute and shared across symbols, so the
-                        # rest of this cycle would only deepen the hole.
                         log.warning("massive.rate_limited connection=%s path=%s", self.label, exc)
                         limited = True
                         break
                     if spot is None:
-                        # Massive is the preferred live producer. If it stops
-                        # answering, release that priority immediately and
-                        # persist the latest observed IB option-model value.
-                        # With neither feed, the retained Redis LTP remains.
                         if self.massive_prices.pop(key, None) is not None:
                             broker = self.underlying_prices.get(key)
                             if broker is not None:
@@ -480,14 +460,6 @@ class GatewaySession(Session):
                     await asyncio.wait_for(self.stop.wait(), delay)
 
     async def snapshots(self):
-        """Record each account's standing every `snapshot_seconds`.
-
-        This is the only record of what an account was worth at a moment in
-        time: `ibkr_accounts` is replaced in place on every update, so without
-        this there is no history to plot. Rows are keyed by account and date
-        plus a within-day bucket, so a restart re-samples rather than
-        duplicating, and a later Flex backfill can supersede the whole day.
-        """
         interval = max(30.0, settings.snapshot_seconds)
         while not self.stop.is_set():
             with contextlib.suppress(TimeoutError):
@@ -499,7 +471,7 @@ class GatewaySession(Session):
             bucket = moment.strftime("%H%M")
             for account in list(self.accounts.values()):
                 if account.net_liquidation is None:
-                    continue  # Nothing worth plotting until the broker has valued it.
+                    continue
                 snapshot = {
                     "tenant_id": self.tenant_id,
                     "account_id": account.account_id,
@@ -535,16 +507,6 @@ class GatewaySession(Session):
                                   self.label, account.account_id)
 
     async def subscribe_underlyings(self):
-        """Open the market-data lines `track_underlying` asked for.
-
-        SPX is subscribed as the index itself. An option model's `undPrice` only
-        changes when that particular option receives a model tick, while the
-        index line supplies an independent, continuously ticking reference for
-        RMS. Other underlyings retain the option-model fallback.
-
-        Position events name a contract but no exchange, and `reqMktData` refuses
-        one without it (error 321), so each contract is qualified first.
-        """
         for key, con_id in list(self.market_wanted.items()):
             if self.market_data_denied:
                 return
@@ -577,7 +539,6 @@ class GatewaySession(Session):
             self.ib.reqMktData(qualified[0])
 
     def stop_market_data(self):
-        """Drop every market-data line: the account is not entitled to the feed."""
         self.market_data_denied = True
         for contract in self.market_subscriptions.values():
             self.ib.cancelMktData(contract)
@@ -585,7 +546,6 @@ class GatewaySession(Session):
         self.market_wanted.clear()
 
     def ticker_value(self, tickers):
-        """Record a direct index LTP, falling back to option-model `undPrice`."""
         for ticker in tickers:
             greeks, contract = ticker.modelGreeks, ticker.contract
             direct = getattr(contract, "secType", "") == "IND"
@@ -598,9 +558,6 @@ class GatewaySession(Session):
             if self.underlying_prices.get(key) != price:
                 self.underlying_prices[key] = price
                 if contract.currency == "USD" and contract.symbol.upper() in settings.massive_symbols:
-                    # Massive owns the selected live mark while it is
-                    # answering. IB remains warm in `underlying_prices` and
-                    # takes over through Redis as soon as Massive fails.
                     if key not in self.massive_prices:
                         self.enqueue_underlying_sample(
                             contract.currency,
@@ -626,7 +583,6 @@ class GatewaySession(Session):
         )
 
     def flush_underlyings(self):
-        """Publish a moved underlying mark even when no P&L update follows it."""
         if not self.underlying_changed:
             return
         keys, self.underlying_changed = self.underlying_changed, set()
@@ -685,6 +641,10 @@ class GatewaySession(Session):
             if code in BROKER_FARM_RECOVERED:
                 self.farm_recovered()
             return
+        if code == BROKER_RESTORED:
+            log.info("broker.restored connection=%s code=%s message=%s", self.label, code, message)
+            self.farm_recovered()
+            return
         log.error(
             "broker.error connection=%s code=%s request=%s message=%s", self.label, code, req_id, message
         )
@@ -697,11 +657,6 @@ class GatewaySession(Session):
             self.fault.set()
 
     def farm_recovered(self):
-        """Undo a farm-fault degrade once IB reports the farm back.
-
-        Only a degrade this worker raised from a farm fault is cleared: anything
-        else that set `last_error` is a real problem the reconnect loop owns.
-        """
         if not self.farm_fault:
             return
         self.farm_fault = None
@@ -751,16 +706,8 @@ class GatewaySession(Session):
                         self.cached_prices[key] = stored
                         self.live_underlyings.add(key)
                         self.underlying_changed.add(key)
-                        # The Redis round trip is complete, so publish the new
-                        # mark now. Waiting for the broker heartbeat here adds
-                        # avoidable latency to the dashboard WebSocket.
                         self.flush_underlyings()
                 else:
-                    # P&L callbacks can be queued while the KeyDB write above
-                    # is awaiting I/O. Stamp every outgoing position event with
-                    # the newest *stored* reference at publish time so an older
-                    # callback cannot make RMS trail or regress after the LTP
-                    # has reached KeyDB.
                     if event.event_type == "position.updated":
                         item = self.positions.get(
                             (event.account_id, int(event.data.get("con_id", 0)))
@@ -775,7 +722,6 @@ class GatewaySession(Session):
                 self.queue.task_done()
 
     async def load_cached_underlyings(self):
-        """Hydrate last stored LTPs before broker positions are synchronized."""
         for symbol in settings.massive_symbols:
             spot = await massive.last_spot(self.redis, symbol)
             if spot is not None:
@@ -835,7 +781,6 @@ class GatewaySession(Session):
             )
 
     async def target(self):
-        """Where to connect: a runtime override if one is set, else the connection."""
         chosen = await self.repo.target(self.connection_id)
         host = chosen.get("host") or self.connection.get("host") or "127.0.0.1"
         port = int(chosen.get("port") or self.connection.get("api_port") or 0)
@@ -906,6 +851,7 @@ class GatewaySession(Session):
                         failures = 0
                     await self.publish_gateway()
                     await self.subscribe_underlyings()
+                    await self.refresh_previous_closes()
                     self.flush_underlyings()
                     await self.poll_orders()
                     for fill in await asyncio.wait_for(
@@ -975,12 +921,6 @@ class GatewaySession(Session):
 
 
 class SnapTradeSession(Session):
-    """A SnapTrade connection, refreshed on an interval.
-
-    SnapTrade exposes no streaming socket, so this reports CONNECTED while polls
-    succeed and DEGRADED once one fails, and emits the same domain events an IB
-    Gateway session does — the dashboard cannot tell the two apart.
-    """
 
     def __init__(self, redis, db, tenant_id: str, connection: dict):
         super().__init__(redis, db, tenant_id, connection)
@@ -1132,7 +1072,6 @@ def build_session(redis, db, connection: dict) -> Session | None:
 
 
 class Supervisor:
-    """Keeps the running sessions in step with the connection registry."""
 
     def __init__(self, redis, db):
         self.redis, self.db = redis, db
@@ -1141,7 +1080,6 @@ class Supervisor:
         self.consumers: dict[str, tuple[asyncio.Event, asyncio.Task]] = {}
 
     def fingerprint(self, doc: dict) -> str:
-        """What a session must be restarted for. A rename alone is not enough."""
         return json.dumps(
             {
                 key: doc.get(key)
@@ -1182,7 +1120,6 @@ class Supervisor:
             log.info("supervisor.starting connection=%s", session.label)
             self.sessions[connection_id] = (session, asyncio.create_task(session.run()))
 
-        # One durable MongoDB consumer per tenant that has any live session.
         tenants = {doc["tenant_id"] for doc in wanted.values()}
         for tenant_id in tenants - set(self.consumers):
             stop = asyncio.Event()
@@ -1197,7 +1134,6 @@ class Supervisor:
             await asyncio.gather(task, return_exceptions=True)
 
     async def commands(self):
-        """Fan operator commands out to the session they name."""
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(COMMAND_CHANNEL)
         try:

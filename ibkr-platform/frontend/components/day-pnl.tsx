@@ -10,13 +10,6 @@ import { Chart } from "./chart";
 import { money } from "./tables";
 import { useZone } from "./timezone";
 
-/** Day P&L through the session, per account and combined.
- *
- *  Drawn from the worker's snapshots, so the curve begins where recording began
- *  and gains a point every `SNAPSHOT_SECONDS`. The x axis is labelled in
- *  whichever timezone the header is set to, and the day it asks for is that
- *  zone's today — a reader in IST looking at "today" means their today.
- */
 export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accounts: string[] }) {
   const zone = useZone();
   const [chosen, setChosen] = useState<string[]>([]);
@@ -114,7 +107,6 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
               trigger: "axis",
               confine: true,
               renderMode: "richText",
-              // The heading carries the full stamp; the axis only has room for a time.
               formatter: (params: { dataIndex: number; seriesName: string; value: number }[]) => {
                 const index = params[0]?.dataIndex ?? 0;
                 const head = formatDateTime(stamps[index], zone);
@@ -163,7 +155,6 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                         const v = totalByStamp.get(s);
                         return v === undefined ? null : Number(v);
                       }),
-                      // Zero is the reference a day's P&L is read against.
                       markLine: {
                         silent: true,
                         symbol: "none",

@@ -1,7 +1,5 @@
 import os
 
-# Set before app.config is imported. Environment wins over the dotenv file, so
-# these hold even on a host whose backend/.env describes a real deployment.
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["SECRET_KEY"] = "testing-secret-key"
@@ -12,8 +10,6 @@ os.environ["IBKR_PORT"] = "4001"
 os.environ["IBC_CONFIG_PATH"] = "/opt/ibc/config.ini"
 os.environ["IBC_LOG_DIRECTORY"] = "/opt/ibc/logs"
 os.environ["GATEWAY_SERVICE"] = "ibkr-gateway.service"
-# A configured vendor feed on the developer's host must not reach into the suite
-# and start it polling; tests that want it on patch these in.
 os.environ["MASSIVE_API_KEY"] = ""
 os.environ["MASSIVE_UNDERLYINGS"] = ""
 
@@ -37,7 +33,6 @@ OTHER_CONNECTION = "connection-two"
 
 
 def gateway_connection(tenant_id: str, connection_id: str, name: str, port: int) -> dict:
-    """An adopted IB Gateway connection: no files are provisioned for it."""
     return {
         "_id": connection_id,
         "tenant_id": tenant_id,
@@ -117,11 +112,6 @@ async def repo(stores):
 
 @pytest.fixture
 async def client(stores):
-    """An API client signed in as tenant-one's OWNER.
-
-    Also seeds a second tenant with its own gateway and accounts, so every
-    isolation assertion has something real to leak from.
-    """
     redis, db = stores
     app.state.redis, app.state.db = redis, db
     await seed_tenant(db, redis, TENANT, CONNECTION, ("DU1", "DU2"), 4101)
@@ -140,7 +130,6 @@ async def client(stores):
 
 
 async def promote_super(stores):
-    """Move the designated identity to the cross-tenant admin test account."""
     _, db = stores
     await db.users.update_one({"_id": "ADMIN"}, {"$set": {"email": "admin@test.local"}})
     await db.users.update_one({"_id": "SUPER"}, {"$set": {"email": "ekalon.consulting@gmail.com"}})

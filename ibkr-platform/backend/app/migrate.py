@@ -1,18 +1,3 @@
-"""Migrate a pre-tenancy installation onto the multi-tenant model.
-
-Everything the single-gateway platform owned becomes the property of one
-bootstrap tenant, and the IB Gateway already running on this host is *adopted*
-rather than re-provisioned — its `/opt/ibc/config.ini`, its port, and its
-`ibkr-gateway.service` unit stay exactly where they are, so a live broker
-session is never disturbed by the migration.
-
-Idempotent: every step checks before it writes, so re-running after a partial
-run finishes the job instead of duplicating it.
-
-    python -m app.migrate --dry-run     # report what would change
-    python -m app.migrate               # apply
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -27,7 +12,6 @@ from app.config import settings
 from app.db import database, initialize, scoped_id
 from app.tenancy import TenantKeys, new_tenant, now
 
-#: Collections that gain a tenant_id, and the id prefix rule for each.
 BACKFILL = (
     "orders",
     "order_events",
@@ -37,11 +21,8 @@ BACKFILL = (
     "ibkr_accounts",
     "account_users",
 )
-#: Collections whose `_id` must be re-keyed so two tenants can hold the same
-#: broker identifier without colliding, and the field the new key is built from.
 REKEYED = {"orders": None, "executions": "execution_id", "ibkr_accounts": "account_id"}
-#: How much of the legacy event stream to carry over. History already lives in
-#: MongoDB; the stream only backs the diagnostics window and visibility tests.
+OPTION_ROOTS = {"SPXW": "SPX", "SPXQ": "SPX", "XSP": "XSP"}
 STREAM_LIMIT = 20000
 
 
@@ -68,11 +49,6 @@ async def ensure_bootstrap_tenant(db, report: Report) -> dict[str, Any]:
 
 
 async def migrate_members(db, tenant: dict[str, Any], report: Report) -> None:
-    """Turn platform roles and account grants into tenant memberships.
-
-    A pre-tenancy ADMIN becomes the tenant's OWNER; a TRADER keeps exactly the
-    accounts it was granted. Nobody gains access they did not already have.
-    """
     tenant_id = tenant["_id"]
     async for user in db.users.find():
         user_id = user["_id"]
@@ -102,12 +78,6 @@ async def migrate_members(db, tenant: dict[str, Any], report: Report) -> None:
 
 
 async def adopt_gateway(db, tenant: dict[str, Any], report: Report) -> dict[str, Any]:
-    """Register the gateway this host already runs, without touching its files.
-
-    `managed=False` is the whole point: provisioning will never rewrite an
-    adopted connection's config or delete its unit, because those predate this
-    platform's ownership of them.
-    """
     tenant_id = tenant["_id"]
     existing = await db.broker_connections.find_one({"tenant_id": tenant_id, "managed": False})
     if existing:
@@ -138,13 +108,6 @@ async def adopt_gateway(db, tenant: dict[str, Any], report: Report) -> dict[str,
 
 
 async def reshape_accounts(db, tenant: dict[str, Any], report: Report) -> None:
-    """Give legacy account documents the fields the tenant-scoped index needs.
-
-    The pre-tenancy shape was `{_id: <account number>, gateway_id: "primary"}`,
-    with no `account_id` field at all. Left as-is, every one of them collides on
-    the new unique `(tenant_id, account_id)` index as `(null, null)` — which is
-    why this runs before any index is created.
-    """
     stale = [doc async for doc in db.ibkr_accounts.find({"account_id": {"$exists": False}})]
     if not stale:
         return
@@ -187,20 +150,60 @@ async def backfill_documents(db, tenant: dict[str, Any], connection_id: str, rep
             continue
         for doc in stale:
             old = doc.pop("_id")
-            # The new key carries the tenant, so two tenants may hold the same
-            # account number, permId, or execution id.
             suffix = doc.get(source, old) if source else old
             key = scoped_id(tenant_id, str(suffix))
             await collection.replace_one({"_id": key}, {"_id": key, **doc}, upsert=True)
             await collection.delete_one({"_id": old})
 
 
-async def migrate_redis(redis, tenant: dict[str, Any], connection_id: str, report: Report) -> None:
-    """Move live state and the event stream into the tenant's namespace.
+def parse_local_symbol(local: str) -> dict[str, str] | None:
+    trimmed = " ".join(local.split())
+    root, _, tail = trimmed.partition(" ")
+    if not root or len(tail) != 15 or tail[6] not in "CP" or not tail[:6].isdigit():
+        return None
+    if not tail[7:].isdigit():
+        return None
+    return {
+        "underlying": OPTION_ROOTS.get(root, root),
+        "sec_type": "OPT",
+        "expiry": f"20{tail[:6]}",
+        "multiplier": "100",
+    }
 
-    Copied rather than renamed, so the pre-tenancy keys survive as a rollback
-    path until an operator removes them.
-    """
+
+async def backfill_execution_contracts(db, report: Report) -> None:
+    pending = [
+        doc
+        async for doc in db.executions.find(
+            {
+                "realized_pnl": {"$ne": None},
+                "$or": [
+                    {field: {"$in": [None, ""]}}
+                    for field in ("underlying", "sec_type", "expiry", "multiplier")
+                ],
+            },
+            {"_id": 1, "symbol": 1, "currency": 1},
+        )
+    ]
+    if not pending:
+        return
+    updates = []
+    for doc in pending:
+        parsed = parse_local_symbol(str(doc.get("symbol") or ""))
+        if parsed:
+            updates.append((doc["_id"], {**parsed, "currency": doc.get("currency") or "USD"}))
+    skipped = len(pending) - len(updates)
+    report.say(
+        f"stamp {len(updates)} realized executions with their contract terms"
+        + (f" ({skipped} unparseable, left as they are)" if skipped else "")
+    )
+    if report.dry_run:
+        return
+    for key, fields in updates:
+        await db.executions.update_one({"_id": key}, {"$set": fields})
+
+
+async def migrate_redis(redis, tenant: dict[str, Any], connection_id: str, report: Report) -> None:
     keys = TenantKeys(tenant["_id"])
 
     legacy_gateway = await redis.get("gateway:primary")
@@ -249,8 +252,6 @@ async def migrate_redis(redis, tenant: dict[str, Any], connection_id: str, repor
     if report.dry_run:
         return
     for event_id, fields in reversed(entries):
-        # The original ids are preserved: the diagnostics window and the
-        # visibility test both range over the stream by millisecond id.
         await redis.xadd(keys.events, {**fields, "connection_id": connection_id}, id=event_id)
 
 
@@ -263,9 +264,7 @@ async def run(dry_run: bool) -> Report:
         connection = await adopt_gateway(db, tenant, report)
         await migrate_members(db, tenant, report)
         await backfill_documents(db, tenant, connection["_id"], report)
-        # Indexes come last. Several of them are unique over `tenant_id`, so
-        # building them before the documents carry one fails on a real database
-        # — and would leave the API unable to start.
+        await backfill_execution_contracts(db, report)
         if not dry_run:
             report.say("create the tenant-scoped indexes")
             await initialize(db)

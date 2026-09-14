@@ -10,7 +10,6 @@ def as_user(role):
 
 
 def spy_on(redis):
-    """Record what reaches the command channel without swallowing it."""
     sent = []
     original = redis.publish
 
@@ -55,12 +54,10 @@ async def test_reconnect_is_rate_limited(client):
 
 
 async def test_rate_limits_are_per_connection(client, stores):
-    """One tenant's command burst must not throttle another tenant's gateway."""
     from app.auth import TENANT_COOKIE
     from tests.conftest import OTHER_TENANT
 
     assert (await client.post("/api/v1/gateway/reconnect", cookies=as_user("ADMIN"))).status_code == 200
-    # The sole administrator switches tenants to operate the other gateway.
     client.cookies.set(TENANT_COOKIE, OTHER_TENANT)
     assert (await client.post("/api/v1/gateway/reconnect")).status_code == 200
 

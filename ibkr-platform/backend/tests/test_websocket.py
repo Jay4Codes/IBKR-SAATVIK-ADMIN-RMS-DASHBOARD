@@ -35,7 +35,6 @@ async def ws_lifespan(app):
         }
     )
     await redis.set(f"session:{digest('token')}", "trader")
-    # Something for the other tenant's stream to carry, so a leak would be visible.
     await StateRepository(redis, OTHER, "c2").publish(
         Event(event_type="position.updated", account_id="DU1", data={"con_id": 7, "quantity": "3"})
     )
@@ -84,11 +83,6 @@ def test_websocket_refuses_a_tenant_without_membership(monkeypatch):
 
 
 def test_websocket_reads_only_its_own_tenant_stream(monkeypatch):
-    """The socket is pinned to the tenant its handshake resolved.
-
-    A backlog already sits on the other tenant's stream; a subscriber here must
-    see none of it, and must still see its own tenant's events.
-    """
     monkeypatch.setattr(app.router, "lifespan_context", ws_lifespan)
     with TestClient(app) as client:
         client.cookies.set(COOKIE, "token")

@@ -1,17 +1,3 @@
-"""IBKR Flex Web Service: the only source of account history from before this
-platform was watching.
-
-The worker's own snapshots start the day they are switched on. Flex serves the
-broker's `EquitySummaryByReportDateInBase` rows — one net-liquidation figure per
-report date, in the account's base currency — which is what backfills the equity
-curve behind them.
-
-Two calls, in order: `SendRequest` hands back a reference code, `GetStatement`
-turns that code into the statement. IBKR generates the statement asynchronously,
-so the second call answers `Warn` with code 1019 until it is ready; that is a
-retry, not a failure.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,12 +16,10 @@ BASE = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
 SEND = f"{BASE}/SendRequest"
 GET = f"{BASE}/GetStatement"
 
-#: "Statement generation in progress" — the documented signal to wait and re-ask.
 IN_PROGRESS = "1019"
 
 
 class FlexError(Exception):
-    """IBKR refused the request. Carries their own code so it can be reported."""
 
     def __init__(self, code: str, message: str) -> None:
         self.code, self.message = code, message
@@ -45,7 +29,6 @@ class FlexError(Exception):
 @dataclass(frozen=True, slots=True)
 class NavPoint:
     account_id: str
-    #: The broker's report date, YYYY-MM-DD.
     report_date: str
     net_liquidation: Decimal
     currency: str
@@ -61,7 +44,6 @@ def _decimal(value: str | None) -> Decimal | None:
 
 
 def _date(value: str | None) -> str | None:
-    """IBKR sends either 20260910 or 2026-09-10 depending on the query's format."""
     if not value:
         return None
     digits = value.replace("-", "")
@@ -78,11 +60,6 @@ def _raise_for_status(root: ElementTree.Element) -> None:
 
 
 def parse_statement(xml: str) -> list[NavPoint]:
-    """Every daily net-liquidation row in a Flex statement.
-
-    Rows without a usable date or total are dropped rather than guessed at: a
-    partial curve is honest, an invented point is not.
-    """
     root = ElementTree.fromstring(xml)
     _raise_for_status(root)
     points: list[NavPoint] = []
@@ -122,7 +99,6 @@ async def _collect(client: httpx.AsyncClient, token: str, code: str, attempts: i
             root = ElementTree.fromstring(response.text)
         except ElementTree.ParseError as exc:
             raise FlexError("", f"Flex returned unparseable XML: {exc}") from exc
-        # A ready statement is a FlexQueryResponse; only the wrapper carries Status.
         if root.tag != "FlexStatementResponse":
             return response.text
         error = (root.findtext("ErrorCode") or "").strip()
@@ -137,7 +113,6 @@ async def _collect(client: httpx.AsyncClient, token: str, code: str, attempts: i
 async def fetch_history(
     token: str | None = None, query_id: str | None = None, *, attempts: int = 6
 ) -> list[NavPoint]:
-    """Run the two-step Flex exchange and return every NAV point it carries."""
     token = (token or settings.ibkr_flex_token).strip()
     query_id = (query_id or settings.ibkr_flex_query_id).strip()
     if not token or not query_id:

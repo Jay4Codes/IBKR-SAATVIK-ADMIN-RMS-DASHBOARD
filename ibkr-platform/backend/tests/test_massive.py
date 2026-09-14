@@ -16,7 +16,6 @@ from tests.conftest import CONNECTION, TENANT, gateway_connection
 
 
 def bodies(**by_path):
-    """Stand in for `massive.get_json`, answering by path prefix."""
 
     async def fake(client, path, params=None):
         for prefix, body in by_path.items():
@@ -125,7 +124,6 @@ def worker(redis, db, ib=None):
 
 
 async def poll_once(session):
-    """Run `spot` far enough to complete one cycle, then stop it."""
     with patch.object(massive, "session_is_open", return_value=True):
         task = asyncio.create_task(session.spot())
         for _ in range(200):
@@ -374,7 +372,6 @@ def test_spx_polling_is_limited_to_the_regular_session():
 
 
 async def test_an_unconfigured_feed_waits_instead_of_ending_the_session(stores):
-    """`run` waits on the first task to finish, so `spot` must not return early."""
     redis, db = stores
     session = worker(redis, db)
     task = asyncio.create_task(session.spot())
@@ -385,7 +382,6 @@ async def test_an_unconfigured_feed_waits_instead_of_ending_the_session(stores):
 
 
 def test_httpx_request_logging_cannot_leak_the_vendor_key(caplog):
-    """The key rides in the query string; httpx logs whole URLs at INFO."""
     from app.logging import configure
 
     configure()

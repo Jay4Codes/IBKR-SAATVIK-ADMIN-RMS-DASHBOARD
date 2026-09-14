@@ -63,8 +63,6 @@ async def _create_indexes(db):
 
 
 def scoped_id(tenant_id: str, *parts: str) -> str:
-    """A document _id that carries its tenant, so two tenants can hold the same
-    broker identifier (account, permId, execId) without colliding."""
     return ":".join((tenant_id, *parts))
 
 

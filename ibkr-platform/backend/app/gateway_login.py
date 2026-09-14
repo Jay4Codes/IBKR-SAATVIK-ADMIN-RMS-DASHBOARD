@@ -89,12 +89,6 @@ def read_trading_mode(path: str | None) -> str:
 
 
 def read_only_login(path: str | None) -> bool:
-    """True when this instance logs in read-only, which skips the second factor.
-
-    It is the difference between a gateway that comes up unattended and one that
-    waits on a push notification, so the dashboard says which it is rather than
-    leaving an operator watching for a 2FA prompt that will never arrive.
-    """
     return (hostctl.read_setting("ReadOnlyLogin", path) or "").lower() in ("yes", "true")
 
 
@@ -279,11 +273,6 @@ def port_is_open(host: str, port: int, timeout: float = 1.0) -> bool:
 
 
 async def snapshot(connection: dict) -> dict:
-    """Login progress for one broker connection, read from its own IBC logs.
-
-    Every path here comes off the connection document, so two tenants' gateways
-    report independently even though they share this host.
-    """
     unit = connections.unit_for(connection)
     config_path = connection.get("ibc_config_path")
     log_directory = connection.get("ibc_log_directory")

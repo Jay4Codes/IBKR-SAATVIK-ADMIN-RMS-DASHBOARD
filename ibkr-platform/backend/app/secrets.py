@@ -1,12 +1,3 @@
-"""Envelope encryption for broker secrets held in MongoDB.
-
-Only secrets the platform must be able to *replay* live here — today that is the
-SnapTrade user secret, which signs every request on that user's behalf. IBKR
-passwords are never stored in the database: they are written straight into the
-connection's IBC config file on disk, at 0600, and cannot be read back through
-the API.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -22,7 +13,7 @@ _PREFIX = "v1:"
 
 
 class SecretUnavailable(RuntimeError):
-    """Raised when a stored secret cannot be read with the configured key."""
+    pass
 
 
 def _key() -> bytes:
@@ -31,8 +22,6 @@ def _key() -> bytes:
         raise SecretUnavailable(
             "SECRET_KEY is not configured; broker secrets cannot be stored or read"
         )
-    # A passphrase of any length becomes a 256-bit key. Rotating SECRET_KEY
-    # invalidates existing ciphertexts by design.
     return hashlib.sha256(material.encode()).digest()
 
 

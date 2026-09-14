@@ -7,7 +7,7 @@ const apiMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 vi.mock("echarts/core", () => ({ use: vi.fn(), init: () => ({ setOption: vi.fn(), getOption: () => ({}), dispose: vi.fn(), resize: vi.fn() }) }));
 vi.mock("echarts/charts", () => ({ LineChart: {} }));
-vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {} }));
+vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {}, AxisPointerComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ SVGRenderer: {} }));
 
 function point(account: string, date: string, value: string, currency = "USD") {

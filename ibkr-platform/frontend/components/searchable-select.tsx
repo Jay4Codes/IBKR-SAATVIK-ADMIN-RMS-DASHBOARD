@@ -2,13 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
-/** A dropdown you can type into.
- *
- *  Native `<select>` only jumps to a matching first letter, which is useless for
- *  a list of expiries or account ids. The filter box appears once the list is
- *  long enough to need it; below that this is a plain listbox, because a search
- *  field over four options is furniture rather than help.
- */
 export function SearchableSelect({
   label,
   value,
