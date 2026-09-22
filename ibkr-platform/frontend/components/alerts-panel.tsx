@@ -289,8 +289,8 @@ export function AlertsPanel() {
           )}
           <p className="footnote">
             {data!.common
-              ? "Each channel keeps its own choices. Entries and exits stay off on the common channel until you turn them on there. Switching one off stops the message; it does not stop the event being recorded."
-              : "Choices are yours alone and apply to this organisation. Switching one off stops the message; it does not stop the event being recorded."}
+              ? "Each channel keeps its own choices. Entries and exits stay off for your chat, the common channel, and the alert bell until you turn them on for a channel. Switching one off stops the message; it does not stop the event being recorded."
+              : "Entries and exits stay off until you turn them on. Switching one off stops the message; it does not stop the event being recorded."}
           </p>
         </>
       )}

@@ -8,7 +8,7 @@ from typing import Any
 from app.telegram import escape
 
 TRIGGERS = ("fills", "move", "risk", "gateway", "events")
-DEFAULT_TRIGGERS = frozenset(TRIGGERS)
+DEFAULT_TRIGGERS = frozenset(("move", "risk", "gateway", "events"))
 
 COMMON_USER = "__common__"
 COMMON_AVAILABLE = ("fills", "move", "risk", "events")

@@ -127,7 +127,7 @@ async def telegram_linker(redis, db, stop: asyncio.Event):
                 log.info("telegram.linked user=%s chat=%s", user_id, chat_id)
                 await telegram.send(
                     client, chat_id,
-                    "<b>Alerts connected.</b>\nYou will receive fills, underlying moves, "
+                    "<b>Alerts connected.</b>\nYou will receive underlying moves, "
                     "risk changes and gateway notices for the accounts you can see.",
                 )
 
@@ -245,7 +245,8 @@ class AlertDispatcher:
             and alerts.selected(common, trigger, alerts.COMMON_DEFAULT)
         ):
             await telegram.send(client, settings.telegram_team_chat_id, text)
-        await self.raise_alert(trigger, account_id, text, urgent)
+        if trigger != "fills":
+            await self.raise_alert(trigger, account_id, text, urgent)
 
     async def common_prefs(self) -> dict | None:
         if not settings.telegram_team_chat_id:

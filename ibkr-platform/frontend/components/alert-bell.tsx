@@ -165,8 +165,8 @@ export function AlertBell() {
             <p role="status">Loading alerts…</p>
           ) : rows.length === 0 ? (
             <p className="footnote">
-              No alerts yet. They arrive here and in Telegram once a fill, a move,
-              a risk change or a gateway notice happens.
+              No alerts yet. Moves, risk changes and gateway notices arrive here
+              and in Telegram. Entries and exits do not.
             </p>
           ) : (
             <ul>

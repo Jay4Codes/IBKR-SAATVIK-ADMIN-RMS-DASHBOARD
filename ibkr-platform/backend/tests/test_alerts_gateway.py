@@ -325,7 +325,7 @@ async def test_gateway_alerts_are_not_copied_to_the_shared_channel(monkeypatch):
     await worker.deliver(None, "move", None, "SPX up")
 
     assert sent == ["111", "111", "111", "-100common"]
-    assert raised == ["gateway", "fills", "move"]
+    assert raised == ["gateway", "move"]
 
 async def test_the_common_channel_can_opt_back_into_fills(monkeypatch):
     from app import telegram

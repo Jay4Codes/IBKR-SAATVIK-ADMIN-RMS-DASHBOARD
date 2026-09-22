@@ -1204,7 +1204,8 @@ async def alert_feed(
     rows = await cursor.sort("timestamp", -1).to_list(max(1, min(limit, 200)) * 4)
     visible = [
         row for row in rows
-        if not row.get("account_id") or row["account_id"] == "*" or user.sees(row["account_id"])
+        if (row.get("data") or {}).get("trigger") != "fills"
+        and (not row.get("account_id") or row["account_id"] == "*" or user.sees(row["account_id"]))
     ]
     return ok(visible[: max(1, min(limit, 200))])
 

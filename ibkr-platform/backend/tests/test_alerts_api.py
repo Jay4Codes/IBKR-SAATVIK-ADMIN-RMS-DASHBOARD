@@ -15,7 +15,7 @@ async def test_alerts_report_an_unconfigured_platform_rather_than_failing(
     body = (await client.get("/api/v1/me/alerts")).json()["data"]
     assert body["configured"] is False
     assert body["linked"] is False
-    assert set(body["triggers"]) == set(body["available"])
+    assert set(body["triggers"]) == set(body["available"]) - {"fills"}
 
 async def test_linking_refuses_when_no_bot_is_configured(client, stores, monkeypatch):
     await unconfigured(monkeypatch)
@@ -131,7 +131,7 @@ async def test_the_common_channel_starts_without_entries_and_exits(client, store
     assert body["common"]["triggers"] == ["events", "move", "risk"]
     assert "fills" in body["common"]["available"]
     assert "gateway" not in body["common"]["available"]
-    assert "fills" in body["triggers"]
+    assert "fills" not in body["triggers"]
 
     saved = (await client.post("/api/v1/me/alerts", json={
         "channel": "common",
@@ -142,7 +142,7 @@ async def test_the_common_channel_starts_without_entries_and_exits(client, store
     assert saved["common"]["triggers"] == ["fills", "move"]
     assert saved["common"]["move_percent"] == "3"
     assert saved["common"]["price_levels"] == ["7800"]
-    assert "fills" in saved["triggers"]
+    assert "fills" not in saved["triggers"]
     _, db = stores
     stored = await db.alert_preferences.find_one({"user_id": "__common__"})
     assert stored["triggers"] == ["fills", "move"]
