@@ -26,7 +26,7 @@ IBC_PATH=/opt/ibc
 TWS_PATH=/root/Jts
 TWS_SETTINGS_PATH=
 LOG_PATH=/var/log/ibc
-# body follows
+
 exec java -jar "$IBC_PATH/IBC.jar"
 """
 
@@ -48,7 +48,6 @@ def connection(**overrides):
         "api_port": 4137,
         "trading_mode": "paper",
         "ibkr_username": None,
-        "read_only_login": True,
         **overrides,
     }
 
@@ -68,7 +67,6 @@ def test_provisioning_creates_a_private_isolated_instance(host):
     text = config.read_text()
     assert "OverrideTwsApiPort=4137" in text
     assert "TradingMode=paper" in text
-    assert "ReadOnlyLogin=yes" in text
     assert "ExistingSessionDetectedAction=primary" in text
     assert "IbLoginId=" in text and "template-user" not in text
     assert "template-secret" not in text
@@ -102,9 +100,45 @@ def test_reprovisioning_keeps_the_password_already_on_disk(host):
     assert "IbPassword=live-secret" in text
     assert "OverrideTwsApiPort=4200" in text
 
-def test_read_only_login_can_be_turned_off_to_restore_two_factor(host):
-    layout = provisioning.provision_files(connection(read_only_login=False))
-    assert "ReadOnlyLogin=no" in Path(layout["ibc_config_path"]).read_text()
+def test_a_provisioned_gateway_needs_one_push_a_week_not_one_a_night(host):
+    text = Path(provisioning.provision_files(connection())["ibc_config_path"]).read_text()
+    assert "AutoRestartTime=03:00 AM" in text
+    assert "AutoLogoffTime=\n" in text
+    assert "ColdRestartTime=13:30" in text
+    assert "ReloginAfterSecondFactorAuthenticationTimeout=no" in text
+    assert "ExitAfterSecondFactorAuthenticationTimeout=no" in text
+    assert "ReadOnlyLogin=no" in text
+    assert "ReadOnlyApi=yes" in text
+
+def test_the_restart_schedule_is_operator_configurable(host, monkeypatch):
+    monkeypatch.setattr(settings, "gateway_auto_restart_time", "11:45 PM")
+    monkeypatch.setattr(settings, "gateway_cold_restart_time", "07:05")
+    text = Path(provisioning.provision_files(connection())["ibc_config_path"]).read_text()
+    assert "AutoRestartTime=11:45 PM" in text
+    assert "ColdRestartTime=07:05" in text
+
+@pytest.mark.parametrize("bad", ["05:00", "3:00 AM", "03:00AM", "13:00 PM", "03:00 am", ""])
+def test_a_restart_time_ibc_would_reject_is_refused_up_front(host, monkeypatch, bad):
+    monkeypatch.setattr(settings, "gateway_auto_restart_time", bad)
+    with pytest.raises(HTTPException) as error:
+        provisioning.provision_files(connection())
+    assert error.value.status_code == 503
+    assert "GATEWAY_AUTO_RESTART_TIME" in error.value.detail
+
+def test_a_malformed_cold_restart_time_is_refused(host, monkeypatch):
+    monkeypatch.setattr(settings, "gateway_cold_restart_time", "1:30 PM")
+    with pytest.raises(HTTPException) as error:
+        provisioning.provision_files(connection())
+    assert "GATEWAY_COLD_RESTART_TIME" in error.value.detail
+
+def test_the_unit_restarts_clean_exits_but_not_in_a_tight_loop(host, monkeypatch):
+    written = {}
+    monkeypatch.setattr(provisioning.hostctl, "write_atomic", lambda p, t, mode=0: written.__setitem__(p, t))
+    body = written[provisioning.write_unit_template()]
+    assert "Restart=always" in body
+    assert "RestartSec=60" in body
+    assert "StartLimitIntervalSec=3600" in body
+    assert "StartLimitBurst=5" in body
 
 def test_the_unit_template_is_written_once_and_is_idempotent(host, tmp_path, monkeypatch):
     written = {}

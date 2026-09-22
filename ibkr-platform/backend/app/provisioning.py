@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -18,18 +19,17 @@ UNIT_TEMPLATE = """\
 Description=IB Gateway instance %i (headless, managed by IBC)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=3600
+StartLimitBurst=5
 
 [Service]
 Type=simple
 Environment=HOME=/root
 WorkingDirectory={root}/%i
 ExecStartPre=/bin/mkdir -p {logs}/%i
-# xvfb-run owns the X server's lifetime and exports DISPLAY itself. Do not guard
-# this with pgrep: a `pgrep -f "Xvfb :N"` matches its own command line and so
-# always reports the server as already running.
 ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1280x1024x24" {root}/%i/gatewaystart.sh -inline
-Restart=on-failure
-RestartSec=30
+Restart=always
+RestartSec=60
 TimeoutStopSec=60
 KillMode=mixed
 KillSignal=SIGTERM
@@ -39,15 +39,37 @@ WantedBy=multi-user.target
 """
 
 BASE_SETTINGS = {
-    "ReadOnlyLogin": "yes",
+    "ReadOnlyLogin": "no",
+    "ReadOnlyApi": "yes",
     "AcceptIncomingConnectionAction": "accept",
     "TrustedTwsApiClientIPs": "127.0.0.1",
     "ExistingSessionDetectedAction": "primary",
-    "ReloginAfterSecondFactorAuthenticationTimeout": "yes",
+    "ReloginAfterSecondFactorAuthenticationTimeout": "no",
     "ExitAfterSecondFactorAuthenticationTimeout": "no",
     "AcceptNonBrokerageAccountWarning": "yes",
     "IbAutoClosedown": "no",
+    "AutoLogoffTime": "",
 }
+
+AUTO_RESTART_FORMAT = re.compile(r"^(0[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$")
+COLD_RESTART_FORMAT = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+def restart_schedule() -> dict[str, str]:
+    auto = settings.gateway_auto_restart_time.strip()
+    cold = settings.gateway_cold_restart_time.strip()
+    if not AUTO_RESTART_FORMAT.match(auto):
+        raise HTTPException(
+            503,
+            f"GATEWAY_AUTO_RESTART_TIME={auto!r} is not IBC's 'hh:mm AM' / 'hh:mm PM' "
+            "format (for example '03:00 AM'). IBC would reject it and Gateway would "
+            "fall back to a daily logoff that needs a second factor every morning.",
+        )
+    if cold and not COLD_RESTART_FORMAT.match(cold):
+        raise HTTPException(
+            503,
+            f"GATEWAY_COLD_RESTART_TIME={cold!r} is not HH:MM (24-hour, host timezone).",
+        )
+    return {"AutoRestartTime": auto, "ColdRestartTime": cold}
 
 def instance_root(connection_id: str) -> Path:
     return Path(settings.gateway_instance_root) / connection_id
@@ -93,16 +115,15 @@ def build_config(
     trading_mode: str,
     username: str | None = None,
     password: str | None = None,
-    read_only_login: bool = True,
     second_factor_device: str | None = None,
     two_factor_timeout: int | None = None,
 ) -> str:
     values = dict(BASE_SETTINGS)
+    values.update(restart_schedule())
     values["OverrideTwsApiPort"] = str(port)
     values["TradingMode"] = trading_mode
     values["IbLoginId"] = username or ""
     values["IbPassword"] = password or ""
-    values["ReadOnlyLogin"] = "yes" if read_only_login else "no"
     values["SecondFactorDevice"] = second_factor_device or ""
     values["SecondFactorAuthenticationTimeout"] = str(
         two_factor_timeout or settings.two_factor_timeout_seconds
@@ -144,7 +165,6 @@ def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict
             trading_mode=doc.get("trading_mode", "paper"),
             username=doc.get("ibkr_username"),
             password=existing_password,
-            read_only_login=doc.get("read_only_login", True),
             second_factor_device=doc.get("second_factor_device"),
         ),
     )

@@ -53,7 +53,6 @@ def write_credentials(
     mode: str,
     port: int,
     *,
-    read_only_login: bool | None = None,
     second_factor_device: str | None = None,
 ) -> None:
     with open(path) as handle:
@@ -63,9 +62,8 @@ def write_credentials(
         "IbPassword": password,
         "TradingMode": mode,
         "OverrideTwsApiPort": str(port),
+        "ReadOnlyLogin": "no",
     }
-    if read_only_login is not None:
-        values["ReadOnlyLogin"] = "yes" if read_only_login else "no"
     if second_factor_device is not None:
         values["SecondFactorDevice"] = second_factor_device
     write_atomic(path, apply_settings(text, values))

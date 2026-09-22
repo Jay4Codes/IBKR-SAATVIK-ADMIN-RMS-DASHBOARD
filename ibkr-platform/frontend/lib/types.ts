@@ -31,7 +31,8 @@ export type Gateway = {
   configured?: boolean;
   managed?: boolean;
   service_unit?: string;
-  read_only_login?: boolean;
+  auto_restart_time?: string | null;
+  cold_restart_time?: string | null;
   host?: string;
   port?: number;
   client_id?: number;

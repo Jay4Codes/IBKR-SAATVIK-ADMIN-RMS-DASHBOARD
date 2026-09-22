@@ -401,7 +401,6 @@ class ConnectionCreate(BaseModel):
     provider: Literal["ibkr_gateway", "snaptrade"] = "ibkr_gateway"
     trading_mode: Literal["live", "paper"] = "paper"
     account_filter: str = Field(default="", max_length=32)
-    read_only_login: bool = True
     second_factor_device: str = Field(default="", max_length=64)
 
 class ConnectionUpdate(BaseModel):
@@ -409,7 +408,6 @@ class ConnectionUpdate(BaseModel):
     status: Literal["DRAFT", "ENABLED", "DISABLED"] | None = None
     trading_mode: Literal["live", "paper"] | None = None
     account_filter: str | None = Field(default=None, max_length=32)
-    read_only_login: bool | None = None
     second_factor_device: str | None = Field(default=None, max_length=64)
     host: str | None = Field(default=None, max_length=253, pattern=r"^[A-Za-z0-9._-]+$")
     client_id: int | None = Field(default=None, gt=0, lt=1000000)
@@ -442,7 +440,6 @@ async def create_connection(
         created_by=user.id,
         trading_mode=body.trading_mode,
         account_filter=body.account_filter,
-        read_only_login=body.read_only_login,
         second_factor_device=body.second_factor_device or None,
     )
 
@@ -494,7 +491,7 @@ async def update_connection(
     merged = {**doc, **changes}
 
     rewrite = doc.get("managed", True) and doc["provider"] == registry.Provider.IBKR_GATEWAY.value
-    if rewrite and {"trading_mode", "read_only_login", "second_factor_device"} & set(changes):
+    if rewrite and {"trading_mode", "second_factor_device"} & set(changes):
         await asyncio.to_thread(provisioning.provision_files, merged)
     changes["updated_at"] = now()
     await db.broker_connections.update_one({"_id": connection_id, "tenant_id": user.tenant_id}, {"$set": changes})
@@ -583,7 +580,6 @@ async def connection_credentials(
             body.password,
             body.mode,
             body.port,
-            read_only_login=doc.get("read_only_login", True),
             second_factor_device=doc.get("second_factor_device"),
         )
     except OSError as exc:

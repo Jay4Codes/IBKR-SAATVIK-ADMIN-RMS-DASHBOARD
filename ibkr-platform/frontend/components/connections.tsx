@@ -170,7 +170,6 @@ function AddConnection({
           provider,
           trading_mode: String(data.get("trading_mode") ?? "paper"),
           account_filter: String(data.get("account_filter") ?? "").trim(),
-          read_only_login: data.get("read_only_login") === "on",
           second_factor_device: String(data.get("second_factor_device") ?? "").trim(),
         });
       }}
@@ -221,17 +220,16 @@ function AddConnection({
       </div>
 
       {provider === "ibkr_gateway" && (
-        <label className="checkbox">
-          <input type="checkbox" name="read_only_login" defaultChecked />
-          <span>
-            Read-only login
-            <small>
-              Skips IBKR&rsquo;s second factor entirely, so the gateway starts
-              unattended. This platform never places orders, so read-only costs
-              nothing. Clear it and every start waits on a push notification.
-            </small>
-          </span>
-        </label>
+        <p className="muted two-factor-note">
+          <strong>Second factor.</strong> Every live IBKR login needs one approval
+          on the device enrolled for that username; IB Gateway has no read-only
+          bypass. This gateway is provisioned to restart daily from its own
+          token with no push, and to do its one full login on Sunday evening.
+          Use a <strong>dedicated API username</strong> added under the
+          account&rsquo;s <em>Users &amp; Access Rights</em>, not the
+          trader&rsquo;s own login: IBKR allows one session per username, so a
+          shared login would knock the trader out of TWS and ring their phone.
+        </p>
       )}
 
       <div className="form-footer">

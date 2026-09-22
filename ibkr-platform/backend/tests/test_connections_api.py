@@ -88,9 +88,15 @@ async def test_changing_the_login_shape_rewrites_the_instance_config(client, sto
     assert provisioned == [], "a rename does not touch the gateway's config"
 
     assert (
-        await client.post(f"/api/v1/connections/{created['id']}", json={"read_only_login": False})
+        await client.post(
+            f"/api/v1/connections/{created['id']}", json={"second_factor_device": "IB Key"}
+        )
     ).status_code == 200
-    assert len(provisioned) == 1, "turning off read-only login must reach the config file"
+    assert len(provisioned) == 1, "naming the second-factor device must reach the config file"
+
+    assert (
+        await client.post(f"/api/v1/connections/{created['id']}", json={"read_only_login": True})
+    ).status_code == 422, "read-only login is not a Gateway feature and is no longer accepted"
 
 async def test_an_adopted_connection_is_never_rewritten(client, stores, provisioned):
     response = await client.post(f"/api/v1/connections/{CONNECTION}", json={"trading_mode": "live"})

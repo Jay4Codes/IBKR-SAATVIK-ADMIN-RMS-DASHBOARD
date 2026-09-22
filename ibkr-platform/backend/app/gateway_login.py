@@ -84,8 +84,11 @@ def read_two_factor_timeout(path: str | None) -> int:
 def read_trading_mode(path: str | None) -> str:
     return (hostctl.read_setting("TradingMode", path) or "").lower() or "paper"
 
-def read_only_login(path: str | None) -> bool:
-    return (hostctl.read_setting("ReadOnlyLogin", path) or "").lower() in ("yes", "true")
+def read_restart_schedule(path: str | None) -> dict[str, str | None]:
+    return {
+        "auto_restart_time": hostctl.read_setting("AutoRestartTime", path) or None,
+        "cold_restart_time": hostctl.read_setting("ColdRestartTime", path) or None,
+    }
 
 def parse_timestamp(line: str) -> datetime | None:
     found = _TIMESTAMP.match(line)
@@ -286,7 +289,7 @@ async def snapshot(connection: dict) -> dict:
         "api_port_open": port_open,
         "gateway_username": hostctl.read_username(config_path),
         "trading_mode": read_trading_mode(config_path),
-        "read_only_login": read_only_login(config_path),
+        **read_restart_schedule(config_path),
         **progress.as_dict(),
     }
 

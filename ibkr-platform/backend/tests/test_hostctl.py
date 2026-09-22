@@ -44,15 +44,18 @@ def test_write_credentials_is_atomic_and_leaves_no_temp_files(config, tmp_path):
     leftovers = [p for p in os.listdir(tmp_path) if p != "config.ini"]
     assert leftovers == []
 
-def test_read_only_login_and_second_factor_device_are_optional(config):
+def test_credentials_never_advertise_a_read_only_login_on_gateway(config):
+    with open(config, "a") as handle:
+        handle.write("ReadOnlyLogin=yes\n")
     hostctl.write_credentials(config, "apibot", "pw", "live", 4001)
-    assert "ReadOnlyLogin" not in open(config).read()
-    hostctl.write_credentials(
-        config, "apibot", "pw", "live", 4001, read_only_login=False, second_factor_device="IB Key"
-    )
     text = open(config).read()
     assert "ReadOnlyLogin=no" in text
-    assert "SecondFactorDevice=IB Key" in text
+    assert "ReadOnlyLogin=yes" not in text
+    assert "SecondFactorDevice" not in text
+
+def test_second_factor_device_is_optional(config):
+    hostctl.write_credentials(config, "apibot", "pw", "live", 4001, second_factor_device="IB Key")
+    assert "SecondFactorDevice=IB Key" in open(config).read()
 
 def test_read_username_returns_only_the_username(config):
     assert hostctl.read_username(config) == "olduser"

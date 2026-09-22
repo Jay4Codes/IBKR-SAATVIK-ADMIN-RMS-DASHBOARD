@@ -124,16 +124,28 @@ done from **Connections** inside the tenant, as an `OWNER` or `ADMIN`.
    order.
 
 2. **Add the IBKR login.** On the connection, open **IBKR login** and supply the
-   client's dedicated API username and password. It is written only to that
+   client's **dedicated API username** and password. It is written only to that
    instance's `config.ini`, at 0600. It is never stored in MongoDB, never
    returned by the API, and never logged.
 
-   Leave **read-only login** on unless the tenant needs order placement one day.
-   A read-only login skips IBKR's second factor entirely, which is what lets the
-   gateway start unattended; turning it off means every start waits on a push
-   notification approved in IBKR Mobile.
+   The username must not be the trader's own. IBKR allows one brokerage
+   session per username: a gateway logged in as the trader knocks them out of
+   TWS and IBKR Mobile (`ExistingSessionDetectedAction=primary` means the
+   gateway wins and reconnects, which is itself a new push), and every push the
+   gateway needs lands on the trader's phone. Have the account holder add a
+   user in Client Portal under **Settings → Users & Access Rights → Add user**
+   (no trading permission is needed; this platform never places orders), enrol
+   that user's second factor on a device the operations desk controls, and
+   give this platform that login. Two logins on one account are two independent
+   sessions; the trader never notices the gateway again.
 
-   If the IBKR account has more than one second-factor device enrolled, set the
+   IB Gateway has **no read-only login**. IBC's `ReadOnlyLogin` is a TWS
+   feature; on Gateway IBC logs `Read-only login not supported by Gateway` and
+   proceeds to the second factor regardless. Earlier versions of this platform
+   offered it as a way to skip 2FA; it never did, and the option is gone.
+   Order safety is `ReadOnlyApi=yes`, which every provisioned gateway sets.
+
+   If the IBKR username has more than one second-factor device enrolled, set the
    device name (for example `IB Key`) when creating the connection. With it
    unset, IBC cannot choose and no push is ever sent — the dashboard reports
    this as `two_factor_device_required` rather than leaving you watching a
@@ -190,7 +202,40 @@ CONNECTED.
 
 IBKR's second factor is a push notification a human approves in IBKR Mobile. No
 part of this platform can answer it, and nothing here stores or replays a second
-factor. What it does is make the wait visible and keep operators from breaking it.
+factor. What it does is make the wait visible, keep operators from breaking it,
+and make sure it is asked for **once a week per gateway**, not once a night or
+once every few minutes.
+
+### How often a human has to tap
+
+IBKR requires Gateway to restart daily and to fully re-authenticate weekly. The
+two IBC settings below turn that into the minimum, and every provisioned
+gateway gets them (`GATEWAY_AUTO_RESTART_TIME`, `GATEWAY_COLD_RESTART_TIME`):
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `AutoRestartTime` | `03:00 AM` (Gateway's timezone, `jts.ini`) | Gateway's own daily restart from an encrypted restart token: no login dialog, no push. Supplying it clears Gateway's default **auto-logoff at 23:45**, which ends the session and forces a full 2FA login every morning. IBC rejects any value not in `hh:mm AM/PM`, so provisioning refuses a malformed one instead of silently falling back to daily logoff. |
+| `ColdRestartTime` | `13:30` (host timezone; 19:00 IST) | IBKR invalidates restart tokens every Sunday 01:00 US/Eastern. At this time on Sundays IBC closes Gateway tidily and logs in afresh: the one push per week, at an hour someone is holding the phone, instead of whenever IBKR's "security tokens expired" dialog happens to appear. |
+
+`ReloginAfterSecondFactorAuthenticationTimeout=no` and
+`ExitAfterSecondFactorAuthenticationTimeout=no` make a missed push cost one
+push. With relogin on, IBC re-sent the push after IBKR's 180-second expiry,
+then exited, and systemd's `Restart=` started it again a minute later — a
+fresh push every ~6.5 minutes for as long as nobody answered (22 Sep 2026: 45
+pushes in one morning on the adopted host). Now IBC stays at the expired
+prompt, the phase reads `two_factor_expired`, the gateway alert fires, and the
+next push is sent only when an operator presses **Start** or **Restart**.
+
+Anything that is not one of those two scheduled logins — a crash, a manual
+restart, a host reboot — is one more push. The API panel's **Details** shows
+the schedule the gateway is actually running with; "daily logoff" there means
+the config has been edited by hand and needs `AutoRestartTime` back.
+
+Steady state for a firm with *N* gateway logins is therefore *N* taps on
+Sunday evening. To make *N* small, put a firm's accounts under one IBKR
+Advisor (or Friends & Family) master username: one gateway, one weekly tap,
+and `managedAccounts()` returns every sub-account, while each client keeps
+their own username for TWS untouched.
 
 The backend reads each connection's own IBC logs and reports a `login_phase` on
 `GET /api/v1/gateway` and on every row of `GET /api/v1/connections`. One poller

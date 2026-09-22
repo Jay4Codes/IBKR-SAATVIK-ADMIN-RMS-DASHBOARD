@@ -233,6 +233,23 @@ export function GatewayStatus({
             </dd>
           </div>
         )}
+        {isAdmin && gateway?.provider !== "snaptrade" && (
+          <div>
+            <dt>Two-factor schedule</dt>
+            <dd className={gateway?.auto_restart_time ? undefined : "negative"}>
+              {gateway?.auto_restart_time
+                ? `daily restart ${gateway.auto_restart_time}, no push`
+                : "daily logoff — a push every morning"}
+              <span className="muted">
+                {" "}
+                · weekly login{" "}
+                {gateway?.cold_restart_time
+                  ? `Sunday ${gateway.cold_restart_time} host time`
+                  : "whenever IBKR expires the token"}
+              </span>
+            </dd>
+          </div>
+        )}
         <div>
           <dt>API port</dt>
           <dd>

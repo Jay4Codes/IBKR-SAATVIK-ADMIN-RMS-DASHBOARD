@@ -59,9 +59,10 @@ systemctl restart ibkr-api ibkr-worker
 ```
 
 **Do not restart `ibkr-gateway`.** Nothing in this migration requires it, and on
-this host a live restart performs a real IBKR login. With `ReadOnlyLogin=yes`
-that login is unattended; with it off, it sends a push to the account holder's
-phone that expires in 180 seconds.
+this host a live restart performs a real IBKR login, which sends a push to the
+phone enrolled for that username and expires in 180 seconds. (`ReadOnlyLogin`
+does not change this: IB Gateway has no read-only login, whatever the config
+says.)
 
 The worker picks the adopted connection up on its next supervision pass, within
 ten seconds, and reconnects to the same gateway on the same port.

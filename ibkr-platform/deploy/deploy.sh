@@ -15,8 +15,9 @@
 # the build runs, so a failed build changes nothing.
 #
 # ibkr-gateway (and any ibkr-gateway@<id> instance) is never restarted here.
-# A live gateway restart performs a real IBKR login, and with ReadOnlyLogin=no
-# it sends a push to the account holder's phone that expires in 180 seconds.
+# A live gateway restart performs a real IBKR login, which sends a push to the
+# phone enrolled for that username (IB Gateway has no read-only bypass) that
+# expires in 180 seconds.
 # Restart one deliberately, from the dashboard or by name.
 set -euo pipefail
 

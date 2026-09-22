@@ -164,13 +164,25 @@ describe("broker connections", () => {
           name: "Acme production",
           provider: "ibkr_gateway",
           trading_mode: "live",
-          read_only_login: true,
         }),
       ),
     );
     expect(
       await screen.findByText(/Provisioned on port 4102/),
     ).toBeTruthy();
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "/connections",
+      expect.objectContaining({ read_only_login: expect.anything() }),
+    );
+  });
+
+  it("tells the operator a dedicated API username is needed, not a read-only bypass", async () => {
+    apiMock.mockResolvedValue([]);
+    wrap(<Connections />);
+    fireEvent.click(await screen.findByText("Add connection"));
+    expect(screen.queryByLabelText(/Read-only login/)).toBeNull();
+    expect(screen.getByText(/dedicated API username/)).toBeTruthy();
+    expect(screen.getByText(/no read-only\s+bypass/)).toBeTruthy();
   });
 
   it("offers the SnapTrade path without gateway-only fields", async () => {

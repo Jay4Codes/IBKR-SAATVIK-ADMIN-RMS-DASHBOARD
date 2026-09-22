@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     gateway_port_range_start: int = 4100
     gateway_port_range_end: int = 4199
     gateway_provisioning_enabled: bool = True
+    gateway_auto_restart_time: str = "03:00 AM"
+    gateway_cold_restart_time: str = "13:30"
 
     snaptrade_client_id: str = ""
     snaptrade_consumer_key: str = ""
