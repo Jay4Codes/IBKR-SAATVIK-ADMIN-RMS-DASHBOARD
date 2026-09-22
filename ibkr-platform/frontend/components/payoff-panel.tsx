@@ -46,8 +46,7 @@ export function buildColumns(percents: number[], prices: number[], spot: number)
   for (const price of prices) {
     if (!(spot > 0)) continue;
     const shock = round((price / spot - 1) * 100);
-    // A price that lands on an existing column replaces its heading: the reader
-    // asked in prices, so the price is the more useful label of the two.
+
     columns.set(shock, {
       shock, label: money(String(price), 0), kind: "price",
       id: `price:${price}`, group: `price:${price}`, custom: true,
@@ -260,7 +259,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
         <label>Days forward: {horizon}<input type="range" min={0} max={maxDays} step={1} value={horizon} onChange={e => setDays(Number(e.target.value))} /></label>
         <label>Annual interest: {rate}%<input type="range" min={-5} max={25} step={0.25} value={rate} onChange={e => setRate(Number(e.target.value))} /></label>
       </div>
-      <p className="footnote">{legs.length} included legs · {excluded.length} excluded legs in {currency}. Model clock: {today} ({zone}); time to expiry runs to the 16:00 New York close, and the horizon stops at the earliest included expiry. Reference prices come from the broker: a held stock’s mark, else the underlying price IB computes for the options on it. Type over one to model a different level, or clear the field to hand it back to the feed. Volatility defaults to an assumed 30%.</p>
+      <p className="footnote">{legs.length} included legs · {excluded.length} excluded legs in {currency}. Model clock: {today} ({zone}); time to expiry runs to the 16:00 New York close, and the horizon stops at the earliest included expiry. Reference prices come from the broker: a held stock’s mark, else the underlying price IB computes for the options on it. Volatility defaults to an assumed 30%.</p>
       {keys.length > 0 && <div className="risk-assumptions">{keys.map(key => <fieldset key={key}>
         <legend>{key}</legend>
         <label>Volatility (%)<input type="number" min="0" max="500" step="any" value={Number.isFinite(assumptions[key].volatility) ? assumptions[key].volatility * 100 : ""} onChange={e => change(key, "volatility", e.target.value)} /></label>
@@ -268,18 +267,17 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
       </fieldset>)}</div>}
       </div>
       <div className="reference-bar">
-        {keys.map(key => <label key={key}>
-          <span>{key.split(":").at(-1)} reference price</span>
-          <input type="number" min="0.000001" step="any" inputMode="decimal"
-            placeholder={quoted[key] === undefined ? "Enter a price" : money(String(quoted[key]))}
-            aria-label={`${key.split(":").at(-1)} reference price`}
-            value={overrides[key]?.spot !== undefined && Number.isFinite(overrides[key]!.spot) ? overrides[key]!.spot : ""}
-            onChange={e => change(key, "spot", e.target.value)} />
-          <small>{overrides[key]?.spot !== undefined
-            ? `Modelling ${money(String(assumptions[key].spot))} · broker mark ${quoted[key] === undefined ? "unavailable" : money(String(quoted[key]))}`
-            : quoted[key] === undefined ? "No broker mark — enter a price" : spotLabel(marks[key]?.source ?? "")}</small>
-        </label>)}
-        {keys.some(key => overrides[key]?.spot !== undefined) && <span className="bar-action"><Button type="button" variant="ghost" size="sm" onClick={() => setOverrides({})}>Reset to broker marks</Button></span>}
+        {keys.map(key => {
+          const symbol = key.split(":").at(-1);
+          const price = quoted[key];
+          return <div key={key} className="reference-readout">
+            <span id={`ref-${key.replace(/:/g, "-")}`}>{symbol} reference price</span>
+            <output className="reference-value" aria-labelledby={`ref-${key.replace(/:/g, "-")}`}>
+              {price === undefined ? "—" : money(String(price))}
+            </output>
+            <small>{price === undefined ? "No broker mark" : spotLabel(marks[key]?.source ?? "")}</small>
+          </div>;
+        })}
         {keys.map(key => <label key={`${key}-iv`} className="iv-control">
           <span>{key.split(":").at(-1)} IV {(assumptions[key].volatility * 100).toFixed(1)}%</span>
           <input type="range" min={1} max={150} step={0.5}
@@ -403,11 +401,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
           ))}</tr></thead>
           <tbody>
             <tr><th scope="row">Scenario underlying level</th>{scenarioRows.map(({ column, point }) => <td key={column.id} className={cellClass(column)}>{scenarioLevel(point.shock)}</td>)}</tr>
-            {/* Two adjustments, and they are different things: P&L realised by
-                closing a leg, and commission IBKR had folded into average cost.
-                One row carrying their sum called the whole thing "booked P&L",
-                which on a book with no closings labelled 11.04 of commission as
-                something the desk had booked. */}
             {realized !== 0 && <>
               <tr><th scope="row">Open legs, as broker reports</th>{scenarioRows.map(({ column, point }) => <td key={column.id} className={cellClass(column)}><Amount value={String(point.terminal - realized)} /></td>)}</tr>
               {applied !== 0 && <tr className="booked"><th scope="row">Booked P&amp;L (closed legs)</th>{scenarioRows.map(({ column }) => <td key={column.id} className={cellClass(column)}><Amount value={String(applied)} /></td>)}</tr>}
@@ -418,9 +411,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
             {!accountId && accountRows.map(a => <tr key={a}><th scope="row">{a} terminal</th>{scenarioRows.map(({ column, point }) => <td key={column.id} className={cellClass(column)}><Amount value={String(point.accounts[a])} /></td>)}</tr>)}
           </tbody>
         </table></div>
-        {/* Drives the whole panel, chart included: two expiries added together
-            are two payoffs drawn on one axis, which is not a shape anyone
-            trades. Sits above the curve it changes. */}
         <StrategyPayoff
           legs={legs} assumptions={assumptions} keys={keys} currency={currency}
           rate={rate} offset={realized} light={light} range={range}
@@ -465,9 +455,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
           {realized !== 0 && <span>Open legs as the broker reports them, at current reference (0%) <b><Amount value={String(openPoint?.terminal)} /> {currency}</b></span>}
           <span>Expiry P&L if SPX expires at current reference (0%) <b><Amount value={String(currentPoint?.terminal)} /> {currency}</b></span>
           <span>Live marked P&L at current reference (0%) <b><Amount value={String(currentPoint?.modeled)} /> {currency}</b></span>
-          {/* Named for the question each answers. "Worst mark-anchored estimate
-              in sampled range" described its own method and left the reader to
-              work out what it was for. */}
           <span>Worst case at expiry (max loss, within plotted range) <b><Amount value={String(Math.min(...adjusted.map(p => p.terminal)))} /> {currency}</b></span>
           <span>Worst case today if the market gapped (mark-to-market) <b><Amount value={String(Math.min(...adjusted.map(p => p.modeled)))} /> {currency}</b></span>
         </div>

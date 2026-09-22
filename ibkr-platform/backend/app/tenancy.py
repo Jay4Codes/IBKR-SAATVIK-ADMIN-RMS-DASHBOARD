@@ -11,10 +11,8 @@ from fastapi import HTTPException
 
 SUPER_ADMIN_EMAIL = "ekalon.consulting@gmail.com"
 
-
 def is_super_admin_email(email: str) -> bool:
     return email.strip().lower() == SUPER_ADMIN_EMAIL
-
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 
@@ -30,11 +28,9 @@ TENANT_COLLECTIONS = (
     "visibility_tests",
 )
 
-
 class TenantStatus(StrEnum):
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
-
 
 class TenantRole(StrEnum):
 
@@ -43,14 +39,11 @@ class TenantRole(StrEnum):
     TRADER = "TRADER"
     VIEWER = "VIEWER"
 
-
 TENANT_ADMIN_ROLES = frozenset({TenantRole.OWNER, TenantRole.ADMIN})
 TENANT_ALL_ACCOUNT_ROLES = TENANT_ADMIN_ROLES
 
-
 def now() -> datetime:
     return datetime.now(UTC)
-
 
 def normalize_slug(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
@@ -61,7 +54,6 @@ def normalize_slug(value: str) -> str:
             "and hyphens, starting and ending with a letter or digit",
         )
     return slug
-
 
 def new_tenant(name: str, slug: str | None = None, **extra: Any) -> dict[str, Any]:
     moment = now()
@@ -75,7 +67,6 @@ def new_tenant(name: str, slug: str | None = None, **extra: Any) -> dict[str, An
         "features": {},
         **extra,
     }
-
 
 @dataclass(frozen=True, slots=True)
 class TenantKeys:
@@ -131,9 +122,7 @@ class TenantKeys:
     def consumer_group(self) -> str:
         return "mongo-history-v2"
 
-
 COMMAND_CHANNEL = "platform.commands"
-
 
 @dataclass(frozen=True, slots=True)
 class Membership:
@@ -161,7 +150,6 @@ class Membership:
             "role": self.role.value,
             "accounts": list(self.accounts),
         }
-
 
 @dataclass(frozen=True, slots=True)
 class Principal:
@@ -227,14 +215,11 @@ class Principal:
             "impersonating": self.impersonating,
         }
 
-
 async def load_tenant(db, tenant_id: str) -> dict[str, Any] | None:
     return await db.tenants.find_one({"_id": tenant_id})
 
-
 async def load_tenant_by_slug(db, slug: str) -> dict[str, Any] | None:
     return await db.tenants.find_one({"slug": slug})
-
 
 async def memberships_for(db, user_id: str, *, include_suspended: bool = False) -> list[Membership]:
     rows = [row async for row in db.tenant_members.find({"user_id": user_id, "status": "ACTIVE"})]
@@ -263,7 +248,6 @@ async def memberships_for(db, user_id: str, *, include_suspended: bool = False) 
         )
     return sorted(memberships, key=lambda m: m.name.lower())
 
-
 def membership_for_super_admin(tenant: dict[str, Any]) -> Membership:
     return Membership(
         tenant_id=tenant["_id"],
@@ -273,7 +257,6 @@ def membership_for_super_admin(tenant: dict[str, Any]) -> Membership:
         role=TenantRole.OWNER,
         accounts=(),
     )
-
 
 async def resolve_active(
     db,

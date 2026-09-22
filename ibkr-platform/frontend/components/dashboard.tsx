@@ -116,10 +116,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { view: "Tenants", icon: Building2, platform: true },
     ],
   },
-  /* Its own group, not a tail on Administration. Sitting there it was hidden
-     from every non-admin along with the group — so a trader could not reach
-     their own profile at all, and with alerts now living there, could not
-     connect the Telegram chat that is theirs alone. */
+
   {
     group: "Account",
     items: [{ view: "Profile", icon: UserRound }],
@@ -128,12 +125,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
 
 const VIEWS = NAV.flatMap((section) => section.items.map((item) => item.view));
 
-/** The navigation a given role actually sees.
- *
- *  Extracted because this is where access is decided, and it was wrong: a
- *  group-wide admin check hid every item in the group, including the ones that
- *  carried no requirement of their own.
- */
 export function visibleNav(isAdmin: boolean, isPlatformAdmin: boolean) {
   return NAV.map((section) => ({
     group: section.group,
@@ -145,14 +136,8 @@ export function visibleNav(isAdmin: boolean, isPlatformAdmin: boolean) {
 
 const ACCOUNT_TABS = ["RMS", "Summary", "Positions", "Skew", "Performance", "Orders", "Executions"] as const;
 
-/** Profile's own sections. Alerts is its own tab because it is configuration
- *  the reader comes to change; everything else — identity, organisations,
- *  session and admin links — is one page about who you are signed in as.
- *
- *  Organisations was briefly a tab of its own and showed an empty panel to
- *  anyone belonging to a single organisation, which is almost everyone. */
 const PROFILE_TABS = ["Account", "Alerts"] as const;
-/** The same glyphs the account tabs carry, so both tablists read alike. */
+
 const PROFILE_TAB_ICONS = { Account: UserRound, Alerts: Bell } as const;
 type ProfileTab = (typeof PROFILE_TABS)[number];
 type AccountTab = (typeof ACCOUNT_TABS)[number];
@@ -601,9 +586,7 @@ function Terminal({
                 )}
               </>
             )}
-            {/* One account needs no table to tell it apart from the others, and
-                the wide row of bare numbers said less than the labelled cards
-                below it. The table earns its place once there are several. */}
+
             {!accountId && (view === "Overview" || view === "Accounts") && selected.length === 1 && (
               <BalancePanel
                 account={selected[0]}
@@ -708,8 +691,7 @@ function Terminal({
                 error={accounts.isError || positions.some((p) => p.isError)}
               />
             )}
-            {/* One view, not two: commissions are what the performance above
-                them cost, and reading either alone gives half the picture. */}
+
             {shows("Performance") && <PnlCards accountId={accountId} />}
             {shows("Performance") && (
               <PerformancePanel

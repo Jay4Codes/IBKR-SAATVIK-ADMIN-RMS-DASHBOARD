@@ -5,12 +5,6 @@ import { api } from "@/lib/api";
 import { CommissionSummary, RealizedSummary } from "@/lib/types";
 import { Amount, money } from "./tables";
 
-/** The headline figures, before any chart.
- *
- *  Booked P&L leads because it is the one the desk cannot see anywhere else:
- *  a closed leg leaves the position feed entirely, so a page built from open
- *  positions reports a book that has been adjusted as though it never was.
- */
 export function PnlCards({ accountId }: { accountId?: string }) {
   const scope = accountId ? `&accounts=${encodeURIComponent(accountId)}` : "";
   const realized = useQuery({
@@ -23,8 +17,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
   });
 
   const booked = Number(realized.data?.total ?? 0);
-  // Every commission the broker has reported, not only the cycle's: this card
-  // is the lifetime cost, and the payoff panel is where a cycle is modelled.
+
   const spent = Number(commissions.data?.total ?? 0);
   const pending = realized.isPending || commissions.isPending;
 

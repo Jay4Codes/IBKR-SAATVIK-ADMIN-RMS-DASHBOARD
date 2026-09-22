@@ -52,7 +52,6 @@ from app.tenancy import (
 configure()
 log = logging.getLogger("backend")
 
-
 @asynccontextmanager
 async def lifespan(app):
     client, db = database()
@@ -69,7 +68,6 @@ async def lifespan(app):
     finally:
         await redis.aclose()
         await client.close()
-
 
 async def watch_gateway_logins(app):
     interval = max(1.0, settings.gateway_login_poll_seconds)
@@ -103,7 +101,6 @@ async def watch_gateway_logins(app):
             log.exception("gateway.login_poll_failed")
         await asyncio.sleep(interval)
 
-
 app = FastAPI(title="IBKR Admin RMS — multi-tenant", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
@@ -113,26 +110,21 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Tenant"],
 )
 
-
 def ok(data):
     return {"success": True, "data": data}
-
 
 @app.exception_handler(HTTPException)
 async def http_error(request, exc):
     return JSONResponse({"success": False, "error": exc.detail}, status_code=exc.status_code)
 
-
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
     return JSONResponse({"success": False, "error": "Invalid request"}, status_code=422)
-
 
 @app.exception_handler(Exception)
 async def error(request, exc):
     log.exception("api.request_failed", exc_info=exc)
     return JSONResponse({"success": False, "error": "Service unavailable"}, status_code=503)
-
 
 @app.middleware("http")
 async def headers(request, call_next):
@@ -142,16 +134,13 @@ async def headers(request, call_next):
     response.headers["Cache-Control"] = "no-store"
     return response
 
-
 def repository(request: Request, user: Principal) -> StateRepository:
     return StateRepository(request.app.state.redis, user.tenant_id)
-
 
 class Login(BaseModel):
     email: str = Field(max_length=254)
     password: str = Field(max_length=1024)
     tenant: str | None = Field(default=None, max_length=64)
-
 
 @app.post("/api/v1/auth/login")
 async def login(body: Login, request: Request):
@@ -193,11 +182,9 @@ async def login(body: Login, request: Request):
         response.set_cookie(TENANT_COOKIE, principal.active.tenant_id, **{**cookie, "httponly": False})
     return response
 
-
 @app.get("/api/v1/auth/me")
 async def me(user: Principal = Depends(require_user)):
     return ok(user.as_dict())
-
 
 @app.post("/api/v1/auth/logout")
 async def logout(request: Request):
@@ -207,17 +194,14 @@ async def logout(request: Request):
     response.delete_cookie(TENANT_COOKIE)
     return response
 
-
 @app.get("/health")
 async def health(request: Request):
     await request.app.state.redis.ping()
     await request.app.state.db.command("ping")
     return ok({"status": "ok", "mongodb": "connected", "redis": "connected"})
 
-
 class TenantSwitch(BaseModel):
     tenant: str = Field(min_length=1, max_length=64)
-
 
 @app.get("/api/v1/tenants")
 async def my_tenants(request: Request, user: Principal = Depends(require_user)):
@@ -250,7 +234,6 @@ async def my_tenants(request: Request, user: Principal = Depends(require_user)):
         }
     )
 
-
 @app.post("/api/v1/tenants/switch")
 async def switch_tenant(body: TenantSwitch, request: Request, user: Principal = Depends(require_user)):
     principal = await identity(
@@ -272,17 +255,14 @@ async def switch_tenant(body: TenantSwitch, request: Request, user: Principal = 
     )
     return response
 
-
 class TenantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     slug: str | None = Field(default=None, max_length=40)
     owner_email: str | None = Field(default=None, max_length=254)
 
-
 class TenantUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=80)
     status: Literal["ACTIVE", "SUSPENDED"] | None = None
-
 
 def tenant_row(doc: dict) -> dict:
     return {
@@ -293,7 +273,6 @@ def tenant_row(doc: dict) -> dict:
         "created_at": doc.get("created_at"),
         "features": doc.get("features", {}),
     }
-
 
 @app.get("/api/v1/admin/tenants")
 async def list_tenants(request: Request, user: Principal = Depends(require_super_admin)):
@@ -309,7 +288,6 @@ async def list_tenants(request: Request, user: Principal = Depends(require_super
             "accounts": await db.ibkr_accounts.count_documents({"tenant_id": doc["_id"]}),
         }
     return ok([{**tenant_row(doc), **counts[doc["_id"]]} for doc in rows])
-
 
 @app.post("/api/v1/admin/tenants")
 async def create_tenant(body: TenantCreate, request: Request, user: Principal = Depends(require_super_admin)):
@@ -338,7 +316,6 @@ async def create_tenant(body: TenantCreate, request: Request, user: Principal = 
     await audit(db, user, "tenant_created", {"tenant": tenant["_id"], "slug": slug})
     return ok({**tenant_row(tenant), "owner": owner["email"] if owner else None})
 
-
 @app.post("/api/v1/admin/tenants/{tenant_id}")
 async def update_tenant(
     tenant_id: str, body: TenantUpdate, request: Request, user: Principal = Depends(require_super_admin)
@@ -354,12 +331,10 @@ async def update_tenant(
     await audit(db, user, "tenant_updated", {"tenant": tenant_id, **changes})
     return ok(tenant_row(await db.tenants.find_one({"_id": tenant_id})))
 
-
 class MemberUpsert(BaseModel):
     email: str = Field(max_length=254)
     role: Literal["OWNER", "ADMIN", "TRADER", "VIEWER"] = "VIEWER"
     accounts: list[str] = Field(default_factory=list, max_length=200)
-
 
 @app.get("/api/v1/members")
 async def list_members(request: Request, user: Principal = Depends(require_tenant_admin)):
@@ -381,7 +356,6 @@ async def list_members(request: Request, user: Principal = Depends(require_tenan
             for row in rows
         ]
     )
-
 
 @app.post("/api/v1/members")
 async def upsert_member(
@@ -409,7 +383,6 @@ async def upsert_member(
     await audit(db, user, "member_upserted", {"email": body.email.lower(), "role": body.role})
     return ok({"email": body.email.lower(), "role": body.role, "accounts": body.accounts})
 
-
 @app.delete("/api/v1/members/{user_id}")
 async def remove_member(user_id: str, request: Request, user: Principal = Depends(require_tenant_admin)):
     db = request.app.state.db
@@ -423,7 +396,6 @@ async def remove_member(user_id: str, request: Request, user: Principal = Depend
     await audit(db, user, "member_removed", {"user_id": user_id})
     return ok({"removed": user_id})
 
-
 class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     provider: Literal["ibkr_gateway", "snaptrade"] = "ibkr_gateway"
@@ -431,7 +403,6 @@ class ConnectionCreate(BaseModel):
     account_filter: str = Field(default="", max_length=32)
     read_only_login: bool = True
     second_factor_device: str = Field(default="", max_length=64)
-
 
 class ConnectionUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=60)
@@ -442,7 +413,6 @@ class ConnectionUpdate(BaseModel):
     second_factor_device: str | None = Field(default=None, max_length=64)
     host: str | None = Field(default=None, max_length=253, pattern=r"^[A-Za-z0-9._-]+$")
     client_id: int | None = Field(default=None, gt=0, lt=1000000)
-
 
 @app.get("/api/v1/connections")
 async def list_connections(request: Request, user: Principal = Depends(require_tenant)):
@@ -455,7 +425,6 @@ async def list_connections(request: Request, user: Principal = Depends(require_t
         row["state"] = await repo.gateway(doc["_id"])
         rows.append(row)
     return ok(rows)
-
 
 @app.post("/api/v1/connections")
 async def create_connection(
@@ -507,7 +476,6 @@ async def create_connection(
     await audit(db, user, "connection_created", {"connection": doc["_id"], "provider": body.provider})
     return ok(registry.present(doc))
 
-
 @app.post("/api/v1/connections/{connection_id}")
 async def update_connection(
     connection_id: str,
@@ -533,7 +501,6 @@ async def update_connection(
     await audit(db, user, "connection_updated", {"connection": connection_id, **changes})
     return ok(registry.present({**doc, **changes}))
 
-
 @app.delete("/api/v1/connections/{connection_id}")
 async def delete_connection(
     connection_id: str, request: Request, user: Principal = Depends(require_tenant_admin)
@@ -558,7 +525,6 @@ async def delete_connection(
     await audit(db, user, "connection_deleted", {"connection": connection_id})
     return ok({"deleted": connection_id})
 
-
 async def guarded_command(request: Request, user: Principal, connection_id: str, action: str, payload: dict):
     if action not in {"process_start", "process_stop", "process_restart", "reconnect"} or not user.can_control_gateway:
         user.require_tenant_admin()
@@ -569,24 +535,20 @@ async def guarded_command(request: Request, user: Principal, connection_id: str,
     await audit(request.app.state.db, user, f"gateway_{action}", {"connection": connection_id, **payload})
     log.info("gateway.%s_requested connection=%s by=%s", action, connection_id, user.email)
 
-
 class GatewayCredentials(BaseModel):
     username: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     password: str = Field(min_length=1, max_length=256)
     mode: Literal["live", "paper"]
     port: int = Field(gt=0, lt=65536)
 
-
 class GatewayProcess(BaseModel):
     action: Literal["start", "stop", "restart"]
     force: bool = False
-
 
 class GatewayTarget(BaseModel):
     host: str = Field(min_length=1, max_length=253, pattern=r"^[A-Za-z0-9._-]+$")
     port: int = Field(gt=0, lt=65536)
     client_id: int = Field(gt=0, lt=1000000)
-
 
 async def gateway_connection(db, user: Principal, connection_id: str | None) -> dict:
     if connection_id:
@@ -595,7 +557,6 @@ async def gateway_connection(db, user: Principal, connection_id: str | None) -> 
     if not doc:
         raise HTTPException(404, "This tenant has no broker connection yet")
     return doc
-
 
 @app.post("/api/v1/connections/{connection_id}/credentials")
 async def connection_credentials(
@@ -640,7 +601,6 @@ async def connection_credentials(
     )
     return ok({"username": body.username, "mode": body.mode, "port": body.port})
 
-
 @app.post("/api/v1/connections/{connection_id}/process")
 async def connection_process(
     connection_id: str,
@@ -671,7 +631,6 @@ async def connection_process(
     await StateRepository(request.app.state.redis, user.tenant_id).clear_login(connection_id)
     return ok({"action": body.action, "process": state})
 
-
 @app.post("/api/v1/connections/{connection_id}/target")
 async def connection_target(
     connection_id: str,
@@ -691,7 +650,6 @@ async def connection_target(
     )
     return ok(payload)
 
-
 @app.post("/api/v1/connections/{connection_id}/reconnect")
 async def connection_reconnect(
     connection_id: str, request: Request, user: Principal = Depends(require_gateway_operator)
@@ -704,7 +662,6 @@ async def connection_reconnect(
         json.dumps({"command": "reconnect", "tenant_id": user.tenant_id, "connection_id": connection_id}),
     )
     return ok({"requested": True})
-
 
 @app.post("/api/v1/connections/{connection_id}/snaptrade/link")
 async def snaptrade_link(
@@ -721,7 +678,6 @@ async def snaptrade_link(
         url = await client.login_link()
     await audit(db, user, "snaptrade_link_issued", {"connection": connection_id})
     return ok({"url": url})
-
 
 @app.get("/api/v1/connections/{connection_id}/snaptrade/status")
 async def snaptrade_status(
@@ -751,7 +707,6 @@ async def snaptrade_status(
         ]}},
     )
     return ok({"authorizations": linked})
-
 
 @app.get("/api/v1/gateway")
 @app.get("/api/v1/gateway/status")
@@ -789,14 +744,12 @@ async def gateway(request: Request, connection_id: str | None = None, user: Prin
     state["service_unit"] = registry.unit_for(doc)
     return ok(state)
 
-
 @app.post("/api/v1/gateway/credentials")
 async def primary_credentials(
     body: GatewayCredentials, request: Request, user: Principal = Depends(require_tenant_admin)
 ):
     doc = await gateway_connection(request.app.state.db, user, None)
     return await connection_credentials(doc["_id"], body, request, user)
-
 
 @app.post("/api/v1/gateway/process")
 async def primary_process(
@@ -805,7 +758,6 @@ async def primary_process(
     doc = await gateway_connection(request.app.state.db, user, None)
     return await connection_process(doc["_id"], body, request, user)
 
-
 @app.post("/api/v1/gateway/target")
 async def primary_target(
     body: GatewayTarget, request: Request, user: Principal = Depends(require_tenant_admin)
@@ -813,12 +765,10 @@ async def primary_target(
     doc = await gateway_connection(request.app.state.db, user, None)
     return await connection_target(doc["_id"], body, request, user)
 
-
 @app.post("/api/v1/gateway/reconnect")
 async def primary_reconnect(request: Request, user: Principal = Depends(require_gateway_operator)):
     doc = await gateway_connection(request.app.state.db, user, None)
     return await connection_reconnect(doc["_id"], request, user)
-
 
 @app.get("/api/v1/accounts")
 async def accounts(request: Request, user: Principal = Depends(require_tenant)):
@@ -831,20 +781,17 @@ async def accounts(request: Request, user: Principal = Depends(require_tenant)):
         if user.sees(account)
     ])
 
-
 async def summary_data(repo: StateRepository, account: str, label: str = ""):
     data = await repo.account(account)
     if data is None or not await repo.knows_account(account):
         raise HTTPException(404, "Account not found")
     return {
         **data,
-        # A desk calls its accounts things like "Income" and "Hedge"; a screen
-        # full of U-numbers makes everyone translate in their head.
+
         "label": label,
         "open_positions": len(await repo.rows(account, "positions")),
         "open_orders": len(await repo.rows(account, "orders")),
     }
-
 
 async def account_labels(db, tenant_id: str) -> dict[str, str]:
     cursor = db.ibkr_accounts.find({"tenant_id": tenant_id}, {"account_id": 1, "label": 1})
@@ -854,7 +801,6 @@ async def account_labels(db, tenant_id: str) -> dict[str, str]:
         if doc.get("account_id")
     }
 
-
 @app.patch("/api/v1/accounts/{account_id}")
 async def name_account(
     account_id: str,
@@ -862,12 +808,12 @@ async def name_account(
     body: dict[str, Any],
     user: Principal = Depends(require_tenant_admin),
 ):
-    """Give an account a name the desk actually uses.
+\
+\
+\
+\
+\
 
-    Tenant-wide rather than per person: an account called "Income" should be
-    called that for everyone looking at it, or the name is worse than the
-    number it replaced.
-    """
     user.require_account(account_id)
     label = str(body.get("label") or "").strip()[:60]
     await request.app.state.db.ibkr_accounts.update_one(
@@ -879,7 +825,6 @@ async def name_account(
     )
     return ok({"account_id": account_id, "label": label})
 
-
 @app.get("/api/v1/accounts/{account_id}")
 @app.get("/api/v1/accounts/{account_id}/summary")
 async def summary(account_id: str, request: Request, user: Principal = Depends(require_tenant)):
@@ -888,7 +833,6 @@ async def summary(account_id: str, request: Request, user: Principal = Depends(r
     return ok(await summary_data(
         repository(request, user), account_id, labels.get(account_id, ""),
     ))
-
 
 @app.get("/api/v1/accounts/{account_id}/positions")
 @app.get("/api/v1/accounts/{account_id}/orders")
@@ -906,7 +850,6 @@ async def rows(account_id: str, request: Request, limit: int = 100, user: Princi
         return ok(await cursor.sort("executed_at", -1).limit(max(1, min(limit, 500))).to_list())
     return ok(await repo.rows(account_id, kind))
 
-
 async def history_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
     window: dict[str, Any] = {}
     if since:
@@ -923,7 +866,6 @@ async def history_rows(db, user: Principal, accounts: list[str], since: str | No
         if row.get("source") == "flex" or closes.get(key, {}).get("source") != "flex":
             closes[key] = row
     return [closes[key] for key in sorted(closes)]
-
 
 def combine(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_date: dict[str, list[dict[str, Any]]] = {}
@@ -945,7 +887,6 @@ def combine(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
     return out
 
-
 @app.get("/api/v1/accounts/{account_id}/history")
 async def account_history(
     account_id: str,
@@ -957,7 +898,6 @@ async def account_history(
     user.require_account(account_id)
     rows = await history_rows(request.app.state.db, user, [account_id], since, until)
     return ok(rows)
-
 
 @app.get("/api/v1/history")
 async def portfolio_history(
@@ -974,7 +914,6 @@ async def portfolio_history(
         user.require_account(account)
     rows = await history_rows(request.app.state.db, user, wanted, since, until)
     return ok({"accounts": wanted, "series": rows, "combined": combine(rows)})
-
 
 @app.get("/api/v1/history/intraday")
 async def intraday(
@@ -1009,7 +948,6 @@ async def intraday(
     ]
     return ok({"date": day, "accounts": wanted, "series": rows, "combined": combined})
 
-
 async def commission_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
     query = user.scope({"account_id": {"$in": accounts}, "commission": {"$ne": None}})
     window: dict[str, Any] = {}
@@ -1021,7 +959,6 @@ async def commission_rows(db, user: Principal, accounts: list[str], since: str |
         query["executed_at"] = window
     cursor = db.executions.find(query, {"_id": 0, "tenant_id": 0})
     return await cursor.sort("executed_at", 1).to_list(200_000)
-
 
 def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = Decimal(0)
@@ -1044,7 +981,6 @@ def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ],
     }
 
-
 @app.get("/api/v1/accounts/{account_id}/commissions")
 async def account_commissions(
     account_id: str,
@@ -1056,7 +992,6 @@ async def account_commissions(
     user.require_account(account_id)
     rows = await commission_rows(request.app.state.db, user, [account_id], since, until)
     return ok(commission_summary(rows))
-
 
 @app.get("/api/v1/commissions")
 async def portfolio_commissions(
@@ -1074,7 +1009,6 @@ async def portfolio_commissions(
     rows = await commission_rows(request.app.state.db, user, wanted, since, until)
     return ok(commission_summary(rows))
 
-
 async def realized_rows(
     db, user: Principal, accounts: list[str], expiries: list[str], active_on: str | None
 ):
@@ -1085,7 +1019,6 @@ async def realized_rows(
         query["expiry"] = {"$gte": active_on}
     cursor = db.executions.find(query, {"_id": 0, "tenant_id": 0})
     return await cursor.sort("executed_at", 1).to_list(200_000)
-
 
 def leg_row(row: dict[str, Any], amount: Decimal) -> dict[str, Any]:
     return {
@@ -1102,7 +1035,6 @@ def leg_row(row: dict[str, Any], amount: Decimal) -> dict[str, Any]:
         "executed_at": row.get("executed_at"),
     }
 
-
 def realized_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = Decimal(0)
     commission = Decimal(0)
@@ -1110,11 +1042,7 @@ def realized_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     by_leg: list[dict[str, Any]] = []
     for row in rows:
         amount = Decimal(str(row["realized_pnl"]))
-        # Every fill in the cycle is carried, not only the ones that booked a
-        # P&L. An opening trade realises nothing but still costs commission, and
-        # that cost is just as real to the position being held as a closing
-        # one's — leaving it out made "include commissions" a no-op on a book
-        # that had not been adjusted yet.
+
         commission += Decimal(str(row.get("commission") or 0))
         account = row.get("account_id") or ""
         if not amount:
@@ -1133,7 +1061,6 @@ def realized_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "legs": by_leg,
     }
 
-
 @app.get("/api/v1/realized")
 async def portfolio_realized(
     request: Request,
@@ -1151,7 +1078,6 @@ async def portfolio_realized(
     rows = await realized_rows(request.app.state.db, user, wanted, cycles, active_on)
     return ok(realized_summary(rows))
 
-
 async def alert_settings(db, user: Principal) -> dict[str, Any]:
     link = await db.telegram_links.find_one({"_id": user.id}, {"_id": 0})
     prefs = await db.alert_preferences.find_one(
@@ -1167,20 +1093,17 @@ async def alert_settings(db, user: Principal) -> dict[str, Any]:
         "available": list(alerts.TRIGGERS),
         "move_percent": str(alerts.threshold(prefs, "move_percent")),
         "risk_percent": str(alerts.threshold(prefs, "risk_percent")),
-        # Absolute levels to be told about when the underlying crosses them.
+
         "price_levels": [str(level) for level in (prefs or {}).get("price_levels") or []],
-        # Specific moves to be told about, as magnitudes. Empty means fall back
-        # to the repeating band above.
+
         "move_levels": [str(level) for level in (prefs or {}).get("move_levels") or []],
         "limits": {name: {"default": d, "min": lo, "max": hi}
                    for name, (d, lo, hi) in alerts.THRESHOLDS.items()},
     }
 
-
 @app.get("/api/v1/me/alerts")
 async def my_alerts(request: Request, user: Principal = Depends(require_tenant)):
     return ok(await alert_settings(request.app.state.db, user))
-
 
 @app.post("/api/v1/me/alerts/link")
 async def link_telegram(request: Request, user: Principal = Depends(require_tenant)):
@@ -1196,12 +1119,10 @@ async def link_telegram(request: Request, user: Principal = Depends(require_tena
         "expires_in": settings.telegram_link_ttl_seconds,
     })
 
-
 @app.delete("/api/v1/me/alerts/link")
 async def unlink_telegram(request: Request, user: Principal = Depends(require_tenant)):
     await request.app.state.db.telegram_links.delete_one({"_id": user.id})
     return ok(await alert_settings(request.app.state.db, user))
-
 
 @app.post("/api/v1/me/alerts")
 async def set_my_alerts(
@@ -1210,14 +1131,12 @@ async def set_my_alerts(
     wanted = body.get("triggers")
     if not isinstance(wanted, list):
         raise HTTPException(400, "triggers must be a list")
-    
+
     triggers = sorted({t for t in wanted if t in alerts.TRIGGERS})
     update: dict[str, Any] = {"triggers": triggers}
     for name in alerts.THRESHOLDS:
         if name in body:
-            # Clamped rather than rejected: a number outside the sane band is a
-            # slip, and refusing the whole save would lose the trigger choices
-            # made alongside it.
+
             _, low, high = alerts.THRESHOLDS[name]
             value = alerts.decimal(body.get(name))
             if value is not None:
@@ -1244,16 +1163,15 @@ async def set_my_alerts(
     )
     return ok(await alert_settings(request.app.state.db, user))
 
-
 @app.get("/api/v1/alerts")
 async def alert_feed(
     request: Request, limit: int = 50, user: Principal = Depends(require_tenant)
 ):
-    """What the bell shows on a fresh load, newest first.
+\
+\
+\
+\
 
-    Filtered the same way the socket filters the live ones, so reloading the
-    page can never reveal an alert the open tab would not have shown.
-    """
     cursor = request.app.state.db.alerts.find(
         {"tenant_id": user.tenant_id}, {"_id": 0, "tenant_id": 0, "connection_id": 0}
     )
@@ -1263,7 +1181,6 @@ async def alert_feed(
         if not row.get("account_id") or row["account_id"] == "*" or user.sees(row["account_id"])
     ]
     return ok(visible[: max(1, min(limit, 200))])
-
 
 @app.post("/api/v1/admin/history/backfill")
 async def backfill(request: Request, user: Principal = Depends(require_tenant_admin)):
@@ -1299,7 +1216,6 @@ async def backfill(request: Request, user: Principal = Depends(require_tenant_ad
         written += 1
     return ok({"written": written, "skipped_other_tenants": skipped, "points": len(points)})
 
-
 @app.get("/api/v1/admin/diagnostics")
 async def diagnostics(request: Request, user: Principal = Depends(require_tenant_admin)):
     redis, db = request.app.state.redis, request.app.state.db
@@ -1319,14 +1235,12 @@ async def diagnostics(request: Request, user: Principal = Depends(require_tenant
         }
     )
 
-
 class VisibilityTest(BaseModel):
     account_id: str
     perm_id: int = Field(gt=0)
     execution_id: str | None = None
     expected_working_perm_ids: list[int] = Field(default_factory=list, max_length=1000)
     started_at: AwareDatetime
-
 
 @app.post("/api/v1/admin/diagnostics/visibility")
 async def visibility(body: VisibilityTest, request: Request, user: Principal = Depends(require_tenant_admin)):
@@ -1418,7 +1332,6 @@ async def visibility(body: VisibilityTest, request: Request, user: Principal = D
     await audit(db, user, "visibility_test", result)
     return ok({k: v for k, v in result.items() if k != "tenant_id"})
 
-
 @app.websocket("/ws/live")
 async def live(ws: WebSocket):
     if ws.headers.get("origin") not in settings.origins:
@@ -1475,8 +1388,7 @@ async def live(ws: WebSocket):
                     event = json.loads(fields["event"])
                     account = event["account_id"]
                     if event["event_type"].startswith("alert."):
-                        # Tenant-wide alerts (an index move, the gateway) name no
-                        # account; one about an account still obeys who may see it.
+
                         if not subscribed:
                             continue
                         if account and account != "*" and not user.sees(account):

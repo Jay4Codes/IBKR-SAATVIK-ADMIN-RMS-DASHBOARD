@@ -195,10 +195,6 @@ export function scenarioPnl(leg: RiskLeg, assumption: Assumption, shock: number,
   return raw + (marked - rawAtAnchor) * remaining;
 }
 
-/** Turn a list of magnitudes into the signed levels a scenario grid reads at.
- *
- *  A desk asking "what about seven percent" means both directions: the move
- *  that helps and the one that hurts are the same question asked twice. */
 export function signedLevels(magnitudes: readonly number[]): number[] {
   const levels = new Set<number>();
   for (const value of magnitudes) {
@@ -215,9 +211,7 @@ export function buildCurves(
 ) {
   const shocks = new Set(Array.from({ length: 81 }, (_, i) => -Math.min(range, 100) + (Math.min(range, 100) + range) * i / 80));
   shocks.add(0);
-  /* Scenario levels are sampled whether or not they fall inside the plotted
-     range: the reader asked for that number specifically, and answering "it is
-     off the chart" would be a worse answer than the figure they wanted. */
+
   for (const shock of levels) {
     if (Number.isFinite(shock) && shock > -100) shocks.add(shock);
   }
@@ -256,7 +250,6 @@ export function upsideRisks(legs: RiskLeg[]) {
     return g.shares + callSlope < 0;
   }).map(([key]) => key);
 }
-
 
 export type PricePoint = { price: number; shock: number; terminal: number; modeled: number; accounts: Record<string, number> };
 

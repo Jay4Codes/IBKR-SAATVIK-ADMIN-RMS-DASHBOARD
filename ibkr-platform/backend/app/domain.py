@@ -6,10 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-
 def now() -> datetime:
     return datetime.now(UTC)
-
 
 class GatewayStatus(StrEnum):
     DISCONNECTED = "DISCONNECTED"
@@ -18,7 +16,6 @@ class GatewayStatus(StrEnum):
     DEGRADED = "DEGRADED"
     RECONNECTING = "RECONNECTING"
     FAILED = "FAILED"
-
 
 class GatewayState(BaseModel):
     gateway_id: str = "primary"
@@ -35,7 +32,6 @@ class GatewayState(BaseModel):
     last_error: str | None = None
     subscriptions: dict[str, str] = Field(default_factory=dict)
 
-
 class AccountState(BaseModel):
     account_id: str
     currency: str = "BASE"
@@ -50,14 +46,11 @@ class AccountState(BaseModel):
     realized_pnl: Decimal | None = None
     unrealized_pnl: Decimal | None = None
     day_pnl: Decimal | None = None
-    #: Excess liquidity over net liquidation, as IBKR computes it. Lower is
-    #: closer to a margin call.
+
     cushion: Decimal | None = None
-    #: IBKR reports -1 for "unlimited", which is not a count and is rendered
-    #: as such rather than shown as a negative number of trades.
+
     day_trades_remaining: Decimal | None = None
     updated_at: datetime = Field(default_factory=now)
-
 
 class Position(BaseModel):
     quantity_changed: bool = False
@@ -83,7 +76,6 @@ class Position(BaseModel):
     realized_pnl: Decimal | None = None
     updated_at: datetime = Field(default_factory=now)
 
-
 class Order(BaseModel):
     account_id: str
     order_id: int
@@ -107,7 +99,6 @@ class Order(BaseModel):
     def key(self) -> str:
         return order_key(self.model_dump())
 
-
 class Execution(BaseModel):
     execution_id: str
     account_id: str
@@ -128,14 +119,12 @@ class Execution(BaseModel):
     realized_pnl: Decimal | None = None
     executed_at: datetime
 
-
 class Event(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     event_type: str
     account_id: str
     timestamp: datetime = Field(default_factory=now)
     data: dict[str, Any]
-
 
 def order_key(data: dict) -> str:
     if data.get("perm_id", 0) > 0:

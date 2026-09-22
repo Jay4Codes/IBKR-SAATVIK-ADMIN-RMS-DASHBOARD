@@ -1,6 +1,5 @@
 from tests.conftest import TENANT
 
-
 async def execution(db, tenant, account, execution_id, *, executed_at, commission=None):
     await db.executions.update_one(
         {"_id": f"{tenant}:{execution_id}"},
@@ -25,7 +24,6 @@ async def execution(db, tenant, account, execution_id, *, executed_at, commissio
         upsert=True,
     )
 
-
 async def test_commissions_are_summed_by_day_and_account(client, stores):
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", executed_at="2026-09-01T10:00:00+00:00", commission="1.50")
@@ -44,7 +42,6 @@ async def test_commissions_are_summed_by_day_and_account(client, stores):
         {"account_id": "DU2", "commission": "0.75"},
     ]
 
-
 async def test_commissions_can_be_scoped_to_one_account(client, stores):
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", executed_at="2026-09-01T10:00:00+00:00", commission="1.50")
@@ -52,7 +49,6 @@ async def test_commissions_can_be_scoped_to_one_account(client, stores):
     body = (await client.get("/api/v1/accounts/DU1/commissions")).json()["data"]
     assert body["total"] == "1.50"
     assert body["count"] == 1
-
 
 async def test_commissions_respect_a_date_window(client, stores):
     _, db = stores

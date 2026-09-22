@@ -14,10 +14,8 @@ from fastapi import HTTPException
 from app.config import settings
 from app.domain import AccountState, Execution, Order, Position, now
 
-
 def configured() -> bool:
     return bool(settings.snaptrade_client_id and settings.snaptrade_consumer_key)
-
 
 def require_configured() -> None:
     if not configured():
@@ -26,7 +24,6 @@ def require_configured() -> None:
             "SnapTrade is not configured on this host. Set SNAPTRADE_CLIENT_ID and "
             "SNAPTRADE_CONSUMER_KEY, then restart the API and worker.",
         )
-
 
 def sign(path: str, query: dict[str, str], body: Any | None) -> str:
     content = json.dumps(
@@ -38,7 +35,6 @@ def sign(path: str, query: dict[str, str], body: Any | None) -> str:
         settings.snaptrade_consumer_key.encode(), content.encode(), hashlib.sha256
     ).digest()
     return base64.urlsafe_b64encode(digest).decode()
-
 
 class SnapTradeClient:
 
@@ -134,7 +130,6 @@ class SnapTradeClient:
             or []
         )
 
-
 def _decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
@@ -143,7 +138,6 @@ def _decimal(value: Any) -> Decimal | None:
     except (ArithmeticError, ValueError):
         return None
     return result if result.is_finite() else None
-
 
 def _symbol(row: dict[str, Any]) -> dict[str, Any]:
     symbol = row.get("symbol") or {}
@@ -154,7 +148,6 @@ def _symbol(row: dict[str, Any]) -> dict[str, Any]:
     elif isinstance(symbol, str):
         symbol = {"symbol": symbol}
     return symbol if isinstance(symbol, dict) else {}
-
 
 def normalize_account(row: dict[str, Any], balances: list[dict[str, Any]]) -> AccountState:
     totals = row.get("balance") or {}
@@ -173,7 +166,6 @@ def normalize_account(row: dict[str, Any], balances: list[dict[str, Any]]) -> Ac
         cash=cash,
         updated_at=now(),
     )
-
 
 def normalize_position(account_id: str, row: dict[str, Any]) -> Position:
     symbol = _symbol(row)
@@ -194,7 +186,6 @@ def normalize_position(account_id: str, row: dict[str, Any]) -> Position:
         market_value=(price * quantity) if price is not None else None,
         unrealized_pnl=((price - average) * quantity) if price is not None else None,
     )
-
 
 def normalize_order(account_id: str, row: dict[str, Any], index: int) -> Order:
     symbol = _symbol(row)
@@ -217,7 +208,6 @@ def normalize_order(account_id: str, row: dict[str, Any], index: int) -> Order:
         remaining_quantity=max(Decimal(0), quantity - filled),
         status=str(row.get("status") or "Unknown"),
     )
-
 
 def normalize_activity(account_id: str, row: dict[str, Any]) -> Execution | None:
     from datetime import datetime

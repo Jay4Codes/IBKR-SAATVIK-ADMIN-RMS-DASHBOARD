@@ -8,15 +8,12 @@ from ib_async.objects import Position
 
 from app import normalizers as norm
 
-
 @pytest.mark.parametrize("value", [None, "", float("nan"), float("inf"), 1.7976931348623157e308])
 def test_missing_money(value):
     assert norm.decimal(value) is None
 
-
 def test_precision():
     assert norm.decimal("0.1234567890123456789") == Decimal("0.1234567890123456789")
-
 
 @pytest.mark.parametrize("sec_type", ["STK", "OPT", "FUT", "CASH"])
 def test_positions(sec_type):
@@ -43,7 +40,6 @@ def test_positions(sec_type):
     assert normalized.updated_at.tzinfo == UTC
     assert normalized.model_dump(mode="json")["quantity"] == "-2"
 
-
 def test_order_client_identity_and_unset_prices():
     trade = Trade(
         Contract(conId=123, symbol="AAPL", secType="STK"),
@@ -54,7 +50,6 @@ def test_order_client_identity_and_unset_prices():
     assert result.key == "DU1:perm:100"
     assert result.limit_price is None
     assert result.filled_quantity == Decimal(2)
-
 
 def test_execution_commission_arrives_later():
     fill = Fill(

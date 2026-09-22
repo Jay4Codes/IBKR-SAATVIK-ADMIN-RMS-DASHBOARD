@@ -3,14 +3,12 @@ from decimal import Decimal, InvalidOperation
 
 from app.domain import Execution, Order, Position
 
-
 def decimal(value):
     try:
         result = Decimal(str(value))
         return result if result.is_finite() and abs(result) < Decimal("1e100") else None
     except (InvalidOperation, ValueError):
         return None
-
 
 def contract_fields(contract):
     return {
@@ -26,7 +24,6 @@ def contract_fields(contract):
         "multiplier": decimal(contract.multiplier),
     }
 
-
 def position(value):
     return Position(
         account_id=value.account,
@@ -34,7 +31,6 @@ def position(value):
         quantity=decimal(value.position),
         average_cost=decimal(value.avgCost),
     )
-
 
 def portfolio(value):
     return Position(
@@ -47,7 +43,6 @@ def portfolio(value):
         unrealized_pnl=decimal(value.unrealizedPNL),
         realized_pnl=decimal(value.realizedPNL),
     )
-
 
 def order(trade):
     source, status, contract = trade.order, trade.orderStatus, trade.contract
@@ -71,7 +66,6 @@ def order(trade):
         status=status.status,
         **fields,
     )
-
 
 def execution(fill):
     source = fill.execution
@@ -98,7 +92,6 @@ def execution(fill):
         executed_at=source.time.astimezone(UTC),
     )
 
-
 ACCOUNT_TAGS = {
     "NetLiquidation": "net_liquidation",
     "TotalCashValue": "cash",
@@ -110,8 +103,7 @@ ACCOUNT_TAGS = {
     "GrossPositionValue": "gross_position_value",
     "RealizedPnL": "realized_pnl",
     "UnrealizedPnL": "unrealized_pnl",
-    # IBKR's own cushion, rather than one derived here: it is the number a
-    # margin call is actually measured against.
+
     "Cushion": "cushion",
     "DayTradesRemaining": "day_trades_remaining",
 }

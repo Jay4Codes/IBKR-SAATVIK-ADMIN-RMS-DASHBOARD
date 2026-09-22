@@ -23,6 +23,7 @@
   padding: var(--space-4) var(--gutter);
 }
 .reference-bar > label,
+.reference-bar > .reference-readout,
 .reference-bar > .bar-action {
   display: grid;
   grid-template-rows: var(--bar-caption) var(--control-height) auto;
@@ -31,7 +32,18 @@
   font-size: var(--text-base);
   color: var(--muted);
 }
-.reference-bar > label > span { align-self: center; }
+.reference-bar > label > span,
+.reference-bar > .reference-readout > span { align-self: center; }
+.reference-bar .reference-value {
+  display: flex;
+  align-items: center;
+  height: var(--control-height);
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .reference-bar input[type="number"] {
   width: 100%;
   height: var(--control-height);
@@ -44,16 +56,13 @@
   font-size: var(--text-sm);
 }
 .reference-bar > .bar-action > * { grid-row: 2; width: 100%; }
-/* Sits on the same three bands as every other control in the bar. */
 .reference-bar .custom-level .level-entry {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 .reference-bar .custom-level input[type="number"] { flex: 1; min-width: 0; }
-/* Sized and weighted to read as the action beside the field, not as a caption:
-   full control height so it sits square with the input, a visible edge, and the
-   accent picked up on hover so it is obviously pressable. */
+
 .reference-bar .custom-level .level-entry .btn {
   flex: none;
   gap: 4px;
@@ -73,8 +82,7 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
-/* The chips, the commissions box and the account menu belong together: they
-   are all "what is in the table", as against the model inputs above them. */
+
 .reference-bar .bar-row {
   grid-column: 1 / -1;
   display: flex;
@@ -84,8 +92,7 @@
   padding-top: var(--space-2);
   border-top: 1px solid var(--line);
 }
-/* Every control on the row shares one height, so chips, a checkbox and a menu
-   sit on one line instead of three slightly different ones. */
+
 .reference-bar .bar-row > * { align-self: center; }
 .reference-bar .bar-row .level-chips { gap: var(--space-2); }
 .reference-bar .bar-row .level-chips button { height: var(--control-height); }
@@ -121,16 +128,9 @@
 }
 .level-chips button:hover { border-color: var(--red); color: var(--red); }
 
-/* Three kinds of column, told apart so it is obvious which are the reader's
-   own: a shipped default is plain, a level they added is accented, and a price
-   is accented and dashed because it asks a different question from a move. */
 .level-chips button.custom { border-color: var(--accent); color: var(--accent); }
 .level-chips button.price { border-style: dashed; }
-/* Column separators. A grid this wide is read by tracking one column down the
-   page, and without a rule to follow the eye slides between neighbours. */
 .scenario-grid .col { border-left: 1px solid var(--line); }
-/* A column the reader added gets a rule of its own, full height, so it is
-   findable among the defaults without having to read the heading. */
 .scenario-grid .col.custom { border-left: 1px solid var(--accent); }
 .scenario-grid tbody .col.custom { background: var(--accent-soft); }
 .scenario-grid .col.price { border-left-style: dashed; }
@@ -144,15 +144,6 @@
   background: var(--accent);
 }
 .scenario-grid thead th.price::after { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
-/* A native disclosure rather than a hand-built popover: it is keyboard
-   accessible, closes on Escape, and needs no outside-click handling to get
-   right. */
-/* Named `dropdown`, not `account-picker`: that class already belonged to a
-   bordered fieldset elsewhere in this file, and being defined later it won —
-   which drew a second box around every menu.
-
-   The element itself draws nothing — only its summary does. Without this it
-   inherits the panel's `details` margin and reads as a box inside a box. */
 .dropdown {
   position: relative;
   margin: 0;
@@ -229,26 +220,16 @@
   text-align: left;
 }
 .dropdown-menu .all:disabled { color: var(--muted); cursor: default; }
-/* The expiry picker leads the panel rather than trailing the grid, because it
-   changes the curve as well as the table. */
-/* Sits after the price, separated by a rule rather than by guesswork about
-   spacing: it is a control, and the numbers before it are a reading. */
 .strategy-head .expiry-picker {
   margin-left: auto;
   align-self: center;
 }
 @media (max-width: 700px) {
-  /* Wrapped onto its own line, "auto" would shove it to the far right of an
-     otherwise empty row. */
   .strategy-head .expiry-picker { margin-left: 0; }
 }
 
-
-/* A panel clips its own corners, which also clips a menu escaping it. Lifted
-   only while a menu is actually open, so nothing else changes. */
 .panel:has(.dropdown[open]) { overflow: visible; }
 .dropdown-menu { top: 100%; left: 0; }
-/* Near the right edge it opens leftwards instead of off the screen. */
 .strategy-head .dropdown-menu { left: auto; right: 0; }
 
 .level-legend {
@@ -287,8 +268,7 @@
   gap: var(--space-2) var(--space-3);
   padding: var(--space-3) 0;
 }
-/* The numbers keep their baseline alignment; only the control beside them is
-   centred, so a 20px price and a 28px menu sit together without one riding high. */
+
 .strategy-head > .ticker,
 .strategy-head > b,
 .strategy-head > .change { align-self: baseline; }
@@ -315,14 +295,72 @@
 .strategy-head .change small { color: var(--muted); font-size: var(--text-xs); }
 
 .strike-ruler {
-  padding: var(--space-2) var(--plot-right, 24px) var(--space-4) var(--plot-left, 64px);
+  padding: var(--space-2) var(--plot-right, 24px) var(--space-3) var(--plot-left, 64px);
 }
-.ruler-track {
+.ruler-rail {
   position: relative;
-  border-bottom: 1px solid var(--line-strong);
+  display: grid;
+  grid-template-rows: 26px 1px 26px;
 }
-.strike-pin {
+.ruler-line { background: var(--line-strong); }
+.ruler-band { position: relative; }
+.ruler-band.call::before,
+.ruler-band.put::before {
   position: absolute;
+  left: -28px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+.ruler-band.call::before { content: "C"; color: var(--green); }
+.ruler-band.put::before { content: "P"; color: var(--red); }
+.strike-tick {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  display: flex;
+  justify-content: center;
+  transform: translateX(calc(-50% + var(--nudge, 0) * 6px));
+  z-index: 1;
+}
+.ruler-band.call .strike-tick { align-items: flex-end; }
+.ruler-band.put .strike-tick { align-items: flex-start; }
+.strike-tick.call { color: var(--green); }
+.strike-tick.put { color: var(--red); }
+.strike-tick:hover,
+.strike-tick:focus-visible { z-index: 4; }
+.strike-tick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.strike-tick i {
+  display: block;
+  width: 7px;
+  height: calc(6px + var(--qty, 1) * 4px);
+  background: currentColor;
+  pointer-events: none;
+}
+.ruler-band.call .strike-tick i { border-radius: 1px 1px 0 0; }
+.ruler-band.put .strike-tick i { border-radius: 0 0 1px 1px; }
+.strike-tick.short i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.tick-card {
+  position: absolute;
+  left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
@@ -333,35 +371,36 @@
   font-weight: 600;
   white-space: nowrap;
   color: #fff;
+  opacity: 0;
+  pointer-events: none;
 }
-.strike-pin.call { background: var(--green); }
-.strike-pin.put { background: var(--red); }
-.strike-pin.short { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
-.strike-pin.short.call { color: var(--green); }
-.strike-pin.short.put { color: var(--red); }
-.strike-pin b { opacity: 0.75; font-weight: 500; }
-.strike-pin::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 100%;
-  bottom: auto;
-  width: 1px;
-  height: var(--drop, 8px);
-  background: var(--line-strong);
-  opacity: 0.5;
+.ruler-band.call .tick-card { bottom: calc(100% + 3px); }
+.ruler-band.put .tick-card { top: calc(100% + 3px); }
+.strike-tick.call .tick-card { background: var(--green); }
+.strike-tick.put .tick-card { background: var(--red); }
+.strike-tick.short .tick-card {
+  background: var(--panel-raised);
+  color: inherit;
+  box-shadow: inset 0 0 0 1px currentColor;
 }
+.strike-tick.short .tick-card b { color: inherit; }
+.tick-card b { opacity: 0.75; font-weight: 500; }
+.strike-tick:hover .tick-card,
+.strike-tick:focus-visible .tick-card { opacity: 1; }
 .spot-pin {
   position: absolute;
-  bottom: -1px;
+  top: 0;
+  bottom: 0;
   transform: translateX(-50%);
   border-left: 1px solid var(--accent);
-  height: 100%;
+  pointer-events: none;
+  z-index: 2;
 }
 .spot-pin small {
   position: absolute;
-  bottom: 2px;
-  left: 3px;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
   color: var(--accent);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -430,9 +469,7 @@
 .payoff-sliders input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .alert-bell { position: relative; }
-/* Matches the theme and sign-out buttons it now sits beside: borderless, with
-   the same hover treatment. A boxed control in that row reads as a different
-   kind of thing. */
+
 .bell-button {
   position: relative;
   display: inline-flex;
@@ -595,9 +632,7 @@
   padding: var(--space-5) var(--gutter);
   border-top: 1px solid var(--line);
 }
-/* `.commission-toggle` gets its `display: grid` from `.reference-bar > label`,
-   which does not apply here — so out on the Profile page the checkbox and its
-   label collapsed into an inline run with no gap between them at all. */
+
 .alert-triggers .commission-toggle {
   display: grid;
   grid-template-rows: auto auto;
@@ -606,8 +641,7 @@
   gap: var(--space-1) var(--space-3);
   height: auto;
 }
-/* The box sits on the cap-height of the label beside it, and the description
-   lines up under the label rather than under the box. */
+
 .alert-triggers .commission-toggle > input { grid-row: 1; grid-column: 1; margin-top: 3px; }
 .alert-triggers .commission-toggle > span {
   grid-row: 1;
@@ -617,8 +651,6 @@
 }
 .alert-triggers .commission-toggle > small { grid-row: 2; grid-column: 2; line-height: var(--leading); }
 
-/* On the toolbar now, so it sits inline with the search box rather than
-   claiming a line of its own above the table. */
 .commission-toggle.table-toggle {
   display: flex;
   grid-template-rows: none;
@@ -679,9 +711,6 @@
 }
 .scenario-grid thead th { text-align: right; color: var(--muted); }
 .scenario-grid thead th:first-child { text-align: left; }
-/* Reorder controls: invisible until the header is hovered or focused, so the
-   grid still reads as a plain table at a glance and the arrows do not compete
-   with the numbers for attention. */
 .scenario-grid .col-head {
   display: inline-flex;
   align-items: center;

@@ -4,7 +4,6 @@ import { useSyncExternalStore } from "react";
 import { SearchableSelect } from "./searchable-select";
 import { DEFAULT_ZONE, isZoneId, STORAGE_KEY, ZoneId, ZONES } from "@/lib/timezone";
 
-
 let listeners: (() => void)[] = [];
 
 function subscribe(notify: () => void) {
@@ -43,9 +42,7 @@ export function useZone(): ZoneId {
 
 export function TimezonePicker() {
   const zone = useZone();
-  /* Searchable from the first keystroke rather than only past a threshold: the
-     list is short today, but "IST" and "ET" are typed far faster than they are
-     found by eye, and the same control grows with the zone list. */
+
   return (
     <div className="tz-picker">
       <SearchableSelect

@@ -1,6 +1,5 @@
 from tests.conftest import TENANT
 
-
 async def execution(
     db, tenant, account, execution_id, *, realized=None, commission=None, expiry="20260918", currency="USD"
 ):
@@ -31,7 +30,6 @@ async def execution(
         upsert=True,
     )
 
-
 async def test_realized_totals_the_closed_legs(client, stores):
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", realized="-1265.36", commission="1.73")
@@ -45,15 +43,14 @@ async def test_realized_totals_the_closed_legs(client, stores):
         {"account_id": "DU2", "realized_pnl": "400.00"},
     ]
 
-
 async def test_an_opening_fill_books_nothing_but_still_costs_commission(client, stores):
-    """It realises no P&L and is not counted as though it had.
+\
+\
+\
+\
+\
+\
 
-    Its commission is another matter: the desk paid it to hold the position the
-    payoff is modelling. Leaving it out made "include commissions" do nothing on
-    a book that had not been adjusted yet — every fill was an opening one, so
-    every commission was invisible.
-    """
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", realized="0.0", commission="1.73")
     await execution(db, TENANT, "DU1", "e2", realized="-100.00", commission="1.00")
@@ -63,9 +60,8 @@ async def test_an_opening_fill_books_nothing_but_still_costs_commission(client, 
     assert body["commission"] == "2.73"
     assert len(body["legs"]) == 2
 
-
 async def test_a_book_with_no_closings_still_reports_what_it_cost(client, stores):
-    """The live case: six opening fills, nothing booked, eleven dollars spent."""
+
     _, db = stores
     for index in range(6):
         await execution(db, TENANT, "DU1", f"open{index}", realized="0.0", commission="1.84")
@@ -73,7 +69,6 @@ async def test_a_book_with_no_closings_still_reports_what_it_cost(client, stores
     assert body["total"] == "0"
     assert body["count"] == 0
     assert body["commission"] == "11.04"
-
 
 async def test_realized_is_narrowed_to_the_modelled_expiry_cycle(client, stores):
     _, db = stores
@@ -85,7 +80,6 @@ async def test_realized_is_narrowed_to_the_modelled_expiry_cycle(client, stores)
     every = (await client.get("/api/v1/realized")).json()["data"]
     assert every["total"] == "-11264.36"
 
-
 async def test_realized_can_be_scoped_to_one_account(client, stores):
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", realized="-1265.36")
@@ -93,7 +87,6 @@ async def test_realized_can_be_scoped_to_one_account(client, stores):
     body = (await client.get("/api/v1/realized?accounts=DU1")).json()["data"]
     assert body["total"] == "-1265.36"
     assert body["count"] == 1
-
 
 async def test_realized_legs_carry_what_the_panel_groups_on(client, stores):
     _, db = stores
@@ -105,7 +98,6 @@ async def test_realized_legs_carry_what_the_panel_groups_on(client, stores):
     assert leg["realized_pnl"] == "-1265.36"
     assert leg["commission"] == "1.73"
 
-
 async def test_an_expired_cycle_drops_out_once_it_has_passed(client, stores):
     _, db = stores
     await execution(db, TENANT, "DU1", "live", realized="-1265.36", expiry="20260918")
@@ -116,7 +108,6 @@ async def test_an_expired_cycle_drops_out_once_it_has_passed(client, stores):
     after = (await client.get("/api/v1/realized?active_on=20260919")).json()["data"]
     assert after["total"] == "0"
     assert after["count"] == 0
-
 
 async def test_named_expiries_win_over_the_active_day(client, stores):
     _, db = stores

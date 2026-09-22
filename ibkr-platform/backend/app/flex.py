@@ -18,13 +18,11 @@ GET = f"{BASE}/GetStatement"
 
 IN_PROGRESS = "1019"
 
-
 class FlexError(Exception):
 
     def __init__(self, code: str, message: str) -> None:
         self.code, self.message = code, message
         super().__init__(f"{code}: {message}" if code else message)
-
 
 @dataclass(frozen=True, slots=True)
 class NavPoint:
@@ -32,7 +30,6 @@ class NavPoint:
     report_date: str
     net_liquidation: Decimal
     currency: str
-
 
 def _decimal(value: str | None) -> Decimal | None:
     if not value:
@@ -42,7 +39,6 @@ def _decimal(value: str | None) -> Decimal | None:
     except (InvalidOperation, ValueError):
         return None
 
-
 def _date(value: str | None) -> str | None:
     if not value:
         return None
@@ -51,13 +47,11 @@ def _date(value: str | None) -> str | None:
         return None
     return f"{digits[:4]}-{digits[4:6]}-{digits[6:]}"
 
-
 def _raise_for_status(root: ElementTree.Element) -> None:
     status = (root.findtext("Status") or "").strip()
     if status and status != "Success":
         code = (root.findtext("ErrorCode") or "").strip()
         raise FlexError(code, (root.findtext("ErrorMessage") or "").strip() or status)
-
 
 def parse_statement(xml: str) -> list[NavPoint]:
     root = ElementTree.fromstring(xml)
@@ -79,7 +73,6 @@ def parse_statement(xml: str) -> list[NavPoint]:
         )
     return points
 
-
 async def _send(client: httpx.AsyncClient, token: str, query_id: str) -> str:
     response = await client.get(SEND, params={"t": token, "q": query_id, "v": "3"})
     response.raise_for_status()
@@ -89,7 +82,6 @@ async def _send(client: httpx.AsyncClient, token: str, query_id: str) -> str:
     if not code:
         raise FlexError("", "Flex returned no reference code")
     return code
-
 
 async def _collect(client: httpx.AsyncClient, token: str, code: str, attempts: int) -> str:
     for attempt in range(attempts):
@@ -108,7 +100,6 @@ async def _collect(client: httpx.AsyncClient, token: str, code: str, attempts: i
         log.info("flex.statement_pending attempt=%s", attempt + 1)
         await asyncio.sleep(min(2 ** attempt, 15))
     raise FlexError(IN_PROGRESS, "Flex statement was still generating after every retry")
-
 
 async def fetch_history(
     token: str | None = None, query_id: str | None = None, *, attempts: int = 6

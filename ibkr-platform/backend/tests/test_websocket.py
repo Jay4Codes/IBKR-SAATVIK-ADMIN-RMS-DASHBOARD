@@ -15,7 +15,6 @@ from app.tenancy import new_tenant
 TENANT = "ws-tenant"
 OTHER = "ws-other"
 
-
 @asynccontextmanager
 async def ws_lifespan(app):
     redis = FakeRedis(decode_responses=True)
@@ -41,10 +40,8 @@ async def ws_lifespan(app):
     yield
     await redis.aclose()
 
-
 def connect(client):
     return client.websocket_connect("/ws/live", headers={"Origin": "http://localhost:3000"})
-
 
 def test_websocket_subscribe_ping_and_forbidden_account(monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", ws_lifespan)
@@ -60,7 +57,6 @@ def test_websocket_subscribe_ping_and_forbidden_account(monkeypatch):
             with pytest.raises(WebSocketDisconnect):
                 ws.receive_json()
 
-
 def test_websocket_rejects_origin_and_missing_session(monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", ws_lifespan)
     with TestClient(app) as client:
@@ -71,7 +67,6 @@ def test_websocket_rejects_origin_and_missing_session(monkeypatch):
             with connect(client):
                 pass
 
-
 def test_websocket_refuses_a_tenant_without_membership(monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", ws_lifespan)
     with TestClient(app) as client:
@@ -80,7 +75,6 @@ def test_websocket_refuses_a_tenant_without_membership(monkeypatch):
         with pytest.raises(WebSocketDisconnect):
             with connect(client):
                 pass
-
 
 def test_websocket_reads_only_its_own_tenant_stream(monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", ws_lifespan)

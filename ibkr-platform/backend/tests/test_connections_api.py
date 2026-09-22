@@ -6,10 +6,8 @@ from app.auth import COOKIE
 from app.config import settings
 from tests.conftest import CONNECTION, OTHER_TENANT, TENANT
 
-
 def as_user(role):
     return {COOKIE: role}
-
 
 @pytest.fixture
 def provisioned(monkeypatch, tmp_path):
@@ -33,13 +31,11 @@ def provisioned(monkeypatch, tmp_path):
     monkeypatch.setattr("app.main.hostctl.daemon_reload", fake_reload)
     return calls
 
-
 async def test_listing_connections_requires_a_tenant_admin(client):
     assert (await client.get("/api/v1/connections", cookies=as_user("TRADER"))).status_code == 403
     rows = (await client.get("/api/v1/connections", cookies=as_user("ADMIN"))).json()["data"]
     assert [row["id"] for row in rows] == [CONNECTION]
     assert rows[0]["state"]["status"] == "DISCONNECTED"
-
 
 async def test_adding_an_ibkr_gateway_provisions_an_isolated_instance(client, stores, provisioned):
     _, db = stores
@@ -60,7 +56,6 @@ async def test_adding_an_ibkr_gateway_provisions_an_isolated_instance(client, st
     stored = await db.broker_connections.find_one({"_id": created["id"]})
     assert stored["tenant_id"] == TENANT
 
-
 async def test_ports_are_unique_across_tenants(client, stores, provisioned):
     ports = set()
     for name in ("One", "Two", "Three"):
@@ -70,11 +65,9 @@ async def test_ports_are_unique_across_tenants(client, stores, provisioned):
     assert len(ports) == 3
     assert 4101 not in ports and 4102 not in ports
 
-
 async def test_a_duplicate_connection_name_is_refused(client, provisioned):
     assert (await client.post("/api/v1/connections", json={"name": "Solo"})).status_code == 200
     assert (await client.post("/api/v1/connections", json={"name": "Solo"})).status_code == 409
-
 
 async def test_a_connection_cannot_be_enabled_without_a_port(client, stores, provisioned):
     _, db = stores
@@ -85,7 +78,6 @@ async def test_a_connection_cannot_be_enabled_without_a_port(client, stores, pro
     )
     assert response.status_code == 409
     assert "no API port" in response.json()["error"]
-
 
 async def test_changing_the_login_shape_rewrites_the_instance_config(client, stores, provisioned):
     created = (await client.post("/api/v1/connections", json={"name": "Rewritable"})).json()["data"]
@@ -100,12 +92,10 @@ async def test_changing_the_login_shape_rewrites_the_instance_config(client, sto
     ).status_code == 200
     assert len(provisioned) == 1, "turning off read-only login must reach the config file"
 
-
 async def test_an_adopted_connection_is_never_rewritten(client, stores, provisioned):
     response = await client.post(f"/api/v1/connections/{CONNECTION}", json={"trading_mode": "live"})
     assert response.status_code == 200
     assert provisioned == []
-
 
 async def test_deleting_a_connection_clears_its_live_state(client, stores, provisioned, monkeypatch):
     redis, db = stores
@@ -130,7 +120,6 @@ async def test_deleting_a_connection_clears_its_live_state(client, stores, provi
 
     assert not await redis.exists(TenantKeys(TENANT).gateway(created["id"]))
 
-
 async def test_a_connection_from_another_tenant_is_invisible(client, stores):
     from tests.conftest import OTHER_CONNECTION
 
@@ -145,7 +134,6 @@ async def test_a_connection_from_another_tenant_is_invisible(client, stores):
     )
     assert response.status_code == 404
 
-
 async def test_snaptrade_is_refused_until_it_is_configured(client, monkeypatch):
     monkeypatch.setattr(settings, "snaptrade_client_id", "")
     monkeypatch.setattr(settings, "snaptrade_consumer_key", "")
@@ -154,7 +142,6 @@ async def test_snaptrade_is_refused_until_it_is_configured(client, monkeypatch):
     )
     assert response.status_code == 503
     assert "SNAPTRADE_CLIENT_ID" in response.json()["error"]
-
 
 async def test_a_snaptrade_connection_registers_a_user_and_seals_its_secret(
     client, stores, monkeypatch
@@ -192,7 +179,6 @@ async def test_a_snaptrade_connection_registers_a_user_and_seals_its_secret(
     assert stored["snaptrade_user_secret"].startswith("v1:")
     assert secrets.decrypt(stored["snaptrade_user_secret"]) == "top-secret-user-key"
 
-
 async def test_ibkr_credentials_are_refused_on_a_snaptrade_connection(client, stores):
     _, db = stores
     await db.broker_connections.insert_one(
@@ -212,7 +198,6 @@ async def test_ibkr_credentials_are_refused_on_a_snaptrade_connection(client, st
     assert response.status_code == 409
     assert "Only IB Gateway" in response.json()["error"]
 
-
 async def test_allocate_port_reports_an_exhausted_range(stores, monkeypatch):
     from fastapi import HTTPException
 
@@ -226,7 +211,6 @@ async def test_allocate_port_reports_an_exhausted_range(stores, monkeypatch):
         await registry.allocate_port(db, TENANT)
     assert error.value.status_code == 409
     assert "GATEWAY_PORT_RANGE" in error.value.detail
-
 
 async def test_supervised_skips_suspended_tenants(stores):
     _, db = stores

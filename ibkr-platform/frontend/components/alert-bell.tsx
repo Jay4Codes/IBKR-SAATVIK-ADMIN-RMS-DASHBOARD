@@ -19,10 +19,6 @@ const LABELS: Record<string, string> = {
   events: "Event",
 };
 
-/* Both preferences are read through an external store, the same way the
-   timezone picker reads its own. Setting them from an effect instead renders
-   once with the default and again with the stored value — a cascading render,
-   and a visible flicker on the unread count. */
 let listeners: (() => void)[] = [];
 
 function subscribe(notify: () => void) {
@@ -50,9 +46,7 @@ function remember(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
   } catch {
-    /* A preference that cannot be saved still works for this session. */
   }
-  // `storage` only fires in *other* tabs, so this tab has to tell itself.
   for (const notify of listeners) notify();
 }
 
@@ -122,15 +116,13 @@ export function AlertBell() {
         setOpen(false);
       }
     };
-    // Captured, so a click on something that stops propagation still closes it.
+
     document.addEventListener("click", away, true);
     return () => document.removeEventListener("click", away, true);
   }, [open]);
 
   const markSeen = () => {
-    // The newest timestamp, not the first row: the feed is sorted newest-first
-    // and live ones are prepended, but reading the marker off position alone
-    // would silently leave an alert unread if that ever stopped being true.
+
     const newestStamp = rows.reduce(
       (latest, row) => (row.timestamp > latest ? row.timestamp : latest),
       "",

@@ -4,15 +4,12 @@ from pymongo.errors import DuplicateKeyError, OperationFailure
 from app.config import settings
 from app.domain import order_key
 
-
 def database():
     client = AsyncMongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=3000, tz_aware=True)
     return client, client[settings.mongodb_database]
 
-
 def snapshot_id(tenant_id: str, account_id: str, report_date: str, bucket: str = "") -> str:
     return f"{tenant_id}:{account_id}:{report_date}" + (f":{bucket}" if bucket else "")
-
 
 async def initialize(db):
     try:
@@ -23,7 +20,6 @@ async def initialize(db):
             "multi-tenancy, run `python -m app.migrate` before starting the API or "
             f"worker — it stamps existing documents with a tenant. Underlying error: {exc}"
         ) from exc
-
 
 async def _create_indexes(db):
     await db.users.create_index("email", unique=True)
@@ -59,8 +55,7 @@ async def _create_indexes(db):
     await db.visibility_tests.create_index([("tenant_id", ASCENDING), ("checked_at", DESCENDING)])
     await db.telegram_links.create_index("chat_id", unique=True)
     await db.alerts.create_index([("tenant_id", ASCENDING), ("timestamp", DESCENDING)])
-    # Platform-wide, not per tenant: a market holiday is the same holiday for
-    # everyone, and fetching it once is the whole point.
+
     await db.market_events.create_index(
         [("date", ASCENDING), ("kind", ASCENDING), ("name", ASCENDING)], unique=True
     )
@@ -71,10 +66,8 @@ async def _create_indexes(db):
     for role in ("ADMIN", "TRADER"):
         await db.roles.update_one({"_id": role}, {"$setOnInsert": {"name": role}}, upsert=True)
 
-
 def scoped_id(tenant_id: str, *parts: str) -> str:
     return ":".join((tenant_id, *parts))
-
 
 async def persist(db, event, *, tenant_id: str, connection_id: str):
     data = {**event.data, "tenant_id": tenant_id, "connection_id": connection_id}

@@ -23,17 +23,14 @@ log = logging.getLogger("app.massive")
 SAMPLE_PREFIX = "market:underlying"
 CSV_FIELDS = ("timestamp_utc", "symbol", "price", "source")
 
-
 class RateLimited(Exception):
     pass
 
 INDEX_UNDERLYINGS = frozenset({"SPX", "NDX", "RUT", "VIX"})
 
-
 def index_ticker(underlying: str) -> str | None:
     ul = underlying.upper()
     return f"I:{ul}" if ul in INDEX_UNDERLYINGS else None
-
 
 def ticker_matches(underlying: str, ticker: str) -> bool:
     ul, given = underlying.upper(), (ticker or "").upper()
@@ -42,20 +39,16 @@ def ticker_matches(underlying: str, ticker: str) -> bool:
     index = index_ticker(ul)
     return index is not None and given == index
 
-
 @dataclass(frozen=True, slots=True)
 class Spot:
     price: Decimal
     source: str
 
-
 def _clock(value: str) -> time:
     return time.fromisoformat(value)
 
-
 def session_day(at: datetime) -> date:
     return at.astimezone(ZoneInfo(settings.massive_session_timezone)).date()
-
 
 def session_is_open(at: datetime) -> bool:
     local = at.astimezone(ZoneInfo(settings.massive_session_timezone))
@@ -65,14 +58,11 @@ def session_is_open(at: datetime) -> bool:
         < _clock(settings.massive_session_close)
     )
 
-
 def sample_key(symbol: str, day: date) -> str:
     return f"{SAMPLE_PREFIX}:{symbol.upper()}:{day.isoformat()}:samples"
 
-
 def last_quote_key(symbol: str) -> str:
     return f"{SAMPLE_PREFIX}:{symbol.upper()}:last"
-
 
 async def record_sample(redis, symbol: str, spot: Spot, *, at: datetime | None = None) -> None:
     moment = at or datetime.now(UTC)
@@ -88,7 +78,6 @@ async def record_sample(redis, symbol: str, spot: Spot, *, at: datetime | None =
         pipe.set(last_quote_key(symbol), encoded)
         await pipe.execute()
 
-
 async def last_spot(redis, symbol: str) -> Spot | None:
     raw = await redis.get(last_quote_key(symbol))
     if not raw:
@@ -100,7 +89,6 @@ async def last_spot(redis, symbol: str) -> Spot | None:
     except (TypeError, ValueError):
         return None
     return Spot(price, source) if price and source else None
-
 
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,7 +117,6 @@ def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
-
 
 async def archive_due_samples(
     redis, symbol: str, *, at: datetime | None = None, directory: str | None = None
@@ -169,7 +156,6 @@ async def archive_due_samples(
         log.info("massive.session_archived symbol=%s rows=%s path=%s", symbol, len(rows), target)
     return archived
 
-
 def _price(value: Any) -> Decimal | None:
     if value is None:
         return None
@@ -178,7 +164,6 @@ def _price(value: Any) -> Decimal | None:
     except (InvalidOperation, ValueError):
         return None
     return price if price > 0 else None
-
 
 async def get_json(
     client: httpx.AsyncClient, path: str, params: dict[str, Any] | None = None
@@ -202,7 +187,6 @@ async def get_json(
         log.warning("massive.bad_json path=%s", path)
         return None
 
-
 async def _from_indices(client: httpx.AsyncClient, underlying: str) -> Spot | None:
     ticker = index_ticker(underlying)
     if not ticker:
@@ -215,7 +199,6 @@ async def _from_indices(client: httpx.AsyncClient, underlying: str) -> Spot | No
     price = _price(row.get("value")) or _price((row.get("session") or {}).get("close"))
     return Spot(price, "indices_snapshot") if price else None
 
-
 async def _from_options(client: httpx.AsyncClient, underlying: str) -> Spot | None:
     body = await get_json(client, f"/v3/snapshot/options/{underlying.upper()}", {"limit": 50})
     for row in (body or {}).get("results") or []:
@@ -225,14 +208,12 @@ async def _from_options(client: httpx.AsyncClient, underlying: str) -> Spot | No
             return Spot(price, "options_snapshot")
     return None
 
-
 async def _from_prev_close(client: httpx.AsyncClient, underlying: str) -> Spot | None:
     ticker = index_ticker(underlying) or underlying.upper()
     body = await get_json(client, f"/v2/aggs/ticker/{ticker}/prev", {"adjusted": "true"})
     rows = (body or {}).get("results") or []
     price = _price(rows[0].get("c")) if rows else None
     return Spot(price, "aggs_prev") if price else None
-
 
 async def _from_stocks(client: httpx.AsyncClient, underlying: str) -> Spot | None:
     body = await get_json(client, f"/v2/snapshot/locale/us/markets/stocks/tickers/{underlying.upper()}")
@@ -241,9 +222,7 @@ async def _from_stocks(client: httpx.AsyncClient, underlying: str) -> Spot | Non
     price = _price(day.get("c")) or _price((ticker.get("lastTrade") or {}).get("p"))
     return Spot(price, "stocks_snapshot") if price else None
 
-
 NON_INDEX_LOADERS = (_from_options, _from_prev_close, _from_stocks)
-
 
 async def fetch_spot(client: httpx.AsyncClient, underlying: str) -> Spot | None:
     if index_ticker(underlying):

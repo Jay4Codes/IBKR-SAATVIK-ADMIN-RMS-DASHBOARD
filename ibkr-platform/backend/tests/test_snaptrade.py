@@ -9,12 +9,10 @@ from fastapi import HTTPException
 from app import secrets, snaptrade
 from app.config import settings
 
-
 @pytest.fixture(autouse=True)
 def configured(monkeypatch):
     monkeypatch.setattr(settings, "snaptrade_client_id", "test-client")
     monkeypatch.setattr(settings, "snaptrade_consumer_key", "test-consumer-key")
-
 
 def test_signature_matches_snaptrades_canonical_form():
     query = {"clientId": "test-client", "timestamp": "1700000000", "userId": "u1"}
@@ -33,11 +31,9 @@ def test_signature_matches_snaptrades_canonical_form():
     ).decode()
     assert signature == expected
 
-
 def test_the_signature_covers_the_body():
     query = {"clientId": "test-client", "timestamp": "1"}
     assert snaptrade.sign("/x", query, {"a": 1}) != snaptrade.sign("/x", query, {"a": 2})
-
 
 def test_provider_reports_itself_unconfigured(monkeypatch):
     monkeypatch.setattr(settings, "snaptrade_client_id", "")
@@ -46,14 +42,12 @@ def test_provider_reports_itself_unconfigured(monkeypatch):
         snaptrade.require_configured()
     assert error.value.status_code == 503
 
-
 async def test_an_unregistered_connection_cannot_make_a_user_call():
     async with snaptrade.SnapTradeClient() as client:
         with pytest.raises(HTTPException) as error:
             await client.accounts()
     assert error.value.status_code == 409
     assert "not been registered" in error.value.detail
-
 
 def test_positions_are_normalised_with_derived_valuations():
     row = {
@@ -79,13 +73,11 @@ def test_positions_are_normalised_with_derived_valuations():
     assert str(position.unrealized_pnl) == "205.00"
     assert position.con_id > 0
 
-
 def test_a_position_without_a_price_leaves_valuations_blank():
     position = snaptrade.normalize_position("U1", {"symbol": "AAPL", "units": "3", "price": None})
     assert position.market_price is None
     assert position.market_value is None
     assert position.unrealized_pnl is None
-
 
 def test_account_normalisation_leaves_unreported_margin_fields_blank():
     account = snaptrade.normalize_account(
@@ -97,7 +89,6 @@ def test_account_normalisation_leaves_unreported_margin_fields_blank():
     assert str(account.cash) == "300"
     assert account.buying_power is None
     assert account.maintenance_margin is None
-
 
 def test_orders_carry_a_stable_positive_identity():
     row = {
@@ -114,7 +105,6 @@ def test_orders_carry_a_stable_positive_identity():
     second = snaptrade.normalize_order("U1", row, 0)
     assert first.perm_id == second.perm_id > 0
     assert str(first.remaining_quantity) == "3"
-
 
 def test_an_activity_without_a_price_or_date_is_skipped():
     assert snaptrade.normalize_activity("U1", {"units": "1"}) is None
@@ -136,7 +126,6 @@ def test_an_activity_without_a_price_or_date_is_skipped():
     assert str(fill.quantity) == "4", "quantity is reported as a magnitude, with side separate"
     assert str(fill.commission) == "0.35"
 
-
 def test_secrets_round_trip_and_reject_a_rotated_key(monkeypatch):
     monkeypatch.setattr(settings, "secret_key", "key-one")
     sealed = secrets.encrypt("user-secret")
@@ -145,7 +134,6 @@ def test_secrets_round_trip_and_reject_a_rotated_key(monkeypatch):
     monkeypatch.setattr(settings, "secret_key", "key-two")
     with pytest.raises(secrets.SecretUnavailable):
         secrets.decrypt(sealed)
-
 
 def test_secrets_are_unavailable_without_a_key(monkeypatch):
     monkeypatch.setattr(settings, "secret_key", "")

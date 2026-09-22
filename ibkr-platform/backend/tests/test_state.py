@@ -5,12 +5,10 @@ from app.domain import Event, GatewayState, Position, now
 from app.state import StateRepository
 from tests.conftest import CONNECTION, OTHER_CONNECTION, OTHER_TENANT, TENANT
 
-
 def position(quantity="2", con_id=1):
     return Position(
         account_id="DU1", con_id=con_id, symbol="SAME", sec_type="OPT", quantity=quantity, average_cost="1200"
     )
-
 
 async def test_atomic_state_event_and_close(stores, repo, keys):
     redis, _ = stores
@@ -32,7 +30,6 @@ async def test_atomic_state_event_and_close(stores, repo, keys):
     assert json.loads(events[-1][1]["event"])["account_id"] == "DU1"
     assert events[-1][1]["connection_id"] == CONNECTION
 
-
 async def test_stale_gateway(stores, repo, keys):
     redis, _ = stores
     state = GatewayState(
@@ -45,7 +42,6 @@ async def test_stale_gateway(stores, repo, keys):
     assert gateway["status"] == "DEGRADED"
     assert gateway["subscriptions"]["positions"] == "STALE"
 
-
 async def test_orders_reconcile_and_terminal(repo):
     data = {"account_id": "DU1", "order_id": 1, "client_id": 2, "status": "Submitted"}
     await repo.publish(Event(event_type="order.updated", account_id="DU1", data=data))
@@ -56,7 +52,6 @@ async def test_orders_reconcile_and_terminal(repo):
     await repo.publish(Event(event_type="orders.reconciled", account_id="DU1", data={"orders": []}))
     assert not await repo.rows("DU1", "orders")
 
-
 async def test_unbound_manual_orders_do_not_collide(repo):
     data = {"account_id": "DU1", "order_id": 0, "client_id": 0, "status": "Submitted"}
     for perm_id in (123, 456):
@@ -64,7 +59,6 @@ async def test_unbound_manual_orders_do_not_collide(repo):
             Event(event_type="order.updated", account_id="DU1", data={**data, "perm_id": perm_id})
         )
     assert len(await repo.rows("DU1", "orders")) == 2
-
 
 async def test_two_tenants_never_share_live_state(stores):
     redis, _ = stores
@@ -82,7 +76,6 @@ async def test_two_tenants_never_share_live_state(stores):
     assert (await two.rows("DU1", "positions"))[0]["quantity"] == "9"
     assert len(await redis.xrange(one.keys.events)) == 1
     assert len(await redis.xrange(two.keys.events)) == 1
-
 
 async def test_reconciliation_only_drops_the_reporting_connection_accounts(stores):
     redis, _ = stores

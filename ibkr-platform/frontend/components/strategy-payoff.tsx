@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, ReactNode, useEffect, useRef, useState } from "react";
+import { memo, ReactNode } from "react";
 import {
   Assumption,
   buildPriceCurve,
@@ -43,64 +43,73 @@ export function scaleTicks(lo: number, hi: number, target = 9): number[] {
   return out;
 }
 
-function useWidth<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const measure = () => setWidth(node.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width] as const;
-}
-
 export const PLOT_LEFT = 64;
 export const PLOT_RIGHT = 24;
+export const TICK_WEIGHT_CAP = 4;
 
-const pinWidth = (pin: Marker) =>
-  `${pin.strike}`.length * 7.5 + 16 + (Math.abs(pin.quantity) !== 1 ? 22 : 0);
+export function tickWeight(quantity: number) {
+  return Math.min(Math.abs(quantity), TICK_WEIGHT_CAP);
+}
 
-export function assignRows(pins: Marker[], lo: number, hi: number, width: number) {
+export function tickPlacement(pins: Marker[], lo: number, hi: number) {
   const span = hi - lo;
-  const rowEnds: number[] = [];
+  const seen = new Map<string, number>();
   return pins.map(pin => {
-    const centre = span > 0 ? ((pin.strike - lo) / span) * width : 0;
-    const half = pinWidth(pin) / 2;
-    let row = rowEnds.findIndex(end => centre - half >= end);
-    if (row === -1) row = rowEnds.length;
-    rowEnds[row] = centre + half + 6;
-    return { pin, row };
+    const key = `${pin.strike}:${pin.right}`;
+    const slot = seen.get(key) ?? 0;
+    seen.set(key, slot + 1);
+    return {
+      pin,
+      x: span > 0 ? ((pin.strike - lo) / span) * 100 : 0,
+      nudge: slot,
+    };
   });
+}
+
+function StrikeTick({ pin, x, nudge }: { pin: Marker; x: number; nudge: number }) {
+  const qty = Math.abs(pin.quantity);
+  const side = pin.right === "C" ? "call" : "put";
+  const label = `${pin.quantity > 0 ? "Long" : "Short"} ${qty} × ${pin.strike} ${side}, expiring ${expiryDate(pin.expiry) || pin.expiry}`;
+  return (
+    <button
+      type="button"
+      className={`strike-tick ${side} ${pin.quantity < 0 ? "short" : "long"}`}
+      style={{
+        left: `${x}%`,
+        ["--qty" as string]: String(tickWeight(pin.quantity)),
+        ["--nudge" as string]: String(nudge),
+      }}
+      aria-label={label}
+      title={label}
+    >
+      <i />
+      <span className="tick-card" aria-hidden="true">
+        {pin.strike}{pin.right}
+        {qty !== 1 && <b>×{qty}</b>}
+      </span>
+    </button>
+  );
 }
 
 function StrikeRuler({ legs, lo, hi, spot, symbol }: { legs: RiskLeg[]; lo: number; hi: number; spot: number; symbol: string }) {
   const place = (price: number) => ((price - lo) / (hi - lo)) * 100;
-  const [ref, width] = useWidth<HTMLDivElement>();
-  const pins = markers(legs).filter(m => m.strike >= lo && m.strike <= hi);
-  const placed = assignRows(pins, lo, hi, width || 1200);
-  const rows = placed.reduce((most, p) => Math.max(most, p.row + 1), 1);
+  const placed = tickPlacement(markers(legs).filter(m => m.strike >= lo && m.strike <= hi), lo, hi);
+  const calls = placed.filter(p => p.pin.right === "C");
+  const puts = placed.filter(p => p.pin.right !== "C");
   return (
     <div className="strike-ruler" role="group" aria-label="Held strikes against the underlying price">
-      <div className="ruler-track" ref={ref} style={{ height: `${rows * 26 + 14}px` }}>
-        {placed.map(({ pin, row }) => (
-          <span
-            key={`${pin.strike}:${pin.right}`}
-            className={`strike-pin ${pin.right === "C" ? "call" : "put"} ${pin.quantity < 0 ? "short" : "long"}`}
-            style={{
-              left: `${place(pin.strike)}%`,
-              top: `${row * 26}px`,
-              ["--drop" as string]: `${(rows - row) * 26 - 6}px`,
-            }}
-            title={`${pin.quantity > 0 ? "Long" : "Short"} ${Math.abs(pin.quantity)} × ${pin.strike} ${pin.right === "C" ? "call" : "put"}, expiring ${expiryDate(pin.expiry) || pin.expiry}`}
-          >
-            {pin.strike}{pin.right}
-            {Math.abs(pin.quantity) !== 1 && <b>×{Math.abs(pin.quantity)}</b>}
-          </span>
-        ))}
+      <div className="ruler-rail">
+        <div className="ruler-band call">
+          {calls.map(({ pin, x, nudge }) => (
+            <StrikeTick key={`${pin.strike}:${pin.right}:${pin.expiry}`} pin={pin} x={x} nudge={nudge} />
+          ))}
+        </div>
+        <div className="ruler-line" />
+        <div className="ruler-band put">
+          {puts.map(({ pin, x, nudge }) => (
+            <StrikeTick key={`${pin.strike}:${pin.right}:${pin.expiry}`} pin={pin} x={x} nudge={nudge} />
+          ))}
+        </div>
         {spot >= lo && spot <= hi && (
           <span className="spot-pin" style={{ left: `${place(spot)}%` }}>
             <small>{symbol}</small>
@@ -270,7 +279,6 @@ export const StrategyPayoff = memo(function StrategyPayoff({
   light: boolean;
   range: number;
   horizon: number;
-  /** Controls that belong on the header line, beside the underlying's price. */
   toolbar?: ReactNode;
 }) {
   const key = keys[0];
@@ -304,9 +312,6 @@ export const StrategyPayoff = memo(function StrategyPayoff({
 
   return (
     <div className="strategy" style={{ ["--plot-left" as string]: `${PLOT_LEFT}px`, ["--plot-right" as string]: `${PLOT_RIGHT}px` }}>
-      {/* The expiry control belongs on this line — it names which book the price
-          describes — but after the price, not before it: the number is what the
-          eye comes here for. */}
       <div className="strategy-head">
         <span className="ticker">{symbol}</span>
         <b>{money(String(spot))}</b>

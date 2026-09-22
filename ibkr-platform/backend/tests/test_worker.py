@@ -11,15 +11,12 @@ from app.tenancy import TenantKeys
 from app.worker import GatewaySession, backoff, durable_consumer
 from tests.conftest import CONNECTION, TENANT, gateway_connection
 
-
 def keep(db, event):
     return persist(db, event, tenant_id=TENANT, connection_id=CONNECTION)
-
 
 def session(redis, db, ib=None, **overrides):
     connection = {**gateway_connection(TENANT, CONNECTION, "Gateway", 4101), **overrides}
     return GatewaySession(redis, db, TENANT, connection, ib or MagicMock())
-
 
 async def test_immutable_fill_with_commission_enrichment(stores):
     _, db = stores
@@ -46,7 +43,6 @@ async def test_immutable_fill_with_commission_enrichment(stores):
     assert fill["commission"] == "0.35"
     assert fill["tenant_id"] == TENANT
 
-
 async def test_same_fill_id_in_two_tenants_stays_two_records(stores):
     _, db = stores
     data = {"execution_id": "shared", "account_id": "DU1", "price": "1"}
@@ -55,7 +51,6 @@ async def test_same_fill_id_in_two_tenants_stays_two_records(stores):
     await persist(db, event, tenant_id="tenant-two", connection_id="connection-two")
     assert await db.executions.count_documents({}) == 2
     assert await db.executions.count_documents({"tenant_id": TENANT}) == 1
-
 
 async def test_order_history_retains_created_at(stores):
     _, db = stores
@@ -81,13 +76,11 @@ async def test_order_history_retains_created_at(stores):
     assert await db.order_events.count_documents({}) == 2
     assert (await db.orders.find_one({}))["created_at"] == data["created_at"]
 
-
 def test_backoff_is_capped():
     with patch("app.worker.random.uniform", return_value=0):
         assert backoff(1) == 2
         assert backoff(2) == 4
         assert backoff(10000) == 60
-
 
 async def test_a_held_lease_stops_a_second_session(stores):
     redis, db = stores
@@ -95,7 +88,6 @@ async def test_a_held_lease_stops_a_second_session(stores):
     ib = MagicMock()
     await session(redis, db, ib).run()
     ib.connectAsync.assert_not_called()
-
 
 async def test_leases_are_per_connection(stores):
     redis, db = stores
@@ -106,14 +98,12 @@ async def test_leases_are_per_connection(stores):
     )
     assert await second.acquire()
 
-
 async def test_callback_error_is_visible(stores):
     redis, db = stores
     worker = session(redis, db)
     worker.callback(lambda: 1 / 0)()
     assert worker.fault.is_set()
     assert "division" in worker.state.last_error
-
 
 async def test_connect_failure_retries_and_stops(stores, monkeypatch):
     redis, db = stores
@@ -133,7 +123,6 @@ async def test_connect_failure_retries_and_stops(stores, monkeypatch):
     assert worker.state.disconnected_at
     ib.disconnect.assert_called()
 
-
 async def test_a_connection_without_a_port_never_dials(stores, monkeypatch):
     redis, db = stores
     ib = MagicMock()
@@ -146,7 +135,6 @@ async def test_a_connection_without_a_port_never_dials(stores, monkeypatch):
     await asyncio.wait_for(task, 1)
     ib.connectAsync.assert_not_called()
     assert "no API port" in worker.state.last_error
-
 
 async def test_durable_stream_consumer_ack(stores):
     redis, db = stores
@@ -170,7 +158,6 @@ async def test_durable_stream_consumer_ack(stores):
         stop.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-
 
 async def test_history_retries_unacknowledged_events(stores, monkeypatch):
     redis, db = stores
@@ -202,7 +189,6 @@ async def test_history_retries_unacknowledged_events(stores, monkeypatch):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-
 async def test_target_prefers_operator_override(stores):
     redis, db = stores
     worker = session(redis, db)
@@ -215,7 +201,6 @@ async def test_target_prefers_operator_override(stores):
     assert await worker.target() == ("gw.internal", 4001, 21)
     assert (worker.state.host, worker.state.port, worker.state.client_id) == ("gw.internal", 4001, 21)
 
-
 async def test_reconnect_command_sets_events(stores):
     redis, db = stores
     worker = session(redis, db)
@@ -223,14 +208,12 @@ async def test_reconnect_command_sets_events(stores):
     assert worker.reconnect.is_set()
     assert worker.fault.is_set()
 
-
 async def test_unsupported_command_is_ignored(stores):
     redis, db = stores
     worker = session(redis, db)
     worker.command({"command": "place_order"})
     assert not worker.reconnect.is_set()
     assert not worker.fault.is_set()
-
 
 async def test_supervisor_routes_commands_to_the_named_session(stores):
     from app.tenancy import COMMAND_CHANNEL
@@ -261,7 +244,6 @@ async def test_supervisor_routes_commands_to_the_named_session(stores):
     assert mine.reconnect.is_set()
     assert not theirs.reconnect.is_set()
 
-
 async def test_a_command_naming_the_wrong_tenant_is_refused(stores):
     from app.tenancy import COMMAND_CHANNEL
     from app.worker import Supervisor
@@ -287,7 +269,6 @@ async def test_a_command_naming_the_wrong_tenant_is_refused(stores):
     await asyncio.gather(task, return_exceptions=True)
     assert not mine.reconnect.is_set()
 
-
 def test_worker_never_calls_a_loop_driving_ib_method():
     import inspect
     import re
@@ -312,7 +293,6 @@ def test_worker_never_calls_a_loop_driving_ib_method():
         f"worker.py calls blocking ib_async methods {offenders}; await the *Async variant instead"
     )
 
-
 @pytest.mark.parametrize(
     "provider,expected",
     [("ibkr_gateway", "GatewaySession"), ("snaptrade", None), ("carrier-pigeon", None)],
@@ -325,7 +305,6 @@ async def test_build_session_picks_the_provider(stores, provider, expected):
     built = build_session(redis, db, doc)
     assert (type(built).__name__ if built else None) == expected
 
-
 async def test_farm_connecting_notice_does_not_degrade(stores):
     redis, db = stores
     worker = session(redis, db)
@@ -336,7 +315,6 @@ async def test_farm_connecting_notice_does_not_degrade(stores):
     assert worker.state.last_error is None
     assert worker.state.subscriptions == {"accounts": "ACTIVE", "positions": "ACTIVE"}
     assert not worker.fault.is_set()
-
 
 async def test_a_broken_farm_degrades_until_it_reconnects(stores):
     redis, db = stores
@@ -351,7 +329,6 @@ async def test_a_broken_farm_degrades_until_it_reconnects(stores):
     assert worker.state.status == GatewayStatus.CONNECTED
     assert worker.state.last_error is None
     assert worker.state.subscriptions == {"accounts": "ACTIVE", "positions": "ACTIVE"}
-
 
 async def test_restored_connectivity_does_not_tear_down_the_session(stores):
     redis, db = stores
@@ -371,7 +348,6 @@ async def test_restored_connectivity_does_not_tear_down_the_session(stores):
     assert worker.state.last_error is None
     assert worker.state.subscriptions == {"accounts": "ACTIVE", "positions": "ACTIVE"}
 
-
 async def test_lost_connectivity_still_rebuilds_the_session(stores):
     redis, db = stores
     worker = session(redis, db)
@@ -379,7 +355,6 @@ async def test_lost_connectivity_still_rebuilds_the_session(stores):
     worker.broker_error(-1, 1100, "Connectivity between IBKR and TWS has been lost.", None)
     assert worker.fault.is_set()
     assert worker.state.status == GatewayStatus.DEGRADED
-
 
 async def test_a_farm_notice_does_not_clear_a_real_error(stores):
     redis, db = stores
@@ -389,12 +364,10 @@ async def test_a_farm_notice_does_not_clear_a_real_error(stores):
     assert worker.state.status == GatewayStatus.DEGRADED
     assert worker.state.last_error.startswith("201:")
 
-
 def option(con_id, symbol="SPX", currency="USD"):
     contract = MagicMock()
     contract.conId, contract.symbol, contract.currency = con_id, symbol, currency
     return contract
-
 
 def held(account="U1", con_id=1, quantity="1", symbol="SPX", currency="USD"):
     value = MagicMock()
@@ -409,18 +382,15 @@ def held(account="U1", con_id=1, quantity="1", symbol="SPX", currency="USD"):
     value.contract.multiplier = "100"
     return value
 
-
 def tick(con_id, und_price, symbol="SPX", currency="USD"):
     ticker = MagicMock()
     ticker.contract = option(con_id, symbol, currency)
     ticker.modelGreeks.undPrice = und_price
     return ticker
 
-
 def qualifying(ib):
     ib.qualifyContractsAsync = AsyncMock(side_effect=lambda contract: [contract])
     return ib
-
 
 async def test_one_market_data_line_prices_the_whole_chain(stores):
     redis, db = stores
@@ -432,7 +402,6 @@ async def test_one_market_data_line_prices_the_whole_chain(stores):
     await worker.subscribe_underlyings()
     assert ib.reqMktData.call_count == 1
     assert list(worker.market_subscriptions) == ["USD:SPX"]
-
 
 async def test_spx_uses_a_direct_index_market_data_line(stores):
     redis, db = stores
@@ -448,7 +417,6 @@ async def test_spx_uses_a_direct_index_market_data_line(stores):
     assert ib.reqMktData.call_args.args[0].secType == "IND"
     assert worker.contracts[1].exchange == "", "the stored contract must not be mutated"
 
-
 async def test_an_unqualifiable_contract_is_dropped_not_retried(stores):
     redis, db = stores
     ib = MagicMock()
@@ -461,7 +429,6 @@ async def test_an_unqualifiable_contract_is_dropped_not_retried(stores):
     await worker.subscribe_underlyings()
     assert ib.qualifyContractsAsync.call_count == 1
 
-
 async def test_underlying_price_reaches_positions(stores):
     redis, db = stores
     worker = session(redis, db, qualifying(MagicMock()))
@@ -472,7 +439,6 @@ async def test_underlying_price_reaches_positions(stores):
     worker.flush_underlyings()
     assert worker.positions[("U1", 1)].underlying_price == Decimal("7612.5")
     assert not worker.underlying_changed
-
 
 async def test_direct_index_tick_is_selected_for_spx(stores):
     redis, db = stores
@@ -497,7 +463,6 @@ async def test_direct_index_tick_is_selected_for_spx(stores):
     }
     worker.queue.task_done()
 
-
 async def test_queued_position_event_is_stamped_with_latest_stored_spx(stores):
     redis, db = stores
     worker = session(redis, db, qualifying(MagicMock()))
@@ -518,7 +483,6 @@ async def test_queued_position_event_is_stamped_with_latest_stored_spx(stores):
     assert '"underlying_price": "7673.13"' in raw
     assert '"underlying_source": "ib_index_ltp"' in raw
 
-
 async def test_an_unmoved_underlying_publishes_nothing(stores):
     redis, db = stores
     worker = session(redis, db, qualifying(MagicMock()))
@@ -529,7 +493,6 @@ async def test_an_unmoved_underlying_publishes_nothing(stores):
     worker.ticker_value([tick(1, 7612.5), tick(1, float("nan")), tick(1, 0)])
     worker.flush_underlyings()
     assert worker.queue.qsize() == before
-
 
 async def test_the_market_data_line_moves_to_a_leg_that_is_still_open(stores):
     redis, db = stores
@@ -544,7 +507,6 @@ async def test_the_market_data_line_moves_to_a_leg_that_is_still_open(stores):
     assert worker.market_wanted == {"USD:SPX": 2}
     await worker.subscribe_underlyings()
     assert worker.market_subscriptions["USD:SPX"].secType == "IND"
-
 
 async def test_a_denied_market_data_feed_does_not_degrade_the_gateway(stores):
     redis, db = stores
@@ -563,7 +525,6 @@ async def test_a_denied_market_data_feed_does_not_degrade_the_gateway(stores):
     await worker.subscribe_underlyings()
     ib.reqMktData.assert_not_called()
 
-
 async def test_a_request_error_on_our_own_market_data_line_spares_the_gateway(stores):
     redis, db = stores
     ib = qualifying(MagicMock())
@@ -577,14 +538,13 @@ async def test_a_request_error_on_our_own_market_data_line_spares_the_gateway(st
     worker.broker_error(8, 321, "Error validating request. cause - Please enter exchange", None)
     assert worker.state.status == GatewayStatus.DEGRADED
 
-
 async def test_ibkrs_aggregate_is_not_counted_as_an_account(stores):
-    """`managedAccounts()` returns an "All" entry beside the real accounts.
+\
+\
+\
+\
+\
 
-    It holds no positions and cannot be traded, but it was reaching the
-    dashboard's account list — which then reported two accounts for a desk that
-    has one.
-    """
     redis, db = stores
     worker = session(redis, db)
     assert worker.accept_account("U22050074") is True
@@ -593,13 +553,12 @@ async def test_ibkrs_aggregate_is_not_counted_as_an_account(stores):
     assert worker.accept_account("") is False
     assert worker.accept_account(None) is False
 
-
 async def test_an_explicit_account_filter_still_wins(stores):
     redis, db = stores
     worker = session(redis, db)
     worker.account_filter = "U22050074"
     assert worker.accept_account("U22050074") is True
     assert worker.accept_account("U99999999") is False
-    # …and never admits the aggregate, whatever the filter says.
+
     worker.account_filter = "All"
     assert worker.accept_account("All") is False

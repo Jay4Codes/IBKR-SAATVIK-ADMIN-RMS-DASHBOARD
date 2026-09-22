@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { breakevens, buildPriceCurve, prepareLegs, previousClose, priceCdf, strategyStats } from "@/lib/payoff";
 import { Position } from "@/lib/types";
-import { assignRows, scaleTicks } from "@/components/strategy-payoff";
+import { scaleTicks, tickPlacement, tickWeight } from "@/components/strategy-payoff";
 
 function opt(fields: Partial<Position>): Position {
   return {
@@ -142,27 +142,27 @@ describe("the strike ladder's price scale", () => {
   });
 });
 
-describe("strike ladder placement", () => {
-  const pin = (strike: number, quantity = 1) =>
-    ({ strike, right: "P", quantity, expiry: "20260918" });
+describe("strike rail placement", () => {
+  const pin = (strike: number, quantity = 1, right = "P", expiry = "20260918") =>
+    ({ strike, right, quantity, expiry });
 
-  it("stacks clustered strikes into as many rows as they need", () => {
-    const placed = assignRows([pin(7485), pin(7510, -2), pin(7530)], 6800, 8600, 1200);
-    const rows = placed.map(p => p.row);
-    expect(new Set(rows).size).toBe(3);
-    expect(Math.max(...rows)).toBe(2);
+  it("sits every strike on the price axis without stacking rows", () => {
+    const placed = tickPlacement([pin(7485), pin(7510, -2), pin(7530)], 6800, 8600);
+    expect(placed.map(p => p.nudge)).toEqual([0, 0, 0]);
+    expect(placed[1].x).toBeCloseTo(((7510 - 6800) / 1800) * 100);
   });
 
-  it("keeps well-separated strikes on one row", () => {
-    const placed = assignRows([pin(7000), pin(7800), pin(8400)], 6800, 8600, 1200);
-    expect(placed.every(p => p.row === 0)).toBe(true);
+  it("nudges overlapping same-strike pins sideways instead of growing taller", () => {
+    const placed = tickPlacement([
+      pin(7770, 1, "C", "20260918"),
+      pin(7770, 2, "C", "20261016"),
+    ], 6800, 8600);
+    expect(placed.map(p => p.nudge)).toEqual([0, 1]);
+    expect(placed[0].x).toBe(placed[1].x);
   });
 
-  it("needs more rows as the window narrows", () => {
-    const wide = assignRows([pin(7485), pin(7530)], 6800, 8600, 2400);
-    const narrow = assignRows([pin(7485), pin(7530)], 6800, 8600, 400);
-    expect(Math.max(...narrow.map(p => p.row))).toBeGreaterThanOrEqual(
-      Math.max(...wide.map(p => p.row)),
-    );
+  it("caps quantity so tick height cannot grow without bound", () => {
+    expect(tickWeight(1)).toBe(1);
+    expect(tickWeight(-12)).toBe(4);
   });
 })

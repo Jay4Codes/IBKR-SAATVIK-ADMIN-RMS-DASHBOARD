@@ -10,10 +10,8 @@ from tests.conftest import CONNECTION, TENANT
 SECRET = "do-not-leak-this"
 TEMPLATE = "IbLoginId=olduser\nIbPassword=oldsecret\nTradingMode=paper\nOverrideTwsApiPort=4002\n"
 
-
 def as_user(role):
     return {COOKIE: role}
-
 
 @pytest.fixture
 async def config(tmp_path, stores):
@@ -27,7 +25,6 @@ async def config(tmp_path, stores):
     )
     return path
 
-
 async def test_credentials_require_admin(client, config):
     response = await client.post(
         "/api/v1/gateway/credentials",
@@ -37,7 +34,6 @@ async def test_credentials_require_admin(client, config):
     assert response.status_code == 403
     assert SECRET not in config.read_text()
 
-
 async def test_credentials_require_session(client, config):
     client.cookies.clear()
     response = await client.post(
@@ -45,7 +41,6 @@ async def test_credentials_require_session(client, config):
         json={"username": "apibot", "password": SECRET, "mode": "live", "port": 4001},
     )
     assert response.status_code == 401
-
 
 async def test_credentials_written_and_never_echoed(client, config, stores):
     _, db = stores
@@ -66,7 +61,6 @@ async def test_credentials_written_and_never_echoed(client, config, stores):
     assert SECRET not in str(stored)
     assert stored["ibkr_username"] == "apibot"
 
-
 async def test_credentials_reject_bad_input(client, config):
     for payload in (
         {"username": "api bot", "password": SECRET, "mode": "live", "port": 4001},
@@ -79,7 +73,6 @@ async def test_credentials_reject_bad_input(client, config):
         )
         assert response.status_code == 422, payload
     assert SECRET not in config.read_text()
-
 
 async def test_gateway_never_exposes_password(client, config, monkeypatch):
     async def fake_state(unit):
@@ -100,7 +93,6 @@ async def test_gateway_never_exposes_password(client, config, monkeypatch):
     assert data["connection_id"] == CONNECTION
     assert "password" not in response.text.lower()
 
-
 async def test_trader_sees_neither_process_nor_username(client, config):
     response = await client.get("/api/v1/gateway", cookies=as_user("TRADER"))
     data = response.json()["data"]
@@ -108,20 +100,17 @@ async def test_trader_sees_neither_process_nor_username(client, config):
     assert "process" not in data
     assert data["connection_id"] == CONNECTION
 
-
 async def test_process_requires_admin(client, config):
     response = await client.post(
         "/api/v1/gateway/process", json={"action": "start"}, cookies=as_user("TRADER")
     )
     assert response.status_code == 403
 
-
 async def test_process_rejects_unknown_action(client, config):
     response = await client.post(
         "/api/v1/gateway/process", json={"action": "reinstall"}, cookies=as_user("ADMIN")
     )
     assert response.status_code == 422
-
 
 async def test_process_action_is_audited(client, config, stores, monkeypatch):
     _, db = stores
@@ -138,7 +127,6 @@ async def test_process_action_is_audited(client, config, stores, monkeypatch):
     record = await db.audit_logs.find_one({"action": "gateway_process_restart", "user_id": "ADMIN"})
     assert record["data"]["connection"] == CONNECTION
 
-
 async def test_process_failure_reports_503(client, config, monkeypatch):
     async def failing(action, unit):
         raise RuntimeError("Unit not found")
@@ -149,7 +137,6 @@ async def test_process_failure_reports_503(client, config, monkeypatch):
     )
     assert response.status_code == 503
     assert response.json()["success"] is False
-
 
 async def test_a_tenant_cannot_drive_another_tenants_connection(client, config):
     from tests.conftest import OTHER_CONNECTION

@@ -2,7 +2,6 @@ import json
 import logging
 from datetime import UTC, datetime
 
-
 class JsonFormatter(logging.Formatter):
     def format(self, record):
         return json.dumps(
@@ -14,7 +13,6 @@ class JsonFormatter(logging.Formatter):
                 "exception": self.formatException(record.exc_info) if record.exc_info else None,
             }
         )
-
 
 def configure():
     handler = logging.StreamHandler()

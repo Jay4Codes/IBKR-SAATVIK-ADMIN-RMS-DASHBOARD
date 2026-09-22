@@ -31,7 +31,6 @@ OTHER_TENANT = "tenant-two"
 CONNECTION = "connection-one"
 OTHER_CONNECTION = "connection-two"
 
-
 def gateway_connection(tenant_id: str, connection_id: str, name: str, port: int) -> dict:
     return {
         "_id": connection_id,
@@ -50,7 +49,6 @@ def gateway_connection(tenant_id: str, connection_id: str, name: str, port: int)
         "service_unit": "ibkr-gateway-test.service",
     }
 
-
 async def seed_tenant(db, redis, tenant_id: str, connection_id: str, accounts, port: int):
     tenant = {**new_tenant(tenant_id.replace("-", " ").title(), tenant_id), "_id": tenant_id}
     await db.tenants.insert_one(tenant)
@@ -64,7 +62,6 @@ async def seed_tenant(db, redis, tenant_id: str, connection_id: str, accounts, p
             Event(event_type="account.updated", account_id=account, data=state.model_dump(mode="json"))
         )
     return repo
-
 
 async def add_user(db, redis, user_id: str, tenant_id: str, role: str, accounts=(), super_admin=False):
     if not await db.users.find_one({"_id": user_id}):
@@ -89,7 +86,6 @@ async def add_user(db, redis, user_id: str, tenant_id: str, role: str, accounts=
         }
     )
 
-
 @pytest.fixture
 async def stores():
     redis = FakeRedis(decode_responses=True)
@@ -98,17 +94,14 @@ async def stores():
     yield redis, db
     await redis.aclose()
 
-
 @pytest.fixture
 async def keys():
     return TenantKeys(TENANT)
-
 
 @pytest.fixture
 async def repo(stores):
     redis, _ = stores
     return StateRepository(redis, TENANT, CONNECTION)
-
 
 @pytest.fixture
 async def client(stores):
@@ -127,7 +120,6 @@ async def client(stores):
         headers={"Origin": "http://localhost:3000"},
     ) as client:
         yield client
-
 
 async def promote_super(stores):
     _, db = stores

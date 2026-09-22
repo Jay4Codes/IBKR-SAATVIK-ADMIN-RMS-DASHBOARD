@@ -5,11 +5,9 @@ from app.auth import COOKIE, TENANT_COOKIE, subscriptions
 from app.tenancy import Membership, Principal, TenantRole
 from tests.conftest import OTHER_TENANT, TENANT, promote_super
 
-
 def principal(role: TenantRole, accounts=(), super_admin=False) -> Principal:
     membership = Membership(TENANT, "t1", "T1", "ACTIVE", role, tuple(accounts))
     return Principal("u", "u@test.local", super_admin, (membership,), membership)
-
 
 @pytest.mark.parametrize("accounts", [["*"], ["DU2"], ["DU1", "DU2"]])
 def test_trader_scope(accounts):
@@ -17,18 +15,15 @@ def test_trader_scope(accounts):
         subscriptions(principal(TenantRole.TRADER, ["DU1"]), accounts)
     assert error.value.status_code == 403
 
-
 def test_admin_and_trader_subscriptions():
     assert subscriptions(principal(TenantRole.OWNER, super_admin=True), ["*"]) == {"*"}
     assert subscriptions(principal(TenantRole.TRADER, ["DU1"]), ["DU1"]) == {"DU1"}
     principal(TenantRole.ADMIN).require_account("DU2")
 
-
 def test_viewer_is_not_a_tenant_admin():
     assert not principal(TenantRole.VIEWER, ["DU1"]).is_tenant_admin
     assert principal(TenantRole.VIEWER, ["DU1"]).sees("DU1")
     assert not principal(TenantRole.VIEWER, ["DU1"]).sees("DU2")
-
 
 async def test_account_routes_and_authorization(client):
     assert (await client.get("/api/v1/accounts")).json()["success"]
@@ -42,12 +37,10 @@ async def test_account_routes_and_authorization(client):
         assert response.json()["success"] is True
     assert (await client.get("/api/v1/admin/diagnostics")).status_code == 403
 
-
 async def test_missing_account_and_unauthorized(client):
     assert (await client.get("/api/v1/accounts/NOPE")).status_code == 404
     client.cookies.clear()
     assert (await client.get("/api/v1/accounts")).status_code == 401
-
 
 async def test_login_logout_cookie_and_csrf(client):
     client.cookies.clear()
@@ -65,7 +58,6 @@ async def test_login_logout_cookie_and_csrf(client):
     assert (await client.post("/api/v1/auth/logout", json={})).status_code == 200
     assert (await client.get("/api/v1/auth/me")).status_code == 401
 
-
 async def test_login_throttle(client):
     for _ in range(5):
         response = await client.post(
@@ -76,7 +68,6 @@ async def test_login_throttle(client):
         await client.post("/api/v1/auth/login", json={"email": "missing@test.local", "password": "bad"})
     ).status_code == 429
 
-
 async def test_visibility_requires_a_healthy_connection(client):
     from app.domain import now
 
@@ -86,7 +77,6 @@ async def test_visibility_requires_a_healthy_connection(client):
     )
     assert response.status_code == 409
     assert "healthy live connection" in response.json()["error"]
-
 
 async def test_live_visibility_requires_correlated_quantity_change(client, stores, repo, keys):
     from datetime import timedelta
@@ -143,7 +133,6 @@ async def test_live_visibility_requires_correlated_quantity_change(client, store
     assert response.json()["data"]["external_order_visibility"] == "PASS"
     assert response.json()["data"]["external_execution_visibility"] == "PASS"
 
-
 async def test_tenant_data_never_crosses_the_boundary(client):
     assert {a["account_id"] for a in (await client.get("/api/v1/accounts")).json()["data"]} == {"DU1", "DU2"}
     assert (await client.get("/api/v1/accounts/DU9")).status_code == 404
@@ -154,14 +143,12 @@ async def test_tenant_data_never_crosses_the_boundary(client):
     for account in ("DU1", "DU2"):
         assert (await client.get(f"/api/v1/accounts/{account}")).status_code == 404
 
-
 async def test_membership_is_required_to_name_a_tenant(client):
     client.cookies.set(COOKIE, "TRADER")
     client.cookies.set(TENANT_COOKIE, OTHER_TENANT)
     response = await client.get("/api/v1/accounts")
     assert response.status_code == 403
     assert "not a member" in response.json()["error"]
-
 
 async def test_super_admin_may_act_inside_any_tenant(client, stores):
     await promote_super(stores)
@@ -174,7 +161,6 @@ async def test_super_admin_may_act_inside_any_tenant(client, stores):
     assert me["impersonating"] is True
     assert me["is_super_admin"] is True
 
-
 async def test_tenant_switch_sets_the_active_tenant(client, stores):
     await promote_super(stores)
     client.cookies.set(COOKIE, "SUPER")
@@ -182,7 +168,6 @@ async def test_tenant_switch_sets_the_active_tenant(client, stores):
     assert response.status_code == 200
     assert response.json()["data"]["tenant"]["tenant_id"] == TENANT
     assert TENANT in response.headers["set-cookie"]
-
 
 async def test_suspended_tenant_is_refused(client, stores):
     _, db = stores

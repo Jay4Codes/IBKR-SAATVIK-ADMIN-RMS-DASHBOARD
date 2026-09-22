@@ -20,10 +20,8 @@ STATEMENT = """<?xml version="1.0" encoding="UTF-8"?>
  </FlexStatements>
 </FlexQueryResponse>"""
 
-
 def as_user(role):
     return {COOKIE: role}
-
 
 async def snapshot(db, tenant, account, date, value, *, bucket="", source="snapshot", taken=None):
     await db.account_snapshots.update_one(
@@ -42,7 +40,6 @@ async def snapshot(db, tenant, account, date, value, *, bucket="", source="snaps
         upsert=True,
     )
 
-
 def test_flex_keeps_only_rows_it_can_trust():
     points = flex.parse_statement(STATEMENT)
     assert [(p.account_id, p.report_date, str(p.net_liquidation)) for p in points] == [
@@ -50,7 +47,6 @@ def test_flex_keeps_only_rows_it_can_trust():
         ("DU1", "2026-09-02", "101500.50"),
         ("DU9", "2026-09-02", "9999.00"),
     ]
-
 
 def test_flex_reports_the_brokers_own_refusal():
     with pytest.raises(flex.FlexError) as raised:
@@ -60,7 +56,6 @@ def test_flex_reports_the_brokers_own_refusal():
         )
     assert raised.value.code == "1015"
     assert "Invalid token" in str(raised.value)
-
 
 async def test_history_returns_one_close_per_day(client, stores):
     _, db = stores
@@ -73,7 +68,6 @@ async def test_history_returns_one_close_per_day(client, stores):
         ("2026-09-02", "150.00"),
     ]
 
-
 async def test_a_flex_row_supersedes_the_days_samples(client, stores):
     _, db = stores
     await snapshot(db, TENANT, "DU1", "2026-09-01", "140.00", bucket="15")
@@ -83,7 +77,6 @@ async def test_a_flex_row_supersedes_the_days_samples(client, stores):
     )
     body = (await client.get("/api/v1/accounts/DU1/history")).json()["data"]
     assert [(r["net_liquidation"], r["source"]) for r in body] == [("138.25", "flex")]
-
 
 async def test_the_combined_line_adds_the_accounts_together(client, stores):
     _, db = stores
@@ -98,7 +91,6 @@ async def test_the_combined_line_adds_the_accounts_together(client, stores):
     ]
     assert len(body["series"]) == 4
 
-
 async def test_a_day_missing_an_account_is_left_out_of_the_total(client, stores):
     _, db = stores
     await snapshot(db, TENANT, "DU1", "2026-09-01", "100")
@@ -107,14 +99,12 @@ async def test_a_day_missing_an_account_is_left_out_of_the_total(client, stores)
     body = (await client.get("/api/v1/history")).json()["data"]
     assert [r["report_date"] for r in body["combined"]] == ["2026-09-01"]
 
-
 async def test_history_can_be_narrowed_to_a_range(client, stores):
     _, db = stores
     for date in ("2026-09-01", "2026-09-02", "2026-09-03"):
         await snapshot(db, TENANT, "DU1", date, "100")
     body = (await client.get("/api/v1/accounts/DU1/history?since=2026-09-02&until=2026-09-02")).json()
     assert [r["report_date"] for r in body["data"]] == ["2026-09-02"]
-
 
 async def test_a_trader_cannot_read_an_account_they_were_not_granted(client, stores):
     _, db = stores
@@ -123,14 +113,12 @@ async def test_a_trader_cannot_read_an_account_they_were_not_granted(client, sto
     body = (await client.get("/api/v1/history", cookies=as_user("TRADER"))).json()["data"]
     assert body["accounts"] == ["DU1"]
 
-
 async def test_another_tenants_history_is_invisible(client, stores):
     _, db = stores
     await snapshot(db, OTHER_TENANT, "DU9", "2026-09-01", "9999")
     await snapshot(db, TENANT, "DU1", "2026-09-01", "100")
     body = (await client.get("/api/v1/history")).json()["data"]
     assert {r["account_id"] for r in body["series"]} == {"DU1"}
-
 
 async def test_backfill_writes_only_this_tenants_accounts(client, stores, monkeypatch):
     _, db = stores
@@ -145,7 +133,6 @@ async def test_backfill_writes_only_this_tenants_accounts(client, stores, monkey
     assert {r["account_id"] for r in rows} == {"DU1"}
     assert all(r["source"] == "flex" for r in rows)
 
-
 async def test_backfill_surfaces_a_flex_refusal_rather_than_a_500(client, monkeypatch):
     async def refuse(*args, **kwargs):
         raise flex.FlexError("1015", "Invalid token")
@@ -155,10 +142,8 @@ async def test_backfill_surfaces_a_flex_refusal_rather_than_a_500(client, monkey
     assert response.status_code == 502
     assert "1015" in response.json()["error"]
 
-
 async def test_backfill_is_refused_to_a_plain_member(client):
     assert (await client.post("/api/v1/admin/history/backfill", cookies=as_user("TRADER"))).status_code == 403
-
 
 async def intraday_point(db, tenant, account, stamp, day_pnl, date="2026-09-10"):
     await db.account_snapshots.update_one(
@@ -178,7 +163,6 @@ async def intraday_point(db, tenant, account, stamp, day_pnl, date="2026-09-10")
         upsert=True,
     )
 
-
 async def test_intraday_keeps_every_point_rather_than_a_daily_close(client, stores):
     _, db = stores
     for stamp, pnl in [("09:35", "10"), ("09:40", "-5"), ("09:45", "22")]:
@@ -186,7 +170,6 @@ async def test_intraday_keeps_every_point_rather_than_a_daily_close(client, stor
     body = (await client.get("/api/v1/history/intraday?date=2026-09-10")).json()["data"]
     assert [r["day_pnl"] for r in body["series"]] == ["10", "-5", "22"]
     assert [c["day_pnl"] for c in body["combined"]] == ["10", "-5", "22"]
-
 
 async def test_intraday_adds_the_accounts_at_each_timestamp(client, stores):
     _, db = stores
@@ -199,7 +182,6 @@ async def test_intraday_adds_the_accounts_at_each_timestamp(client, stores):
         ("09:40", "-4"),
     ]
 
-
 async def test_a_timestamp_missing_an_account_is_left_out_of_the_total(client, stores):
     _, db = stores
     await intraday_point(db, TENANT, "DU1", "09:35", "10")
@@ -207,7 +189,6 @@ async def test_a_timestamp_missing_an_account_is_left_out_of_the_total(client, s
     await intraday_point(db, TENANT, "DU1", "09:40", "-5")
     body = (await client.get("/api/v1/history/intraday?date=2026-09-10")).json()["data"]
     assert [c["taken_at"][11:16] for c in body["combined"]] == ["09:35"]
-
 
 async def test_intraday_skips_a_point_the_broker_never_valued(client, stores):
     _, db = stores
@@ -217,14 +198,12 @@ async def test_intraday_skips_a_point_the_broker_never_valued(client, stores):
     assert len(body["series"]) == 2
     assert [c["day_pnl"] for c in body["combined"]] == ["12"]
 
-
 async def test_intraday_excludes_a_flex_row(client, stores):
     _, db = stores
     await intraday_point(db, TENANT, "DU1", "09:35", "10")
     await snapshot(db, TENANT, "DU1", "2026-09-10", "5000", source="flex")
     body = (await client.get("/api/v1/history/intraday?date=2026-09-10")).json()["data"]
     assert [r["source"] for r in body["series"]] == ["snapshot"]
-
 
 async def test_intraday_respects_account_grants(client, stores):
     _, db = stores

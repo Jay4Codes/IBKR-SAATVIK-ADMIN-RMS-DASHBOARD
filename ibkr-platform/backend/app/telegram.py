@@ -13,24 +13,19 @@ log = logging.getLogger("ibkr-worker")
 API = "https://api.telegram.org"
 MAX_MESSAGE = 3900
 
-
 def configured() -> bool:
     return bool(settings.telegram_bot_token)
 
-
 def link_code() -> str:
     return secrets.token_urlsafe(9)
-
 
 def deep_link(code: str) -> str | None:
     if not settings.telegram_bot_username:
         return None
     return f"https://t.me/{settings.telegram_bot_username}?start={code}"
 
-
 def escape(text: str) -> str:
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 async def send(client: httpx.AsyncClient, chat_id: str, text: str) -> bool:
     if not configured() or not chat_id:
@@ -58,7 +53,6 @@ async def send(client: httpx.AsyncClient, chat_id: str, text: str) -> bool:
     )
     return False
 
-
 async def updates(client: httpx.AsyncClient, offset: int) -> list[dict[str, Any]]:
     if not configured():
         return []
@@ -68,10 +62,7 @@ async def updates(client: httpx.AsyncClient, offset: int) -> list[dict[str, Any]
             params={
                 "offset": offset,
                 "timeout": 25,
-                # A channel's content arrives as `channel_post`, never as
-                # `message`, and a bot being promoted in one arrives as
-                # `my_chat_member`. Asking only for messages meant a bot could
-                # sit in a channel as an administrator and hear nothing at all.
+
                 "allowed_updates": '["message","channel_post","my_chat_member"]',
             },
             timeout=40,
@@ -84,17 +75,16 @@ async def updates(client: httpx.AsyncClient, offset: int) -> list[dict[str, Any]
         log.warning("telegram.updates_failed error=%s", exc)
         return []
 
-
 def group_chat(update: dict[str, Any]) -> tuple[str, str] | None:
-    """A group or channel this bot can post to, as (chat id, title).
+\
+\
+\
+\
+\
+\
+\
+\
 
-    A private group or channel has no public username, so its id cannot be
-    looked up — it only ever arrives on an update. Three update types can carry
-    one: a message in a group, a post in a channel, and the bot's own promotion
-    in either. All three are checked because which one appears depends on how
-    the bot was added, and that is not something the person adding it should
-    have to know.
-    """
     for key in ("message", "channel_post", "my_chat_member"):
         chat = (update.get(key) or {}).get("chat") or {}
         kind = str(chat.get("type") or "")
@@ -102,7 +92,6 @@ def group_chat(update: dict[str, Any]) -> tuple[str, str] | None:
         if chat_id and kind in ("group", "supergroup", "channel"):
             return chat_id, str(chat.get("title") or chat_id)
     return None
-
 
 def started_with(update: dict[str, Any]) -> tuple[str, str, str] | None:
     message = update.get("message") or {}
@@ -114,7 +103,7 @@ def started_with(update: dict[str, Any]) -> tuple[str, str, str] | None:
     parts = text.split(maxsplit=1)
     if len(parts) != 2 or not parts[1].strip():
         return None
-    # In a group the command is addressed: "/start@thebot <code>".
+
     if "@" in parts[0] and not parts[0].split("@", 1)[1]:
         return None
     name = chat.get("username") or " ".join(

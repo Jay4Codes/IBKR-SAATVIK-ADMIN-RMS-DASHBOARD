@@ -25,7 +25,6 @@ REKEYED = {"orders": None, "executions": "execution_id", "ibkr_accounts": "accou
 OPTION_ROOTS = {"SPXW": "SPX", "SPXQ": "SPX", "XSP": "XSP"}
 STREAM_LIMIT = 20000
 
-
 class Report:
     def __init__(self, dry_run: bool):
         self.dry_run = dry_run
@@ -34,7 +33,6 @@ class Report:
     def say(self, message: str) -> None:
         self.lines.append(message)
         print(("would " if self.dry_run else "") + message)
-
 
 async def ensure_bootstrap_tenant(db, report: Report) -> dict[str, Any]:
     existing = await db.tenants.find_one({"slug": settings.bootstrap_tenant_slug})
@@ -46,7 +44,6 @@ async def ensure_bootstrap_tenant(db, report: Report) -> dict[str, Any]:
     if not report.dry_run:
         await db.tenants.insert_one(tenant)
     return tenant
-
 
 async def migrate_members(db, tenant: dict[str, Any], report: Report) -> None:
     tenant_id = tenant["_id"]
@@ -75,7 +72,6 @@ async def migrate_members(db, tenant: dict[str, Any], report: Report) -> None:
             }
         )
         await db.users.update_one({"_id": user_id}, {"$set": {"default_tenant_id": tenant_id}})
-
 
 async def adopt_gateway(db, tenant: dict[str, Any], report: Report) -> dict[str, Any]:
     tenant_id = tenant["_id"]
@@ -106,7 +102,6 @@ async def adopt_gateway(db, tenant: dict[str, Any], report: Report) -> dict[str,
         await db.broker_connections.insert_one(doc)
     return doc
 
-
 async def reshape_accounts(db, tenant: dict[str, Any], report: Report) -> None:
     stale = [doc async for doc in db.ibkr_accounts.find({"account_id": {"$exists": False}})]
     if not stale:
@@ -119,7 +114,6 @@ async def reshape_accounts(db, tenant: dict[str, Any], report: Report) -> None:
             {"_id": doc["_id"]},
             {"$set": {"account_id": str(doc["_id"]), "tenant_id": tenant["_id"]}},
         )
-
 
 async def backfill_documents(db, tenant: dict[str, Any], connection_id: str, report: Report) -> None:
     tenant_id = tenant["_id"]
@@ -155,7 +149,6 @@ async def backfill_documents(db, tenant: dict[str, Any], connection_id: str, rep
             await collection.replace_one({"_id": key}, {"_id": key, **doc}, upsert=True)
             await collection.delete_one({"_id": old})
 
-
 def parse_local_symbol(local: str) -> dict[str, str] | None:
     trimmed = " ".join(local.split())
     root, _, tail = trimmed.partition(" ")
@@ -169,7 +162,6 @@ def parse_local_symbol(local: str) -> dict[str, str] | None:
         "expiry": f"20{tail[:6]}",
         "multiplier": "100",
     }
-
 
 async def backfill_execution_contracts(db, report: Report) -> None:
     pending = [
@@ -201,7 +193,6 @@ async def backfill_execution_contracts(db, report: Report) -> None:
         return
     for key, fields in updates:
         await db.executions.update_one({"_id": key}, {"$set": fields})
-
 
 async def migrate_redis(redis, tenant: dict[str, Any], connection_id: str, report: Report) -> None:
     keys = TenantKeys(tenant["_id"])
@@ -254,7 +245,6 @@ async def migrate_redis(redis, tenant: dict[str, Any], connection_id: str, repor
     for event_id, fields in reversed(entries):
         await redis.xadd(keys.events, {**fields, "connection_id": connection_id}, id=event_id)
 
-
 async def run(dry_run: bool) -> Report:
     report = Report(dry_run)
     client, db = database()
@@ -279,7 +269,6 @@ async def run(dry_run: bool) -> Report:
         await client.close()
     return report
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="report changes without writing")
@@ -288,7 +277,6 @@ def main() -> None:
     report = asyncio.run(run(args.dry_run))
     if args.json:
         print(json.dumps({"dry_run": args.dry_run, "steps": report.lines}, indent=2))
-
 
 if __name__ == "__main__":
     main()

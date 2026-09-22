@@ -16,7 +16,6 @@ describe("dropdown", () => {
     details.open = true;
     expect(open()).toBe(true);
 
-    // A native <details> handles the keyboard and Escape but not this.
     fireEvent.click(screen.getByRole("button", { name: "elsewhere" }));
     expect(open()).toBe(false);
   });

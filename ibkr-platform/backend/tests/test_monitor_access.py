@@ -3,7 +3,6 @@ import pytest
 from app.auth import COOKIE, TENANT_COOKIE
 from tests.conftest import OTHER_TENANT
 
-
 @pytest.mark.parametrize('user_id', ['ADMIN', 'TRADER', 'OUTSIDER', 'SUPER'])
 async def test_other_accounts_keep_platform_admin_restricted(client, stores, user_id):
     _, db = stores
@@ -20,7 +19,6 @@ async def test_other_accounts_keep_platform_admin_restricted(client, stores, use
     expected = 403 if user_id == 'TRADER' else 200
     assert (await client.post('/api/v1/gateway/reconnect', json={})).status_code == expected
 
-
 @pytest.mark.parametrize('email', ['ekalon.consulting@gmail.com', 'EKALON.CONSULTING@gmail.com'])
 async def test_designated_account_has_all_admin_access(client, stores, email):
     _, db = stores
@@ -33,7 +31,6 @@ async def test_designated_account_has_all_admin_access(client, stores, email):
     response = await client.post('/api/v1/tenants/switch', json={'tenant': OTHER_TENANT})
     assert response.status_code == 200
     assert {a['account_id'] for a in (await client.get('/api/v1/accounts')).json()['data']} == {'DU9'}
-
 
 async def test_admin_revocation_applies_to_existing_session(client, stores):
     _, db = stores

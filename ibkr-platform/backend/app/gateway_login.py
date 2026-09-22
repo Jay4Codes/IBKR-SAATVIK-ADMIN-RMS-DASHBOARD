@@ -36,7 +36,6 @@ _RECENT_LINES = 60
 _QUARTER_HOUR = 900
 _TAIL_BYTES = 256 * 1024
 
-
 class LoginProgress:
     __slots__ = (
         "phase",
@@ -78,19 +77,15 @@ class LoginProgress:
             "two_factor_attempts": self.two_factor_attempts,
         }
 
-
 def read_two_factor_timeout(path: str | None) -> int:
     raw = hostctl.read_setting("SecondFactorAuthenticationTimeout", path)
     return int(raw) if raw and raw.isdigit() and int(raw) > 0 else settings.two_factor_timeout_seconds
 
-
 def read_trading_mode(path: str | None) -> str:
     return (hostctl.read_setting("TradingMode", path) or "").lower() or "paper"
 
-
 def read_only_login(path: str | None) -> bool:
     return (hostctl.read_setting("ReadOnlyLogin", path) or "").lower() in ("yes", "true")
-
 
 def parse_timestamp(line: str) -> datetime | None:
     found = _TIMESTAMP.match(line)
@@ -100,7 +95,6 @@ def parse_timestamp(line: str) -> datetime | None:
         return datetime.strptime(found.group(1), "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
-
 
 def log_timezone_offset(path: Path | None, lines: list[str]) -> timedelta:
     if path is None:
@@ -117,10 +111,8 @@ def log_timezone_offset(path: Path | None, lines: list[str]) -> timedelta:
         return timedelta(0)
     return timedelta(seconds=round(drift / _QUARTER_HOUR) * _QUARTER_HOUR)
 
-
 def _instant(stamp: datetime | None, offset: timedelta) -> datetime | None:
     return None if stamp is None else stamp.replace(tzinfo=timezone.utc) - offset
-
 
 def _tail(path: Path, limit: int = _TAIL_BYTES) -> list[str]:
     try:
@@ -134,7 +126,6 @@ def _tail(path: Path, limit: int = _TAIL_BYTES) -> list[str]:
     lines = text.splitlines()
     return lines[1:] if start and len(lines) > 1 else lines
 
-
 def newest_log(directory: str | None) -> Path | None:
     if not directory:
         return None
@@ -145,7 +136,6 @@ def newest_log(directory: str | None) -> Path | None:
         return None
     return max(candidates, key=lambda p: p.stat().st_mtime, default=None)
 
-
 def collect_lines(directory: str | None, launcher_log: str | None = None) -> list[str]:
     lines: list[str] = []
     log = newest_log(directory)
@@ -155,13 +145,11 @@ def collect_lines(directory: str | None, launcher_log: str | None = None) -> lis
         lines.extend(_tail(Path(launcher_log))[-120:])
     return lines
 
-
 def _last_index(lines: list[str], markers: tuple[str, ...]) -> int:
     return max(
         (i for i, line in enumerate(lines) if any(m in line for m in markers)),
         default=-1,
     )
-
 
 def _second_factor_events(lines: list[str], after: int, offset: timedelta) -> list[datetime]:
     stamps = sorted(
@@ -179,7 +167,6 @@ def _second_factor_events(lines: list[str], after: int, offset: timedelta) -> li
             continue
         events.append(stamp)
     return events
-
 
 def evaluate(
     lines: list[str],
@@ -263,14 +250,12 @@ def evaluate(
         return LoginProgress(DOWN, "Gateway exited")
     return LoginProgress(STARTING, "Gateway starting — the API port is not open yet")
 
-
 def port_is_open(host: str, port: int, timeout: float = 1.0) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False
-
 
 async def snapshot(connection: dict) -> dict:
     unit = connections.unit_for(connection)
@@ -304,7 +289,6 @@ async def snapshot(connection: dict) -> dict:
         "read_only_login": read_only_login(config_path),
         **progress.as_dict(),
     }
-
 
 def restart_blocked(login: dict, grace_seconds: int | None = None) -> bool:
     grace = settings.two_factor_grace_seconds if grace_seconds is None else grace_seconds

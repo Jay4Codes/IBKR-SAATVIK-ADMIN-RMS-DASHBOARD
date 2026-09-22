@@ -35,19 +35,19 @@ function mount() {
 
 beforeEach(() => {
   localStorage.clear();
-  // jsdom has no audio; the bell must survive that rather than throw.
+
   vi.stubGlobal("AudioContext", undefined);
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("alert bell", () => {
   it("counts what has arrived since the reader last looked", async () => {
-    // Newest first, the way the feed endpoint returns them.
+
     stubFetch([alert({ event_id: "e2", timestamp: "2026-09-14T18:05:00Z" }), alert()]);
     mount();
     const bell = await screen.findByRole("button", { name: /Alerts, 2 unread/ });
     fireEvent.click(bell);
-    // Opening is reading: the count clears and the list is shown.
+
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Recent alerts" })).toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Alerts" })).toBeInTheDocument());
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
@@ -70,7 +70,7 @@ describe("alert bell", () => {
     fireEvent.click(screen.getByRole("button", { name: /Alerts/ }));
     const items = screen.getAllByRole("listitem");
     expect(items[0]).toHaveTextContent("Gateway Disconnected");
-    // Urgent ones are marked so they read differently at a glance.
+
     expect(items[0].className).toContain("urgent");
   });
 
@@ -78,7 +78,7 @@ describe("alert bell", () => {
     stubFetch([alert()]);
     mount();
     fireEvent.click(await screen.findByRole("button", { name: /Alerts/ }));
-    // No AudioContext in jsdom: toggling must not throw.
+
     fireEvent.click(screen.getByRole("button", { name: "Mute alert sound" }));
     expect(localStorage.getItem("rms.alerts.sound")).toBe("off");
     expect(screen.getByRole("button", { name: "Unmute alert sound" })).toBeInTheDocument();
@@ -120,7 +120,7 @@ describe("alert bell", () => {
     vi.stubGlobal("localStorage", { getItem: boom, setItem: boom, clear: boom });
     stubFetch([alert()]);
     mount();
-    // A private window cannot persist the read marker; the bell still renders.
+
     expect(await screen.findByRole("button", { name: /Alerts/ })).toBeInTheDocument();
   });
 });

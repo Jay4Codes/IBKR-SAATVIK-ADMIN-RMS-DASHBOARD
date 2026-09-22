@@ -50,7 +50,7 @@ export function DataTable<T>({
   id: (row: T) => string;
   onRow?: (row: T) => void;
   facets?: Facet<T>[];
-  /** Controls belonging to this table, shown beside its search box. */
+
   toolbar?: ReactNode;
 }) {
   const [search, setSearch] = useState("");
@@ -118,8 +118,7 @@ export function DataTable<T>({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {/* A table's own controls belong on its toolbar, beside the search, not
-            stranded on a line above it. */}
+
         {toolbar}
         {facets.map((facet) => (
           <label key={facet.label} className="table-facet">
@@ -285,8 +284,7 @@ export function DataTable<T>({
     </>
   );
 }
-/** An account's name, falling back to its number. Kept here as well as in the
- *  balance panel so every table that lists accounts agrees. */
+
 export function accountLabel(row: { account_id: string; label?: string }) {
   return row.label?.trim() || row.account_id;
 }
@@ -315,12 +313,11 @@ export function AccountsTable({
               }}
             >
               {accountLabel(r)}
-              {/* The number stays visible beneath the name: it is what IBKR,
-                  the statements and support all use. */}
+
               <small>{r.label ? `${r.account_id} · ${r.currency}` : r.currency}</small>
             </button>
           ),
-          // Sorted and searched by both, so typing either finds the row.
+
           value: (r) => `${accountLabel(r)} ${r.account_id}`,
         },
         {

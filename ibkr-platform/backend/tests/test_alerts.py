@@ -11,10 +11,8 @@ BOOK = [
     {"sec_type": "OPT", "strike": "7530", "right": "P", "quantity": "1", "multiplier": "100", "average_cost": "3326.6303"},
 ]
 
-
 def cents(value):
     return value.quantize(Decimal("0.01"))
-
 
 def test_terminal_pnl_agrees_with_the_dashboard_point_for_point():
     spot = Decimal("7656.98")
@@ -23,23 +21,19 @@ def test_terminal_pnl_agrees_with_the_dashboard_point_for_point():
     assert cents(terminal_pnl(BOOK, spot * Decimal("0.97"))) == Decimal("790.86")
     assert cents(terminal_pnl(BOOK, spot * Decimal("1.03"))) == Decimal("790.86")
 
-
 def test_worst_case_is_the_defined_risk_not_an_unbounded_number():
     worst = worst_terminal(BOOK, Decimal("7656.98"))
     assert worst is not None
     assert cents(worst) == Decimal("790.86")
     assert terminal_pnl(BOOK, Decimal("1000")) == terminal_pnl(BOOK, Decimal("2000"))
 
-
 def test_worst_case_samples_the_corners_a_uniform_grid_steps_over():
     call = [{"sec_type": "OPT", "strike": "7650", "right": "C", "quantity": "1", "multiplier": "100", "average_cost": "4500"}]
     assert worst_terminal(call, Decimal("7656.98")) == Decimal("-4500")
 
-
 def test_stock_legs_price_off_their_own_cost():
     stock = [{"sec_type": "STK", "quantity": "10", "average_cost": "80", "multiplier": "1"}]
     assert terminal_pnl(stock, Decimal("100")) == Decimal("200")
-
 
 def test_an_unpriceable_leg_is_skipped_rather_than_guessed_at():
     broken = [
@@ -52,7 +46,6 @@ def test_an_unpriceable_leg_is_skipped_rather_than_guessed_at():
     assert worst_terminal([], Decimal("100")) is not None
     assert worst_terminal(BOOK, Decimal(0)) is None
 
-
 def test_a_band_only_counts_once_it_is_fully_crossed():
     anchor, step = Decimal("7600"), Decimal(2)
     assert band_of(anchor, anchor, step) == 0
@@ -62,7 +55,6 @@ def test_a_band_only_counts_once_it_is_fully_crossed():
     assert band_of(anchor * Decimal("0.981"), anchor, step) == 0
     assert band_of(anchor * Decimal("0.979"), anchor, step) == -1
     assert band_of(anchor, Decimal(0), step) == 0
-
 
 def test_a_fill_reports_what_it_booked_only_when_it_booked_something():
     closing = fill_message({
@@ -80,29 +72,25 @@ def test_a_fill_reports_what_it_booked_only_when_it_booked_something():
     assert "Bought" in opening
     assert "Booked" not in opening
 
-
 def test_messages_escape_what_the_broker_sends():
     message = fill_message({"account_id": "<b>x</b>", "data": {"side": "BOT", "symbol": "A&B<c>", "quantity": "1", "price": "1"}})
     assert "&lt;" in message and "&amp;" in message
     assert "<b>x</b>" not in message
 
-
 def test_a_restart_looks_exactly_like_an_outage_at_the_instant_it_happens():
-    """Which is why status alone cannot decide; only persistence can.
+\
+\
+\
+\
 
-    These are the real statuses a deploy produced three times over, each pair
-    seconds apart, and each one reached the desk as a disconnect alert.
-    """
     from app.alerts import GATEWAY_DEBOUNCED, GATEWAY_URGENT
 
     assert "DISCONNECTED" in GATEWAY_DEBOUNCED
     assert "DEGRADED" in GATEWAY_DEBOUNCED
-    # A login prompt expires in three minutes and a tenth failure is not a blip:
-    # waiting on either would waste the only window there is.
+
     assert "TWO_FACTOR_PENDING" in GATEWAY_URGENT
     assert "FAILED" in GATEWAY_URGENT
     assert not set(GATEWAY_DEBOUNCED) & set(GATEWAY_URGENT)
-
 
 def test_a_recovery_says_how_long_it_was_gone():
     from app.alerts import recovery_message
@@ -111,7 +99,6 @@ def test_a_recovery_says_how_long_it_was_gone():
     assert "back after 4 min" in recovery_message("Primary IB Gateway", "DISCONNECTED", 240)
     assert "Primary IB Gateway" in recovery_message("Primary IB Gateway", "DEGRADED", 100)
 
-
 def test_a_members_own_threshold_wins_over_the_platform_default():
     from app.alerts import threshold
 
@@ -119,27 +106,23 @@ def test_a_members_own_threshold_wins_over_the_platform_default():
     assert threshold({}, "move_percent") == Decimal("2.0")
     assert threshold({"move_percent": "5"}, "move_percent") == Decimal("5")
     assert threshold({"risk_percent": "25"}, "risk_percent") == Decimal("25")
-    # Outside the sane band it is not honoured: a 0% move band would alert on
-    # every tick, and a 1000% one would never alert at all.
+
     assert threshold({"move_percent": "0"}, "move_percent") == Decimal("2.0")
     assert threshold({"move_percent": "900"}, "move_percent") == Decimal("2.0")
     assert threshold({"move_percent": "nonsense"}, "move_percent") == Decimal("2.0")
 
-
 def test_a_price_level_fires_on_the_crossing_not_on_the_side():
     from app.alerts import crossed
 
-    # Rising through it.
     assert crossed(Decimal("7790"), Decimal("7801"), Decimal("7800"))
-    # Falling through it.
+
     assert crossed(Decimal("7810"), Decimal("7799"), Decimal("7800"))
-    # Sitting above it all morning is not news, and must not alert on every tick.
+
     assert not crossed(Decimal("7810"), Decimal("7820"), Decimal("7800"))
     assert not crossed(Decimal("7790"), Decimal("7795"), Decimal("7800"))
-    # Landing exactly on it counts once, on the way in.
+
     assert crossed(Decimal("7790"), Decimal("7800"), Decimal("7800"))
     assert not crossed(Decimal("7800"), Decimal("7805"), Decimal("7800"))
-
 
 def test_a_price_crossing_says_which_way_it_went():
     from app.alerts import price_message

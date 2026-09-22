@@ -14,7 +14,6 @@ from app.domain import Event
 from app.worker import GatewaySession
 from tests.conftest import CONNECTION, TENANT, gateway_connection
 
-
 def bodies(**by_path):
 
     async def fake(client, path, params=None):
@@ -25,7 +24,6 @@ def bodies(**by_path):
 
     return fake
 
-
 def test_index_tickers_are_prefixed_and_stocks_are_not():
     assert massive.index_ticker("spx") == "I:SPX"
     assert massive.index_ticker("SPY") is None
@@ -34,13 +32,11 @@ def test_index_tickers_are_prefixed_and_stocks_are_not():
     assert massive.ticker_matches("SPX", "")
     assert not massive.ticker_matches("SPY", "I:SPX")
 
-
 async def test_an_index_snapshot_can_resolve_spx():
     body = {"results": [{"value": 7612.5, "session": {"close": 7000}}]}
     with patch.object(massive, "get_json", bodies(**{"/v3/snapshot/indices": body})):
         spot = await massive._from_indices(MagicMock(), "SPX")
     assert spot == massive.Spot(Decimal("7612.5"), "indices_snapshot")
-
 
 async def test_a_dark_index_falls_back_to_the_session_close():
     body = {"results": [{"value": None, "session": {"close": 7500.25}}]}
@@ -48,20 +44,17 @@ async def test_a_dark_index_falls_back_to_the_session_close():
         spot = await massive._from_indices(MagicMock(), "SPX")
     assert spot == massive.Spot(Decimal("7500.25"), "indices_snapshot")
 
-
 async def test_a_stock_skips_the_index_loader_and_takes_the_chain_snapshot():
     chain = {"results": [{"underlying_asset": {"ticker": "SPY", "price": 612.4}}]}
     with patch.object(massive, "get_json", bodies(**{"/v3/snapshot/options/": chain})):
         spot = await massive.fetch_spot(MagicMock(), "SPY")
     assert spot == massive.Spot(Decimal("612.4"), "options_snapshot")
 
-
 async def test_spx_takes_its_underlying_price_from_the_option_chain_snapshot():
     chain = {"results": [{"underlying_asset": {"ticker": "I:SPX", "price": 7612.5}}]}
     with patch.object(massive, "get_json", bodies(**{"/v3/snapshot/options/SPX": chain})):
         spot = await massive.fetch_spot(MagicMock(), "SPX")
     assert spot == massive.Spot(Decimal("7612.5"), "options_snapshot")
-
 
 async def test_a_chain_row_for_a_different_underlying_is_not_borrowed():
     chain = {"results": [{"underlying_asset": {"ticker": "QQQ", "price": 500}}]}
@@ -74,11 +67,9 @@ async def test_a_chain_row_for_a_different_underlying_is_not_borrowed():
         spot = await massive.fetch_spot(MagicMock(), "SPY")
     assert spot == massive.Spot(Decimal("611.1"), "aggs_prev")
 
-
 async def test_every_loader_silent_yields_no_spot():
     with patch.object(massive, "get_json", bodies()):
         assert await massive.fetch_spot(MagicMock(), "SPX") is None
-
 
 async def test_spx_spends_only_one_option_request_per_poll_cycle():
     calls = []
@@ -91,13 +82,11 @@ async def test_spx_spends_only_one_option_request_per_poll_cycle():
         assert await massive.fetch_spot(MagicMock(), "SPX") is None
     assert calls == ["/v3/snapshot/options/SPX"]
 
-
 @pytest.mark.parametrize("value", [None, 0, -1, "", "n/a"])
 async def test_an_unusable_price_is_not_treated_as_a_quote(value):
     body = {"results": [{"value": value, "session": {}}]}
     with patch.object(massive, "get_json", bodies(**{"/v3/snapshot/indices": body})):
         assert await massive.fetch_spot(MagicMock(), "SPX") is None
-
 
 async def test_a_rejected_request_returns_none_rather_than_raising():
     async def refuse(url, params=None):
@@ -108,7 +97,6 @@ async def test_a_rejected_request_returns_none_rather_than_raising():
     with patch.object(massive.settings, "massive_api_key", "k"):
         assert await massive.get_json(client, "/v3/snapshot/indices") is None
 
-
 async def test_a_transport_failure_returns_none_rather_than_raising():
     async def explode(url, params=None):
         raise httpx.ConnectError("no route to host")
@@ -117,11 +105,9 @@ async def test_a_transport_failure_returns_none_rather_than_raising():
     client.get = explode
     assert await massive.get_json(client, "/v3/snapshot/indices") is None
 
-
 def worker(redis, db, ib=None):
     connection = gateway_connection(TENANT, CONNECTION, "Gateway", 4101)
     return GatewaySession(redis, db, TENANT, connection, ib or MagicMock())
-
 
 async def poll_once(session):
     with patch.object(massive, "session_is_open", return_value=True):
@@ -132,7 +118,6 @@ async def poll_once(session):
                 break
         session.stop.set()
         await asyncio.wait_for(task, 1)
-
 
 async def test_a_polled_spot_becomes_the_positions_underlying_price(stores):
     redis, db = stores
@@ -148,7 +133,6 @@ async def test_a_polled_spot_becomes_the_positions_underlying_price(stores):
         option = MagicMock(sec_type="OPT", currency="USD", symbol="SPX")
         assert session.underlying_of(option) == Decimal("7612.5")
         assert session.underlying_source_of(option) == "t"
-
 
 async def test_configured_spx_is_only_served_from_the_common_redis_cache(stores):
     redis, db = stores
@@ -166,7 +150,6 @@ async def test_configured_spx_is_only_served_from_the_common_redis_cache(stores)
         assert session.underlying_of(option) == Decimal("7612.5")
         assert session.underlying_source_of(option) == "options_snapshot_cached"
 
-
 async def test_a_massive_configured_underlying_still_opens_one_ib_fallback_line(stores):
     redis, db = stores
     ib = MagicMock()
@@ -179,7 +162,6 @@ async def test_a_massive_configured_underlying_still_opens_one_ib_fallback_line(
     assert session.market_wanted == {"USD:SPX": 1}
     assert 1 in session.contracts
 
-
 async def test_a_429_aborts_the_loader_chain_instead_of_spending_the_quota():
     calls = []
 
@@ -190,7 +172,6 @@ async def test_a_429_aborts_the_loader_chain_instead_of_spending_the_quota():
     with patch.object(massive, "get_json", limited), pytest.raises(massive.RateLimited):
         await massive.fetch_spot(MagicMock(), "SPX")
     assert len(calls) == 1
-
 
 async def test_a_rate_limited_cycle_backs_off_without_crying_no_prices(stores):
     redis, db = stores
@@ -207,7 +188,6 @@ async def test_a_rate_limited_cycle_backs_off_without_crying_no_prices(stores):
         session.stop.set()
         await asyncio.wait_for(task, 1)
     assert session.massive_prices == {}
-
 
 async def test_session_samples_archive_to_csv_then_flush_only_their_key(stores, tmp_path):
     redis, _ = stores
@@ -238,7 +218,6 @@ async def test_session_samples_archive_to_csv_then_flush_only_their_key(stores, 
             "source": "indices_snapshot",
         }
     ]
-
 
 async def test_ib_underlying_sample_is_stored_in_the_session_series(stores):
     redis, db = stores
@@ -273,7 +252,6 @@ async def test_ib_underlying_sample_is_stored_in_the_session_series(stores):
         assert session.underlying_of(option) == Decimal("7602.50")
         assert session.underlying_source_of(option) == "ib_und_price"
 
-
 async def test_ib_tick_is_not_served_until_redis_round_trip_finishes(stores):
     redis, db = stores
     session = worker(redis, db)
@@ -294,7 +272,6 @@ async def test_ib_tick_is_not_served_until_redis_round_trip_finishes(stores):
 
         assert session.underlying_of(option) == Decimal("7603.25")
         assert session.underlying_source_of(option) == "ib_und_price"
-
 
 async def test_direct_ib_index_ltp_is_stored_before_it_is_served(stores):
     redis, db = stores
@@ -320,7 +297,6 @@ async def test_direct_ib_index_ltp_is_stored_before_it_is_served(stores):
         )
         assert session.underlying_of(option) == Decimal("7673.13")
         assert session.underlying_source_of(option) == "ib_index_ltp"
-
 
 async def test_massive_has_priority_and_ibkr_takes_over_when_it_is_unavailable(stores):
     redis, db = stores
@@ -351,7 +327,6 @@ async def test_massive_has_priority_and_ibkr_takes_over_when_it_is_unavailable(s
         Decimal("7603.50"), "ib_und_price"
     )
 
-
 async def test_worker_hydrates_stored_spx_ltp_as_a_labeled_fallback(stores):
     redis, db = stores
     await massive.record_sample(
@@ -364,12 +339,10 @@ async def test_worker_hydrates_stored_spx_ltp_as_a_labeled_fallback(stores):
     assert session.underlying_of(option) == Decimal("7602.50")
     assert session.underlying_source_of(option) == "ib_und_price_cached"
 
-
 def test_spx_polling_is_limited_to_the_regular_session():
     assert not massive.session_is_open(datetime(2026, 9, 10, 13, 29, tzinfo=UTC))
     assert massive.session_is_open(datetime(2026, 9, 10, 13, 30, tzinfo=UTC))
     assert not massive.session_is_open(datetime(2026, 9, 10, 20, 0, tzinfo=UTC))
-
 
 async def test_an_unconfigured_feed_waits_instead_of_ending_the_session(stores):
     redis, db = stores
@@ -379,7 +352,6 @@ async def test_an_unconfigured_feed_waits_instead_of_ending_the_session(stores):
     assert not task.done()
     session.stop.set()
     await asyncio.wait_for(task, 1)
-
 
 def test_httpx_request_logging_cannot_leak_the_vendor_key(caplog):
     from app.logging import configure

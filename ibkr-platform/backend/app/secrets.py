@@ -11,10 +11,8 @@ from app.config import settings
 
 _PREFIX = "v1:"
 
-
 class SecretUnavailable(RuntimeError):
     pass
-
 
 def _key() -> bytes:
     material = settings.secret_key.strip()
@@ -24,16 +22,13 @@ def _key() -> bytes:
         )
     return hashlib.sha256(material.encode()).digest()
 
-
 def available() -> bool:
     return bool(settings.secret_key.strip())
-
 
 def encrypt(plaintext: str) -> str:
     nonce = os.urandom(12)
     sealed = AESGCM(_key()).encrypt(nonce, plaintext.encode(), None)
     return _PREFIX + base64.urlsafe_b64encode(nonce + sealed).decode()
-
 
 def decrypt(ciphertext: str) -> str:
     if not ciphertext.startswith(_PREFIX):

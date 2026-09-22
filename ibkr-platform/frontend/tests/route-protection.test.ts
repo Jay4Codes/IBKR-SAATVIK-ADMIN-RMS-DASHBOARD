@@ -85,9 +85,7 @@ describe("navigation visibility", () => {
     visibleNav(admin, platform).flatMap((s) => s.items.map((i) => i.view));
 
   it("shows every trader their own profile", () => {
-    // It used to live under Administration, and a group-wide admin check hid
-    // the whole group — so a trader could not reach their profile at all, and
-    // with alerts living there, could not connect their own Telegram chat.
+
     expect(views(false, false)).toContain("Profile");
     expect(groups(false, false)).toContain("Account");
   });

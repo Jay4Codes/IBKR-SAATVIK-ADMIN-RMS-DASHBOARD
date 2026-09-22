@@ -35,7 +35,6 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, body !== undefined ? { body } : {});
 }
 
-/** PATCH changes one field of something that already exists. */
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: "PATCH", body });
 }

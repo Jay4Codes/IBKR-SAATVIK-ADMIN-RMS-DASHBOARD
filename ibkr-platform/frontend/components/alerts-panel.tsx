@@ -74,8 +74,7 @@ export function AlertsPanel() {
 
   return (
     <section className="panel">
-      {/* lucide ships no brand marks, so the paper plane stands in for Telegram
-          the way it does in most icon sets. */}
+
       <h2>Alerts<span className="channel"><Send size={13} aria-hidden="true" />Telegram</span></h2>
       {settings.isPending ? (
         <p role="status">Loading alert settings…</p>
@@ -140,11 +139,7 @@ export function AlertsPanel() {
             ))}
           </div>
           {data!.linked && <div className="alert-thresholds">
-            {/* The numbers behind two of the triggers above. They are this
-                member's own: one person watches every two percent and another
-                only cares about five. */}
-            {/* Named levels first: a desk usually wants 2%, 3% and 5%, not
-                every multiple of one number. The band below is the fallback. */}
+
             <label>
               <span>Alert me at these moves</span>
               <span className="level-entry">

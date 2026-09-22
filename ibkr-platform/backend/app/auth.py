@@ -24,10 +24,8 @@ COOKIE = "ibkr_session"
 TENANT_COOKIE = "ibkr_tenant"
 TENANT_HEADER = "x-tenant"
 
-
 def digest(token):
     return hashlib.sha256(token.encode()).hexdigest()
-
 
 def requested_tenant(request) -> str | None:
     header = request.headers.get(TENANT_HEADER)
@@ -35,7 +33,6 @@ def requested_tenant(request) -> str | None:
         return header.strip() or None
     cookie = request.cookies.get(TENANT_COOKIE)
     return cookie.strip() if cookie else None
-
 
 async def identity(redis, db, token, tenant: str | None = None) -> Principal:
     if not token:
@@ -60,7 +57,6 @@ async def identity(redis, db, token, tenant: str | None = None) -> Principal:
         impersonating=impersonating,
     )
 
-
 async def require_user(request: Request) -> Principal:
     return await identity(
         request.app.state.redis,
@@ -68,7 +64,6 @@ async def require_user(request: Request) -> Principal:
         request.cookies.get(COOKIE),
         requested_tenant(request),
     )
-
 
 async def require_tenant(request: Request) -> Principal:
     user = await require_user(request)
@@ -78,12 +73,10 @@ async def require_tenant(request: Request) -> Principal:
         )
     return user
 
-
 async def require_tenant_admin(request: Request) -> Principal:
     user = await require_tenant(request)
     user.require_tenant_admin()
     return user
-
 
 async def require_gateway_operator(request: Request) -> Principal:
     user = await require_tenant(request)
@@ -91,12 +84,10 @@ async def require_gateway_operator(request: Request) -> Principal:
         raise HTTPException(403, "Gateway operator access required")
     return user
 
-
 async def require_super_admin(request: Request) -> Principal:
     user = await require_user(request)
     user.require_super_admin()
     return user
-
 
 def subscriptions(user: Principal, accounts):
     if not accounts or len(accounts) > 100 or any(not isinstance(a, str) for a in accounts):
@@ -108,7 +99,6 @@ def subscriptions(user: Principal, accounts):
     for account in accounts:
         user.require_account(account)
     return set(accounts)
-
 
 async def audit(db, user: Principal, action: str, data: dict | None = None):
     await db.audit_logs.insert_one(
@@ -124,7 +114,6 @@ async def audit(db, user: Principal, action: str, data: dict | None = None):
         }
     )
 
-
 async def ensure_tenant(db, slug: str, name: str) -> dict:
     slug = normalize_slug(slug)
     existing = await db.tenants.find_one({"slug": slug})
@@ -133,7 +122,6 @@ async def ensure_tenant(db, slug: str, name: str) -> dict:
     tenant = new_tenant(name, slug)
     await db.tenants.insert_one(tenant)
     return tenant
-
 
 async def create_user():
     import argparse
@@ -211,7 +199,6 @@ async def create_user():
         print(f"{email} is {args.role} in tenant '{tenant['slug']}'" + (" (super admin)" if args.super_admin else ""))
     finally:
         await client.close()
-
 
 if __name__ == "__main__":
     asyncio.run(create_user())

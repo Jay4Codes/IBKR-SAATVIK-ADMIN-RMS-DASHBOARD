@@ -8,7 +8,6 @@ TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 
 STALE_HEARTBEAT_SECONDS = 35
 
-
 class StateRepository:
     def __init__(self, redis, tenant_id: str, connection_id: str | None = None):
         self.redis = redis

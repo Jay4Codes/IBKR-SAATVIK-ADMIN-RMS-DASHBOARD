@@ -41,10 +41,8 @@ BROKER_FATAL = (1100, 1101, 1300, 326, 502, 504)
 BROKER_RESTORED = 1102
 BROKER_MARKET_DATA = (354, 10089, 10090, 10091, 10167, 10168, 10197)
 
-
 def backoff(attempt):
     return min(60, 2 ** min(attempt, 6)) + random.uniform(0, 1)
-
 
 async def durable_consumer(redis, db, tenant_id: str, stop: asyncio.Event):
     keys = TenantKeys(tenant_id)
@@ -80,7 +78,6 @@ async def durable_consumer(redis, db, tenant_id: str, stop: asyncio.Event):
             pending = True
             await asyncio.sleep(2)
 
-
 async def telegram_linker(redis, db, stop: asyncio.Event):
     if not telegram.configured():
         return
@@ -102,8 +99,7 @@ async def telegram_linker(redis, db, stop: asyncio.Event):
                 offset = max(offset, int(update.get("update_id", 0)) + 1)
                 group = telegram.group_chat(update)
                 if group:
-                    # Logged rather than stored: which group is the desk's own
-                    # channel is a deployment decision, not the bot's to make.
+
                     log.info(
                         "telegram.group_seen chat_id=%s title=%s "
                         "(set TELEGRAM_TEAM_CHAT_ID to use it)",
@@ -135,15 +131,14 @@ async def telegram_linker(redis, db, stop: asyncio.Event):
                     "risk changes and gateway notices for the accounts you can see.",
                 )
 
-
 async def refresh_events(db, stop: asyncio.Event):
-    """Keep the market's event calendar current, once for the whole platform.
+\
+\
+\
+\
+\
+\
 
-    A holiday is the same holiday for every tenant, so this runs beside the
-    per-tenant work rather than inside it. A failed fetch leaves whatever was
-    stored last time in place: a stale calendar is far better than none, since
-    these dates are published months ahead and rarely move.
-    """
     while not stop.is_set():
         try:
             async with httpx.AsyncClient() as client:
@@ -165,15 +160,14 @@ async def refresh_events(db, stop: asyncio.Event):
         except TimeoutError:
             pass
 
-
 async def announce_group(redis, client, chat_id: str, title: str):
-    """Tell the group its own id, once, so wiring it up needs no log access.
+\
+\
+\
+\
+\
+\
 
-    A private group cannot be looked up by name and its id only ever arrives on
-    an update, so the id has to come from the bot itself. Said once per group —
-    the marker lives in Redis so a worker restart does not repeat it — and only
-    while the desk channel is still unconfigured.
-    """
     if settings.telegram_team_chat_id:
         return
     if not await redis.set(f"telegram:greeted:{chat_id}", "1", ex=86400, nx=True):
@@ -185,26 +179,25 @@ async def announce_group(redis, client, chat_id: str, title: str):
         "runs the platform to start sending desk alerts here.",
     )
 
-
 class AlertDispatcher:
     def __init__(self, redis, db, tenant_id: str):
         self.redis, self.db, self.tenant_id = redis, db, tenant_id
         self.keys = TenantKeys(tenant_id)
         self.state = alerts.AlertState()
-        #: connection id -> its human name, so a gateway alert says which one.
+
         self.names: dict[str, str] = {}
         self.group = f"{self.keys.consumer_group}:alerts"
 
     async def once(self, marker: str, ttl: int = 604800) -> bool:
-        """True the first time a marker is seen, False on every replay.
+\
+\
+\
+\
+\
+\
+\
+\
 
-        Alerting has to be idempotent against its own inputs. The worker
-        re-requests the day's executions whenever it reconnects, and the guard
-        that stops it republishing them is in memory — so every restart, and
-        every deploy, replayed the day's fills as fresh alerts. Holding the
-        marker in Redis means a restart is silent, which is what a restart
-        should be.
-        """
         key = f"{self.keys.prefix}:alerted:{marker}"
         return bool(await self.redis.set(key, "1", ex=ttl, nx=True))
 
@@ -245,17 +238,17 @@ class AlertDispatcher:
         wanted = await self.wants(trigger)
         for chat_id in sorted(entitled & wanted):
             await telegram.send(client, chat_id, text)
-        if settings.telegram_team_chat_id:
+        if settings.telegram_team_chat_id and trigger != "gateway":
             await telegram.send(client, settings.telegram_team_chat_id, text)
         await self.raise_alert(trigger, account_id, text, urgent)
 
     async def raise_alert(self, trigger: str, account_id: str | None, text: str, urgent: bool):
-        """Put the alert back on the stream so the dashboard's bell sees it too.
+\
+\
+\
+\
+\
 
-        The socket the dashboard already holds open carries it, and the durable
-        consumer files it for the backlog — no second transport, and the in-app
-        alert is by construction the same decision Telegram was told about.
-        """
         await StateRepository(self.redis, self.tenant_id, "alerts").publish(
             Event(
                 event_type="alert.raised",
@@ -263,8 +256,7 @@ class AlertDispatcher:
                 data={
                     "trigger": trigger,
                     "text": text,
-                    # Plain text for a title attribute, and for anything that
-                    # cannot render Telegram's HTML.
+
                     "plain": re.sub(r"<[^>]+>", "", text),
                     "urgent": urgent,
                 },
@@ -276,7 +268,7 @@ class AlertDispatcher:
         return [json.loads(row) for row in raw]
 
     async def label_for(self, connection_id: str) -> str:
-        """The connection's name. A UUID tells the reader nothing at 3am."""
+
         if not connection_id:
             return "Gateway"
         if connection_id not in self.names:
@@ -288,8 +280,7 @@ class AlertDispatcher:
 
     async def handle(self, client, event: dict, connection_id: str = ""):
         kind = event.get("event_type") or ""
-        # Alerts are published back onto this same stream for the dashboard, so
-        # reading one as an input would alert about alerting, forever.
+
         if kind.startswith("alert."):
             return
         data = event.get("data") or {}
@@ -304,7 +295,7 @@ class AlertDispatcher:
 
         if kind.startswith("gateway."):
             status = str(data.get("status") or "")
-            # The name rides the stream entry beside the event, not inside it.
+
             key = str(data.get("connection_id") or connection_id or self.tenant_id)
             label = await self.label_for(key)
             await self.gateway_changed(
@@ -318,21 +309,18 @@ class AlertDispatcher:
             await self.risk_changed(client, account)
 
     async def gateway_changed(self, client, key: str, label: str, status: str, error, login_phase: str = ""):
-        """Decide whether a gateway transition is worth anyone's attention.
+\
+\
+\
+\
+\
+\
+\
 
-        A restart drops the session for about two seconds and a data farm blips
-        several times a session. Both look exactly like an outage at the instant
-        they happen, and both are over before anyone could act — so a status that
-        can heal is held for a grace period and only reported if it is still
-        there afterwards. A recovery is announced only if the outage was.
-        """
         kind = alerts.gateway_class(status, login_phase)
         if not kind:
             return
-        # What was last reported, as a class. An outage that flaps between
-        # DISCONNECTED and FAILED is one episode, not one alert per flap — and
-        # the episode has to outlive a restart, or redeploying in the middle of
-        # an outage re-reports the outage.
+
         if key not in self.state.gateway:
             stored = await self.redis.get(f"{self.keys.prefix}:alerted:gateway:{key}")
             if stored:
@@ -352,13 +340,12 @@ class AlertDispatcher:
                     ),
                 )
             else:
-                # Nothing was ever reported wrong, so nothing needs putting right.
+
                 await self.remember_gateway(key, kind)
             return
 
         if reported == kind:
-            # Same episode, different spelling of it. Keep the latest detail for
-            # the recovery message, and say nothing.
+
             self.state.statuses[key] = status
             self.state.errors[key] = error
             return
@@ -376,19 +363,18 @@ class AlertDispatcher:
             await self.deliver(client, "gateway", None, text, urgent=True)
             return
 
-        # Debounced: start the clock, and let the sweep decide later.
         if key not in self.state.pending:
             self.state.pending[key] = (status, time.time())
             self.state.labels[key] = label
             self.state.errors[key] = error
 
     async def announce_events(self, client):
-        """Say once, each session day, what is different about it.
+\
+\
+\
+\
+\
 
-        Keyed on the exchange's own day rather than the server's: a holiday
-        belongs to New York's calendar, and announcing it at UTC midnight would
-        land five and a half hours early for a desk reading in Mumbai.
-        """
         today = now().astimezone(ZoneInfo(settings.massive_session_timezone)).date().isoformat()
         if self.state.announced == today:
             return
@@ -396,18 +382,14 @@ class AlertDispatcher:
             {"date": {"$gte": today}}, {"_id": 0}
         ).sort("date", 1).to_list(60)
         if not rows:
-            # An empty calendar means the refresh has not landed yet, not that
-            # nothing is happening: the dispatcher starts before the first fetch
-            # completes, and marking the day announced here would suppress a
-            # real event day for the whole of it.
+
             return
         self.state.announced = today
         due = [row for row in rows if row["date"] == today]
         if not due:
-            # A day with nothing special about it is not worth a message.
+
             return
-        # Survives a restart: the day's schedule is announced once, not once per
-        # deploy. Two days of life so a late-evening restart cannot repeat it.
+
         if not await self.once(f"events:{today}", ttl=172800):
             return
         await self.deliver(
@@ -416,12 +398,12 @@ class AlertDispatcher:
         )
 
     async def remember_gateway(self, key: str, kind: str):
-        """Record what was last reported, where a restart cannot lose it."""
+
         self.state.gateway[key] = kind
         await self.redis.set(f"{self.keys.prefix}:alerted:gateway:{key}", kind, ex=604800)
 
     async def sweep_pending(self, client):
-        """Report an outage that has outlasted the grace period."""
+
         grace = settings.alert_gateway_grace_seconds
         for key, (status, began) in list(self.state.pending.items()):
             if time.time() - began < grace:
@@ -442,13 +424,13 @@ class AlertDispatcher:
             )
 
     async def underlying_moved(self, client, data: dict):
-        """Band crossings and price crossings, judged per member.
+\
+\
+\
+\
+\
+\
 
-        The threshold is theirs, not the platform's: one person watches every
-        two percent and another only cares about five, and a single tenant-wide
-        evaluation cannot serve both. The anchor and the last band are held per
-        member for the same reason.
-        """
         symbol = data.get("symbol")
         price = alerts.decimal(data.get("underlying_price"))
         if not symbol or price is None or price <= 0:
@@ -467,10 +449,7 @@ class AlertDispatcher:
             wanted = [alerts.decimal(level) for level in prefs.get("move_levels") or []]
             wanted = [level for level in wanted if level and level > 0]
             if wanted:
-                # Named moves rather than a repeating band: the desk asked to
-                # hear about 2%, 3% and 5%, not about every multiple of one of
-                # them. Each is a price either side of the anchor, so the same
-                # crossing test the price levels use applies.
+
                 if previous is None:
                     continue
                 for level in wanted:
@@ -495,7 +474,6 @@ class AlertDispatcher:
                     )
                     await self.raise_alert("move", None, alerts.move_message(symbol, price, anchor, band, step), False)
 
-            # Absolute levels, which are a different question from a move.
             if previous is None:
                 continue
             for raw in prefs.get("price_levels") or []:
@@ -510,7 +488,7 @@ class AlertDispatcher:
             await self.desk_move(client, key, symbol, previous, price)
 
     async def desk_move(self, client, key: str, symbol: str, previous, price):
-        """The shared channel has no member behind it, so it uses the defaults."""
+
         step = Decimal(str(settings.alert_move_percent))
         anchor = self.state.anchors.get(key)
         if anchor is None:
@@ -528,7 +506,7 @@ class AlertDispatcher:
             )
 
     async def members(self, trigger: str):
-        """Members with this trigger on and a chat to send to, with their prefs."""
+
         cursor = self.db.alert_preferences.find({"tenant_id": self.tenant_id})
         prefs = {doc.get("user_id"): doc for doc in await cursor.to_list(5000)}
         out = []
@@ -562,8 +540,7 @@ class AlertDispatcher:
         for member, prefs in await self.members("risk"):
             if member["chat_id"] not in entitled:
                 continue
-            # Each member's own percentage, with an absolute floor: ten percent
-            # of a nearly flat book is pennies and would alert on every tick.
+
             want = abs(before) * alerts.threshold(prefs, "risk_percent") / 100
             if moved < max(want, Decimal(1)):
                 continue
@@ -616,7 +593,6 @@ class AlertDispatcher:
                     log.exception("alerts.dispatch_failed tenant=%s", self.tenant_id)
                     await asyncio.sleep(2)
 
-
 class Session:
 
     def __init__(self, redis, db, tenant_id: str, connection: dict):
@@ -662,7 +638,6 @@ class Session:
 
     def on_reconnect(self):
         pass
-
 
 class GatewaySession(Session):
 
@@ -739,9 +714,6 @@ class GatewaySession(Session):
             Event(event_type=kind, account_id="*", data=self.state.model_dump(mode="json"))
         )
 
-    #: IBKR returns an aggregate alongside the real accounts. It holds no
-    #: positions and cannot be traded — counting it told the desk it had two
-    #: accounts when it had one.
     PSEUDO_ACCOUNTS = frozenset({"All", "ALL"})
 
     def accept_account(self, account):
@@ -1464,7 +1436,6 @@ class GatewaySession(Session):
             except Exception:
                 log.exception("gateway.shutdown_failed connection=%s", self.label)
 
-
 class SnapTradeSession(Session):
 
     def __init__(self, redis, db, tenant_id: str, connection: dict):
@@ -1601,7 +1572,6 @@ class SnapTradeSession(Session):
                 await self.publish_gateway(GatewayStatus.DISCONNECTED)
             await self.release()
 
-
 def build_session(redis, db, connection: dict) -> Session | None:
     provider = connection.get("provider")
     tenant_id = connection["tenant_id"]
@@ -1614,7 +1584,6 @@ def build_session(redis, db, connection: dict) -> Session | None:
         return SnapTradeSession(redis, db, tenant_id, connection)
     log.warning("connection.unsupported_provider provider=%s", provider)
     return None
-
 
 class Supervisor:
 
@@ -1750,7 +1719,6 @@ class Supervisor:
             everything = [t for _, t in self.sessions.values()] + [t for _, t in self.consumers.values()]
             await asyncio.gather(*everything, *tasks, return_exceptions=True)
 
-
 async def main():
     configure()
     client, db = database()
@@ -1764,7 +1732,6 @@ async def main():
     finally:
         await redis.aclose()
         await client.close()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

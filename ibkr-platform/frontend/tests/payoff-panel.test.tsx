@@ -82,10 +82,11 @@ describe("payoff panel", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
   it("requires an underlying reference price even when an option has a mark", async () => {
-    panel([position()]);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveValue(null);
+    const { rerender } = panel([position()]);
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("—");
+    expect(screen.queryByRole("spinbutton", { name: "XYZ reference price" })).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("XYZ reference price"), { target: { value: "100" } });
+    rerender(<PayoffPanel rows={[position({ underlying_price: "100" })]} loading={false} error={false} light={false} />);
     expect(await screen.findByRole("img")).toBeInTheDocument();
     expect(screen.getByRole("table")).toHaveAccessibleName("RMS by account ID · Scenario P&L (USD)");
     fireEvent.change(screen.getByLabelText("Volatility (%)"), { target: { value: "" } });
@@ -107,27 +108,24 @@ describe("payoff panel", () => {
     expect(screen.getByText(/Unsupported FOP contract/)).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
-  it("recalculates on live stock marks and retains an explicit reference override", () => {
+  it("recalculates on live stock marks", () => {
     const stock = position({ sec_type: "STK", average_cost: "80", market_price: "100", unrealized_pnl: "20" });
     const { rerender } = panel([stock], { accountId: "A" });
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "100.00");
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("100.00");
     rerender(<PayoffPanel rows={[{ ...stock, market_price: "110", unrealized_pnl: "30" }]} accountId="A" loading={false} error={false} light={false} />);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "110.00");
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("110.00");
     expect(screen.getAllByText("31.10")).toHaveLength(2);
-    fireEvent.change(screen.getByLabelText("XYZ reference price"), { target: { value: "120" } });
-    rerender(<PayoffPanel rows={[{ ...stock, market_price: "115", unrealized_pnl: "35" }]} accountId="A" loading={false} error={false} light={false} />);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveValue(120);
-    expect(screen.getAllByText("34.00").length).toBeGreaterThanOrEqual(2);
   });
-  it("offers the broker's underlying mark as the placeholder and models it", () => {
+  it("shows the broker's underlying mark as text and models it", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5" })]);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveValue(null);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "7,612.50");
+    const readout = screen.getByLabelText("XYZ reference price");
+    expect(readout.tagName).toBe("OUTPUT");
+    expect(readout).toHaveTextContent("7,612.50");
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByText("Live broker mark")).toBeInTheDocument();
     expect(screen.getByText("USD:XYZ reference").parentElement).toHaveTextContent("7,612.50");
     rerender(<PayoffPanel rows={[position({ underlying_price: "7650" })]} loading={false} error={false} light={false} />);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "7,650.00");
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("7,650.00");
   });
   it("recalculates both the RMS table and graph when the live reference moves", async () => {
     const first = position({ underlying_price: "100" });
@@ -147,7 +145,7 @@ describe("payoff panel", () => {
     );
 
     await waitFor(() => expect(chart.setOption).toHaveBeenCalledTimes(2));
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "110.00");
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("110.00");
     expect(screen.getByText("USD:XYZ reference").parentElement).toHaveTextContent("110.00");
     const updatedRow = screen.getByRole("row", { name: /Scenario underlying level/ });
     expect(updatedRow).toHaveTextContent("XYZ 111.10");
@@ -165,28 +163,25 @@ describe("payoff panel", () => {
   });
   it("labels a stored underlying LTP as cached rather than live", () => {
     panel([position({ underlying_price: "7583.88", underlying_source: "ib_und_price_cached" })]);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "7,583.88");
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("7,583.88");
     expect(screen.getByText("Stored last underlying price — not live")).toBeInTheDocument();
   });
-  it("keeps a typed reference price and hands the field back when it is cleared", () => {
+  it("follows the broker mark instead of keeping a typed price", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5" })]);
-    fireEvent.change(screen.getByLabelText("XYZ reference price"), { target: { value: "7000" } });
+    expect(screen.queryByRole("spinbutton", { name: "XYZ reference price" })).not.toBeInTheDocument();
     rerender(<PayoffPanel rows={[position({ underlying_price: "7650" })]} loading={false} error={false} light={false} />);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveValue(7000);
-    expect(screen.getByText(/Modelling 7,000.00 · broker mark/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("XYZ reference price"), { target: { value: "" } });
-    expect(screen.getByLabelText("XYZ reference price")).toHaveValue(null);
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("7,650.00");
     expect(screen.getByText("USD:XYZ reference").parentElement).toHaveTextContent("7,650.00");
   });
   it("prefers a held stock mark over the option-implied underlying price", () => {
     panel([position({ sec_type: "STK", average_cost: "80", market_price: "100" }), position({ con_id: 2, underlying_price: "7612.5" })]);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "100.00");
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("100.00");
   });
-  it("stays manual when the broker sends no underlying mark", () => {
+  it("shows no price when the broker sends no underlying mark", () => {
     panel([position()]);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveValue(null);
-    expect(screen.getByLabelText("XYZ reference price")).toHaveAttribute("placeholder", "Enter a price");
-    expect(screen.getByText(/No broker mark — enter a price/)).toBeInTheDocument();
+    expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("—");
+    expect(screen.queryByRole("spinbutton", { name: "XYZ reference price" })).not.toBeInTheDocument();
+    expect(screen.getByText("No broker mark")).toBeInTheDocument();
   });
   it("keeps the model inputs collapsed until they are asked for", () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -300,28 +295,21 @@ describe("payoff panel", () => {
       [...table.querySelectorAll("thead th")].slice(1).map(th => th.getAttribute("aria-label"));
     expect(headerOrder()).toEqual(["-10%", "-5%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
 
-    // Capture the underlying level shown under each heading before moving —
-    // the values are position-dependent, not hardcoded, so the row cells can
-    // be checked to have moved along with their header rather than stayed put.
     const level = screen.getByRole("row", { name: /Scenario underlying level/ });
     const before = [...level.querySelectorAll("td")].map(td => td.textContent);
 
-    // Move -10% one step right, past -5%.
     fireEvent.click(screen.getByRole("button", { name: "Move -10% right" }));
     expect(headerOrder()).toEqual(["-5%", "-10%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
-    // The row cells follow the header: the two swapped levels traded places,
-    // not just their labels.
+
     const after = [...level.querySelectorAll("td")].map(td => td.textContent);
     expect(after[0]).toBe(before[1]);
     expect(after[1]).toBe(before[0]);
     expect(after.slice(2)).toEqual(before.slice(2));
 
-    // A leading column has nowhere left to go.
     expect(screen.getByRole("button", { name: "Move -5% left" })).toBeDisabled();
 
     unmount();
 
-    // The order survives a remount, the same way the levels themselves do.
     panel([position({ account_id: "A", sec_type: "STK", average_cost: "80", market_price: "100" })]);
     expect(headerOrder()).toEqual(["-5%", "-10%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
     localStorage.removeItem("rms.columns.order");
@@ -337,7 +325,6 @@ describe("payoff panel", () => {
     expect(rowFor("U1")).toBeInTheDocument();
     expect(rowFor("U2")).toBeInTheDocument();
 
-    // The summary says what is shown without having to open it.
     expect(screen.getByText("All 2")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "U2" }));
@@ -345,7 +332,6 @@ describe("payoff panel", () => {
     expect(rowFor("U1")).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
 
-    // "Show all" puts it back, and the desk total never depended on the choice.
     fireEvent.click(screen.getByRole("button", { name: "Show all" }));
     expect(rowFor("U2")).toBeInTheDocument();
   });
@@ -368,6 +354,30 @@ describe("payoff panel", () => {
     expect(screen.getByText(/Manual · market/)).toBeInTheDocument();
   });
 
+  it("keeps the strike rail a fixed two-band height as the book densifies", () => {
+    const book = Array.from({ length: 16 }, (_, i) =>
+      position({
+        con_id: i + 1,
+        strike: String(7600 + i * 10),
+        right: i % 2 ? "C" : "P",
+        quantity: String(i % 2 ? 1 : -2),
+        underlying_price: "7650",
+        market_price: "45",
+        expiry: futureExpiry(4),
+        average_cost: "4500",
+      }),
+    );
+    panel(book);
+    const rail = screen.getByRole("group", { name: "Held strikes against the underlying price" });
+    expect(rail.querySelector(".ruler-rail")).toBeTruthy();
+    expect((rail.querySelector(".ruler-rail") as HTMLElement).style.height).toBe("");
+    expect(rail.querySelectorAll(".strike-tick")).toHaveLength(16);
+    expect(rail.querySelectorAll(".ruler-band.call .strike-tick")).toHaveLength(8);
+    expect(rail.querySelectorAll(".ruler-band.put .strike-tick")).toHaveLength(8);
+    expect(screen.getByRole("button", { name: /Long 1 × 7610 call/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Short 2 × 7600 put/ })).toBeInTheDocument();
+  });
+
   it("lets a book spanning several cycles be modelled a cycle at a time", () => {
     const near = futureExpiry(4);
     const far = futureExpiry(11);
@@ -375,12 +385,10 @@ describe("payoff panel", () => {
       position({ con_id: 1, expiry: near, strike: "7650", underlying_price: "7650" }),
       position({ con_id: 2, expiry: far, strike: "7700", underlying_price: "7650" }),
     ]);
-    // Both cycles on to begin with: every live expiry is modelled.
+
     expect(screen.getByText("All 2")).toBeInTheDocument();
     expect(screen.getByText(/2 included legs/)).toBeInTheDocument();
 
-    // Deselecting one leaves the other, rather than selecting only the one
-    // clicked — the bug a naive toggle has when nothing is stored yet.
     fireEvent.click(screen.getByRole("checkbox", { name: expiryDate(far) }));
     expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
@@ -392,8 +400,7 @@ describe("payoff panel", () => {
   it("names the single cycle outright when there is only one", async () => {
     const only = futureExpiry(9);
     panel([position({ con_id: 1, expiry: only, strike: "7650", underlying_price: "7650" })]);
-    // "All 1" would be a strange thing to tell someone holding one expiry, so
-    // the summary names the cycle itself.
+
     const summary = document.querySelector(".expiry-picker summary")!;
     expect(summary.textContent).toContain(expiryDate(only));
   });
@@ -555,12 +562,7 @@ describe("payoff panel", () => {
   });
 
   it("adds back the commission IBKR buried in average cost", async () => {
-    /* The finding that prompted this: IBKR's average_cost already contains the
-       commission, moved against the trader. Verified on the live book to four
-       decimals — a long's cost is price + commission, a short's is price −
-       commission. So a payoff built from average cost is already net, and the
-       dashboard read 11.04 worse than a tool pricing off the premium alone.
-       Unticked means gross, which means adding it back. */
+
     panel(
       [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
       {},
@@ -574,25 +576,22 @@ describe("payoff panel", () => {
       screen.getByRole("row", { name: /Desk total terminal/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""),
     );
     const says = (re: RegExp) => re.test(document.body.textContent ?? "");
-    // Default is gross: the 11.04 the broker took out is put back. Waited for,
-    // because reading before the realized data lands measures the raw curve.
+
     await waitFor(() => expect(says(/added back/)).toBe(true));
     const grossShown = total();
-    // The adjustment is labelled for what it is. Nothing has been closed, so
-    // there is no booked P&L row to confuse it with.
+
     const row = (name: RegExp) => screen.queryByRole("row", { name });
     expect(row(/Commissions added back/)).toBeInTheDocument();
     expect(row(/Booked P&L \(closed legs\)/)).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Include commissions"));
-    // Ticked is what the broker actually charged, which is 11.04 worse.
+
     await waitFor(() => expect(total()).toBeCloseTo(grossShown - 11.04, 2));
     expect(says(/Net of commissions/)).toBe(true);
   });
 
   it("does not add back a closing fill's commission twice", async () => {
-    // A closing fill's commission is already inside the realized P&L the broker
-    // reports for it; adding it back as well would overstate the gross figure.
+
     panel(
       [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
       {},
@@ -602,20 +601,18 @@ describe("payoff panel", () => {
       ],
     );
     await screen.findByRole("table", { name: /RMS by account ID/ });
-    // Only the opening fill's 3.00 is described as added back.
+
     await waitFor(() =>
       expect(document.body.textContent ?? "").toMatch(/3\.00 USD IBKR embedded/),
     );
     expect(document.body.textContent ?? "").not.toMatch(/7\.00 USD IBKR embedded/);
-    // Both adjustments present, each under its own name.
+
     expect(screen.getByRole("row", { name: /Booked P&L \(closed legs\)/ })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /Commissions added back/ })).toBeInTheDocument();
   });
 
   it("leaves a closing fill's commission where the broker already put it", async () => {
-    /* IBKR reports realized P&L for a closing fill with its commission already
-       accounted for, so there is nothing for the toggle to add or remove: the
-       box changes what is *embedded in average cost*, which only open legs have. */
+
     panel(
       [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
       {},

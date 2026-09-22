@@ -9,7 +9,6 @@ from app.tenancy import TenantKeys
 
 SLUG = settings.bootstrap_tenant_slug
 
-
 @pytest.fixture
 async def raw_stores():
     from fakeredis.aioredis import FakeRedis
@@ -18,7 +17,6 @@ async def raw_stores():
     redis = FakeRedis(decode_responses=True)
     yield redis, AsyncMongoMockClient().legacy
     await redis.aclose()
-
 
 @pytest.fixture
 async def legacy(raw_stores, monkeypatch):
@@ -46,17 +44,14 @@ async def legacy(raw_stores, monkeypatch):
     monkeypatch.setattr(migrate.Redis, "from_url", staticmethod(lambda *a, **k: _NoClose(redis)))
     return redis, db
 
-
 class _Closer:
     async def close(self):
         return None
-
 
 class _NoClose:
 
     def __new__(cls, redis):
         return redis
-
 
 async def test_dry_run_changes_nothing(legacy):
     redis, db = legacy
@@ -66,7 +61,6 @@ async def test_dry_run_changes_nothing(legacy):
     assert await db.tenants.count_documents({}) == 0
     assert await db.tenant_members.count_documents({}) == 0
     assert await db.broker_connections.count_documents({}) == 0
-
 
 async def test_migration_adopts_the_running_gateway_untouched(legacy):
     _, db = legacy
@@ -78,7 +72,6 @@ async def test_migration_adopts_the_running_gateway_untouched(legacy):
     assert connection["ibc_config_path"] == settings.ibc_config_path
     assert connection["api_port"] == settings.ibkr_port
 
-
 async def test_roles_and_grants_carry_over_without_widening_access(legacy):
     _, db = legacy
     await migrate.run(dry_run=False)
@@ -88,7 +81,6 @@ async def test_roles_and_grants_carry_over_without_widening_access(legacy):
     assert admin["role"] == "OWNER" and admin["tenant_id"] == tenant["_id"]
     assert trader["role"] == "TRADER"
     assert trader["accounts"] == ["DU1"], "a trader keeps exactly the accounts it had"
-
 
 async def test_documents_are_stamped_and_re_keyed(legacy):
     _, db = legacy
@@ -101,7 +93,6 @@ async def test_documents_are_stamped_and_re_keyed(legacy):
     fill = await db.executions.find_one({})
     assert fill["_id"] == scoped_id(tenant["_id"], "fill-1")
     assert (await db.audit_logs.find_one({}))["tenant_id"] == tenant["_id"]
-
 
 async def test_live_state_is_copied_not_moved(legacy):
     redis, db = legacy
@@ -119,7 +110,6 @@ async def test_live_state_is_copied_not_moved(legacy):
     assert await redis.get("gateway:primary"), "the pre-tenancy key is left as a rollback path"
     assert await redis.smembers("accounts") == {"DU1"}
 
-
 async def test_migration_is_idempotent(legacy):
     _, db = legacy
     await migrate.run(dry_run=False)
@@ -129,7 +119,6 @@ async def test_migration_is_idempotent(legacy):
     assert await db.tenant_members.count_documents({}) == 2
     assert await db.orders.count_documents({}) == 1
     assert await db.executions.count_documents({}) == 1
-
 
 async def test_legacy_accounts_are_reshaped_before_the_unique_index_is_built(legacy):
     _, db = legacy
@@ -143,7 +132,6 @@ async def test_legacy_accounts_are_reshaped_before_the_unique_index_is_built(leg
     names = {index["name"] async for index in db.ibkr_accounts.list_indexes()}
     assert "tenant_id_1_account_id_1" in names
 
-
 async def test_initialize_explains_itself_on_an_unmigrated_database(raw_stores):
     from pymongo.errors import DuplicateKeyError
 
@@ -156,7 +144,6 @@ async def test_initialize_explains_itself_on_an_unmigrated_database(raw_stores):
         assert "python -m app.migrate" in str(error)
     except DuplicateKeyError:
         pytest.skip("the in-memory MongoDB does not enforce this unique index")
-
 
 async def test_local_symbols_give_back_the_underlying_and_expiry():
     from app.migrate import parse_local_symbol
@@ -172,7 +159,6 @@ async def test_local_symbols_give_back_the_underlying_and_expiry():
     assert parse_local_symbol("28812380") is None
     assert parse_local_symbol("") is None
     assert parse_local_symbol("SPXW  2609XXP07485000") is None
-
 
 async def test_only_realized_fills_without_a_contract_are_stamped(stores):
     from app.migrate import Report, backfill_execution_contracts
@@ -191,7 +177,6 @@ async def test_only_realized_fills_without_a_contract_are_stamped(stores):
     assert stamped["expiry"] == "20260918"
     assert stamped["currency"] == "USD"
     assert (await db.executions.find_one({"_id": "t:e3"})).get("expiry") is None
-
 
 async def test_the_contract_backfill_is_a_no_op_on_a_dry_run(stores):
     from app.migrate import Report, backfill_execution_contracts

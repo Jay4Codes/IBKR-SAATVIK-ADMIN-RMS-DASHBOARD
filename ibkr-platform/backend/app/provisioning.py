@@ -49,10 +49,8 @@ BASE_SETTINGS = {
     "IbAutoClosedown": "no",
 }
 
-
 def instance_root(connection_id: str) -> Path:
     return Path(settings.gateway_instance_root) / connection_id
-
 
 def paths(connection_id: str) -> dict[str, str]:
     root = instance_root(connection_id)
@@ -64,10 +62,8 @@ def paths(connection_id: str) -> dict[str, str]:
         "service_unit": settings.gateway_instance_unit.format(instance=connection_id),
     }
 
-
 def rewrite_launcher(text: str, values: dict[str, str]) -> str:
     return hostctl.apply_settings(text, {k: v for k, v in values.items() if k in LAUNCHER_VARIABLES})
-
 
 def _template_launcher() -> str:
     candidate = Path(settings.gateway_template_config).parent / "gatewaystart.sh"
@@ -80,7 +76,6 @@ def _template_launcher() -> str:
             f"GATEWAY_TEMPLATE_CONFIG at an IBC directory that contains gatewaystart.sh.",
         ) from exc
 
-
 def _template_config() -> str:
     try:
         return Path(settings.gateway_template_config).read_text()
@@ -90,7 +85,6 @@ def _template_config() -> str:
             f"IBC template config not readable at {settings.gateway_template_config}. "
             f"Set GATEWAY_TEMPLATE_CONFIG to an existing IBC config.ini.",
         ) from exc
-
 
 def build_config(
     template: str,
@@ -115,7 +109,6 @@ def build_config(
     )
     return hostctl.apply_settings(template, values)
 
-
 def _require_enabled() -> None:
     if not settings.gateway_provisioning_enabled:
         raise HTTPException(
@@ -124,7 +117,6 @@ def _require_enabled() -> None:
             "GATEWAY_PROVISIONING_ENABLED=true, or register the connection as "
             "unmanaged with an existing config path and systemd unit.",
         )
-
 
 def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict[str, str]:
     _require_enabled()
@@ -171,7 +163,6 @@ def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict
     )
     return layout
 
-
 def write_unit_template() -> str:
     _require_enabled()
     path = Path("/etc/systemd/system") / settings.gateway_instance_unit.format(instance="")
@@ -182,7 +173,6 @@ def write_unit_template() -> str:
         return str(path)
     hostctl.write_atomic(str(path), body, mode=stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
     return str(path)
-
 
 def remove_files(doc: dict[str, Any]) -> None:
     if not doc.get("managed", True):

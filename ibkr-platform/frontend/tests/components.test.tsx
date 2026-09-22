@@ -128,7 +128,7 @@ describe("account names", () => {
   it("shows the name the desk gave an account, keeping the number beneath", async () => {
     const { accountLabel } = await import("@/components/tables");
     expect(accountLabel({ account_id: "U22050074", label: "Income book" })).toBe("Income book");
-    // An unnamed account is still identified, and whitespace is not a name.
+
     expect(accountLabel({ account_id: "U22050074" })).toBe("U22050074");
     expect(accountLabel({ account_id: "U22050074", label: "   " })).toBe("U22050074");
   });

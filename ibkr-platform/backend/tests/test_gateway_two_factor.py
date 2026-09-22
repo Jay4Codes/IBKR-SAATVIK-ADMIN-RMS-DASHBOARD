@@ -31,10 +31,8 @@ IDLE = {
     "two_factor_attempts": 0,
 }
 
-
 def as_user(role):
     return {COOKIE: role}
-
 
 @pytest.fixture
 def login(monkeypatch):
@@ -50,12 +48,10 @@ def login(monkeypatch):
     monkeypatch.setattr(hostctl, "process_action", fake_action)
     return state
 
-
 @pytest.fixture
 def repo_for(stores):
     redis, _ = stores
     return StateRepository(redis, TENANT, CONNECTION)
-
 
 def poller_snapshot(served, snapshots):
 
@@ -66,10 +62,8 @@ def poller_snapshot(served, snapshots):
 
     return fake_snapshot
 
-
 def polled(served, connection_id=CONNECTION):
     return served.count(connection_id)
-
 
 def phases_on(entries):
     return [
@@ -77,7 +71,6 @@ def phases_on(entries):
         for _, fields in entries
         if json.loads(fields["event"])["event_type"] == "gateway.login"
     ]
-
 
 async def test_admin_sees_the_login_phase_and_countdown(client, login):
     login["snapshot"] = PENDING
@@ -90,13 +83,11 @@ async def test_admin_sees_the_login_phase_and_countdown(client, login):
     assert data["trading_mode"] == "live"
     assert data["api_port_open"] is False
 
-
 async def test_traders_do_not_see_login_internals(client, login):
     login["snapshot"] = PENDING
     data = (await client.get("/api/v1/gateway", cookies=as_user("TRADER"))).json()["data"]
     for field in ("login_phase", "two_factor_remaining_seconds", "api_port_open", "trading_mode"):
         assert field not in data
-
 
 async def test_restart_is_refused_while_a_push_is_outstanding(client, login, stores):
     _, db = stores
@@ -108,7 +99,6 @@ async def test_restart_is_refused_while_a_push_is_outstanding(client, login, sto
     assert "140s left" in response.json()["error"]
     assert await db.audit_logs.find_one({"action": "gateway_process_restart"}) is None
 
-
 async def test_stop_is_refused_while_a_push_is_outstanding(client, login):
     login["snapshot"] = PENDING
     response = await client.post(
@@ -116,14 +106,12 @@ async def test_stop_is_refused_while_a_push_is_outstanding(client, login):
     )
     assert response.status_code == 409
 
-
 async def test_start_is_never_blocked(client, login):
     login["snapshot"] = PENDING
     response = await client.post(
         "/api/v1/gateway/process", json={"action": "start"}, cookies=as_user("ADMIN")
     )
     assert response.status_code == 200
-
 
 async def test_force_overrides_the_guard_and_is_audited(client, login, stores):
     _, db = stores
@@ -136,7 +124,6 @@ async def test_force_overrides_the_guard_and_is_audited(client, login, stores):
     assert response.status_code == 200
     record = await db.audit_logs.find_one({"action": "gateway_process_restart"})
     assert record["data"] == {"connection": CONNECTION, "action": "restart", "force": True}
-
 
 async def test_a_refused_restart_does_not_consume_the_command_rate_limit(client, login):
     login["snapshot"] = PENDING
@@ -151,14 +138,12 @@ async def test_a_refused_restart_does_not_consume_the_command_rate_limit(client,
     )
     assert forced.status_code == 200, "the operator's deliberate retry must not hit a 429"
 
-
 async def test_a_trader_is_refused_before_the_two_factor_guard_runs(client, login):
     login["snapshot"] = PENDING
     response = await client.post(
         "/api/v1/gateway/process", json={"action": "restart"}, cookies=as_user("TRADER")
     )
     assert response.status_code == 403
-
 
 async def test_an_expired_push_does_not_block_the_restart_that_fixes_it(client, login):
     login["snapshot"] = {**PENDING, "login_phase": "two_factor_expired", "two_factor_remaining_seconds": 0}
@@ -167,14 +152,12 @@ async def test_an_expired_push_does_not_block_the_restart_that_fixes_it(client, 
     )
     assert response.status_code == 200
 
-
 async def test_a_nearly_expired_push_does_not_block_a_restart(client, login):
     login["snapshot"] = {**PENDING, "two_factor_remaining_seconds": 4}
     response = await client.post(
         "/api/v1/gateway/process", json={"action": "restart"}, cookies=as_user("ADMIN")
     )
     assert response.status_code == 200
-
 
 async def test_a_restart_clears_the_stale_countdown(client, login, stores, repo_for):
     redis, _ = stores
@@ -188,7 +171,6 @@ async def test_a_restart_clears_the_stale_countdown(client, login, stores, repo_
     assert response.status_code == 200
     assert await redis.get(repo_for.keys.login(CONNECTION)) is None
 
-
 async def test_stored_login_progress_never_overwrites_worker_state(client, stores, repo_for):
     redis, _ = stores
     before = await redis.get(repo_for.keys.gateway(CONNECTION))
@@ -197,7 +179,6 @@ async def test_stored_login_progress_never_overwrites_worker_state(client, store
     assert merged["login_phase"] == "two_factor"
     assert merged["status"] == "DISCONNECTED"
     assert await redis.get(repo_for.keys.gateway(CONNECTION)) == before
-
 
 async def test_the_poller_streams_only_on_phase_changes(client, stores, monkeypatch, repo_for):
     redis, _ = stores
@@ -214,7 +195,6 @@ async def test_the_poller_streams_only_on_phase_changes(client, stores, monkeypa
     assert phases_on(await redis.xrange(repo_for.keys.events)) == ["two_factor", "logged_in"]
     assert await redis.get(repo_for.keys.login(CONNECTION))
 
-
 async def test_only_one_worker_polls_per_interval(client, stores, monkeypatch, repo_for):
     redis, _ = stores
     served = []
@@ -230,7 +210,6 @@ async def test_only_one_worker_polls_per_interval(client, stores, monkeypatch, r
     await asyncio.gather(*tasks, return_exceptions=True)
 
     assert phases_on(await redis.xrange(repo_for.keys.events)) == ["two_factor", "logged_in"]
-
 
 async def test_the_poller_compares_against_the_stored_phase(client, stores, monkeypatch, repo_for):
     redis, _ = stores
@@ -250,7 +229,6 @@ async def test_the_poller_compares_against_the_stored_phase(client, stores, monk
         "the phase was already two_factor; nothing changed"
     )
 
-
 async def test_the_poller_survives_a_failing_snapshot(client, monkeypatch, repo_for):
     calls = []
 
@@ -266,7 +244,6 @@ async def test_the_poller_survives_a_failing_snapshot(client, monkeypatch, repo_
     assert not task.done()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-
 
 @pytest.mark.parametrize("role,expected", [("OWNER", 200), ("ADMIN", 200), ("TRADER", 403), ("VIEWER", 403)])
 async def test_tenant_gateway_operator_process(client, stores, login, role, expected):

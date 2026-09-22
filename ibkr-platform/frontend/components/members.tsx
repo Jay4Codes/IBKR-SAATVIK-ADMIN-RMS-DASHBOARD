@@ -6,7 +6,6 @@ import { api, apiDelete } from "@/lib/api";
 import { Member, TenantRole, User } from "@/lib/types";
 import { Button } from "./ui/button";
 
-
 const SCOPED: TenantRole[] = ["TRADER", "VIEWER"];
 
 export function Members({ user }: { user?: User }) {

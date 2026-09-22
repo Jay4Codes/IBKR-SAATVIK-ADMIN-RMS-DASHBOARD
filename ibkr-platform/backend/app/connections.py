@@ -11,11 +11,9 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.tenancy import now
 
-
 class Provider(StrEnum):
     IBKR_GATEWAY = "ibkr_gateway"
     SNAPTRADE = "snaptrade"
-
 
 class ConnectionStatus(StrEnum):
     DRAFT = "DRAFT"
@@ -23,7 +21,6 @@ class ConnectionStatus(StrEnum):
     DISABLED = "DISABLED"
 
 SUPERVISED = (ConnectionStatus.ENABLED.value,)
-
 
 class BrokerConnection(BaseModel):
 
@@ -60,12 +57,10 @@ class BrokerConnection(BaseModel):
 
 REDACTED = ("snaptrade_user_secret", "ibkr_password")
 
-
 def present(doc: dict[str, Any]) -> dict[str, Any]:
     row = {key: value for key, value in doc.items() if key not in REDACTED}
     row["id"] = row.pop("_id")
     return BrokerConnection.model_validate(row).model_dump(mode="json")
-
 
 async def by_id(db, tenant_id: str, connection_id: str) -> dict[str, Any]:
     doc = await db.broker_connections.find_one({"_id": connection_id, "tenant_id": tenant_id})
@@ -73,11 +68,9 @@ async def by_id(db, tenant_id: str, connection_id: str) -> dict[str, Any]:
         raise HTTPException(404, "Broker connection not found")
     return doc
 
-
 async def list_for(db, tenant_id: str) -> list[dict[str, Any]]:
     cursor = db.broker_connections.find({"tenant_id": tenant_id}).sort("name", 1)
     return [doc async for doc in cursor]
-
 
 async def supervised(db) -> list[dict[str, Any]]:
     active = [t["_id"] async for t in db.tenants.find({"status": "ACTIVE"}, {"_id": 1})]
@@ -88,7 +81,6 @@ async def supervised(db) -> list[dict[str, Any]]:
     )
     return [doc async for doc in cursor]
 
-
 async def primary(db, tenant_id: str) -> dict[str, Any] | None:
     for status in (ConnectionStatus.ENABLED.value, ConnectionStatus.DISABLED.value, None):
         query: dict[str, Any] = {"tenant_id": tenant_id}
@@ -98,7 +90,6 @@ async def primary(db, tenant_id: str) -> dict[str, Any] | None:
         if doc:
             return doc
     return None
-
 
 async def allocate_port(db, tenant_id: str) -> int:
     taken = {
@@ -115,7 +106,6 @@ async def allocate_port(db, tenant_id: str) -> int:
         f"{settings.gateway_port_range_end}; widen GATEWAY_PORT_RANGE_* or remove a connection",
     )
 
-
 async def allocate_client_id(db, tenant_id: str) -> int:
     taken = {
         doc.get("client_id", 0)
@@ -125,7 +115,6 @@ async def allocate_client_id(db, tenant_id: str) -> int:
     while candidate in taken:
         candidate += 1
     return candidate
-
 
 def new_connection(tenant_id: str, name: str, provider: Provider, **extra: Any) -> dict[str, Any]:
     moment = now()
@@ -140,7 +129,6 @@ def new_connection(tenant_id: str, name: str, provider: Provider, **extra: Any) 
         "updated_at": moment,
         **extra,
     }
-
 
 def unit_for(doc: dict[str, Any]) -> str:
     unit = doc.get("service_unit")

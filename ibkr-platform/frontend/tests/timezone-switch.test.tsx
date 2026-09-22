@@ -32,7 +32,7 @@ afterEach(() => localStorage.clear());
 describe("switching the display timezone", () => {
   it("re-renders every timestamp on the page at the chosen desk's clock", () => {
     page();
-    // A searchable menu now, not a native select: open it, then pick.
+
     const pick = (zone: string) => {
       fireEvent.click(screen.getByRole("button", { name: "Display timezone" }));
       fireEvent.click(screen.getByRole("option", { name: zone }));

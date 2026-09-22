@@ -30,7 +30,6 @@ LOG_PATH=/var/log/ibc
 exec java -jar "$IBC_PATH/IBC.jar"
 """
 
-
 @pytest.fixture
 def host(tmp_path, monkeypatch):
     ibc = tmp_path / "ibc"
@@ -43,7 +42,6 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gateway_provisioning_enabled", True)
     return tmp_path
 
-
 def connection(**overrides):
     return {
         "_id": "conn-1",
@@ -54,13 +52,11 @@ def connection(**overrides):
         **overrides,
     }
 
-
 def test_paths_are_derived_from_the_connection_id(host):
     layout = provisioning.paths("conn-1")
     assert layout["ibc_config_path"].endswith("instances/conn-1/config.ini")
     assert layout["ibc_log_directory"].endswith("logs/conn-1")
     assert layout["service_unit"] == "ibkr-gateway@conn-1.service"
-
 
 def test_provisioning_creates_a_private_isolated_instance(host):
     layout = provisioning.provision_files(connection())
@@ -77,7 +73,6 @@ def test_provisioning_creates_a_private_isolated_instance(host):
     assert "IbLoginId=" in text and "template-user" not in text
     assert "template-secret" not in text
 
-
 def test_the_launcher_points_at_this_instances_own_files(host):
     layout = provisioning.provision_files(connection())
     launcher = Path(layout["launcher_path"]).read_text()
@@ -90,7 +85,6 @@ def test_the_launcher_points_at_this_instances_own_files(host):
     assert "TWS_MAJOR_VRSN=1045" in launcher
     assert stat.S_IMODE(os.stat(layout["launcher_path"]).st_mode) == 0o700
 
-
 def test_two_connections_get_fully_separate_instances(host):
     first = provisioning.provision_files(connection(_id="a", api_port=4101))
     second = provisioning.provision_files(connection(_id="b", api_port=4102))
@@ -100,7 +94,6 @@ def test_two_connections_get_fully_separate_instances(host):
     assert "OverrideTwsApiPort=4101" in Path(first["ibc_config_path"]).read_text()
     assert "OverrideTwsApiPort=4102" in Path(second["ibc_config_path"]).read_text()
 
-
 def test_reprovisioning_keeps_the_password_already_on_disk(host):
     layout = provisioning.provision_files(connection(), password="live-secret")
     assert "IbPassword=live-secret" in Path(layout["ibc_config_path"]).read_text()
@@ -109,11 +102,9 @@ def test_reprovisioning_keeps_the_password_already_on_disk(host):
     assert "IbPassword=live-secret" in text
     assert "OverrideTwsApiPort=4200" in text
 
-
 def test_read_only_login_can_be_turned_off_to_restore_two_factor(host):
     layout = provisioning.provision_files(connection(read_only_login=False))
     assert "ReadOnlyLogin=no" in Path(layout["ibc_config_path"]).read_text()
-
 
 def test_the_unit_template_is_written_once_and_is_idempotent(host, tmp_path, monkeypatch):
     written = {}
@@ -129,7 +120,6 @@ def test_the_unit_template_is_written_once_and_is_idempotent(host, tmp_path, mon
     assert f"{settings.gateway_instance_root}/%i/gatewaystart.sh" in body
     assert "WantedBy=multi-user.target" in body
 
-
 def test_provisioning_is_refused_when_disabled(host, monkeypatch):
     monkeypatch.setattr(settings, "gateway_provisioning_enabled", False)
     with pytest.raises(HTTPException) as error:
@@ -137,14 +127,12 @@ def test_provisioning_is_refused_when_disabled(host, monkeypatch):
     assert error.value.status_code == 503
     assert "provisioning is disabled" in error.value.detail
 
-
 def test_a_missing_ibc_installation_reports_where_to_look(host, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "gateway_template_config", str(tmp_path / "absent.ini"))
     with pytest.raises(HTTPException) as error:
         provisioning.provision_files(connection())
     assert error.value.status_code == 503
     assert "GATEWAY_TEMPLATE_CONFIG" in error.value.detail
-
 
 def test_removing_files_never_touches_an_adopted_instance(host):
     layout = provisioning.provision_files(connection())

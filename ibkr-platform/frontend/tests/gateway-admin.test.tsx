@@ -196,7 +196,6 @@ describe("gateway process and credentials", () => {
   });
 });
 
-
 it("lets a tenant gateway operator disconnect without configuration access", async () => {
   apiMock.mockResolvedValue({});
   render(<GatewayStatus gateway={gateway({process: "active", api_port_open: true, status: "CONNECTED", last_heartbeat: new Date().toISOString()})} clock={Date.now()} canControl />);

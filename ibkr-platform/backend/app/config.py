@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -65,17 +64,13 @@ class Settings(BaseSettings):
     telegram_link_ttl_seconds: int = 900
     alert_move_percent: float = 2
     alert_risk_percent: float = 10
-    #: How long a gateway must stay down before it is worth interrupting for.
-    #: Longer than a deploy's restart, shorter than anyone would want to wait.
+
     alert_gateway_grace_seconds: float = 60
 
-    #: Finnhub supplies the exchange holiday calendar, including half-days. Its
-    #: economic calendar is a paid endpoint, so FOMC dates come from the Federal
-    #: Reserve's own published calendar instead.
     finnhub_api_key: str = ""
     finnhub_rest_url: str = "https://finnhub.io/api/v1"
     fomc_calendar_url: str = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
-    #: The calendar changes a few times a year; refetching hourly is plenty.
+
     event_refresh_seconds: float = 3600
 
     secret_key: str = ""
@@ -87,6 +82,5 @@ class Settings(BaseSettings):
     @property
     def origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-
 
 settings = Settings()

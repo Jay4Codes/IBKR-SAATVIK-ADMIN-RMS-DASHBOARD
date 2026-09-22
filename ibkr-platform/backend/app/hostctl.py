@@ -6,18 +6,15 @@ import re
 import stat
 import tempfile
 
-
 def _assign(text: str, key: str, value: str) -> str:
     pattern = re.compile(rf"^{re.escape(key)}=.*$", re.M)
     line = f"{key}={value}"
     return pattern.sub(lambda _: line, text, count=1) if pattern.search(text) else f"{text}\n{line}\n"
 
-
 def apply_settings(text: str, values: dict[str, str]) -> str:
     for key, value in values.items():
         text = _assign(text, key, value)
     return text
-
 
 def read_setting(key: str, path: str | None) -> str | None:
     if not path:
@@ -30,10 +27,8 @@ def read_setting(key: str, path: str | None) -> str | None:
     value = found.group(1).strip() if found else ""
     return value or None
 
-
 def read_username(path: str | None) -> str | None:
     return read_setting("IbLoginId", path)
-
 
 def write_atomic(path: str, text: str, mode: int = stat.S_IRUSR | stat.S_IWUSR) -> None:
     directory = os.path.dirname(path) or "."
@@ -50,7 +45,6 @@ def write_atomic(path: str, text: str, mode: int = stat.S_IRUSR | stat.S_IWUSR) 
         if os.path.exists(temporary.name):
             os.unlink(temporary.name)
         raise
-
 
 def write_credentials(
     path: str,
@@ -76,7 +70,6 @@ def write_credentials(
         values["SecondFactorDevice"] = second_factor_device
     write_atomic(path, apply_settings(text, values))
 
-
 async def _systemctl(*args) -> tuple[int, str]:
     process = await asyncio.create_subprocess_exec(
         "systemctl", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
@@ -84,11 +77,9 @@ async def _systemctl(*args) -> tuple[int, str]:
     output, _ = await process.communicate()
     return process.returncode, output.decode().strip()
 
-
 async def process_state(unit: str) -> str:
     _, output = await _systemctl("is-active", unit)
     return output or "unknown"
-
 
 async def process_action(action: str, unit: str) -> str:
     if action not in ("start", "stop", "restart"):
@@ -98,12 +89,10 @@ async def process_action(action: str, unit: str) -> str:
         raise RuntimeError(output or f"systemctl {action} {unit} failed")
     return await process_state(unit)
 
-
 async def daemon_reload() -> None:
     code, output = await _systemctl("daemon-reload")
     if code != 0:
         raise RuntimeError(output or "systemctl daemon-reload failed")
-
 
 async def unit_exists(unit: str) -> bool:
     code, output = await _systemctl("cat", unit)
