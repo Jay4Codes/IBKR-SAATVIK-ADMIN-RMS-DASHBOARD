@@ -15,8 +15,6 @@ import { useZone } from "./timezone";
 import { todayIn } from "@/lib/timezone";
 import { parseLevels, parsePrices, usePersisted, writeStored } from "@/lib/persisted";
 
-/** A column heading. Whole numbers stay whole; a 12.5% level asked for is a
- *  12.5% level shown, not the 13% a blanket rounding would have printed. */
 export function levelLabel(shock: number): string {
   const shown = Number.isInteger(shock) ? String(shock) : shock.toFixed(1);
   return `${shock > 0 ? "+" : ""}${shown}%`;
@@ -24,35 +22,18 @@ export function levelLabel(shock: number): string {
 
 const CUSTOM_LEVELS_KEY = "rms.levels.custom";
 const PRICE_LEVELS_KEY = "rms.levels.price";
-/** The percentage levels a fresh browser starts with. They are a starting
- *  point, not a fixture: every one of them can be removed. */
 const DEFAULT_LEVELS = RMS_SHOCKS.filter(shock => shock > 0).join(",");
-/** More than this and the grid stops being readable across a screen. */
 const MAX_CUSTOM = 8;
 
-/** One column of the scenario grid, however the reader asked for it. */
-/** `id` is unique per column so React can key on it; `group` is what removing
- *  the column acts on, and a percentage's two columns share one group because
- *  ±7% is a single thing the reader added. They were the same field, which
- *  gave the −1% and +1% columns the same key. */
 type Column = {
   shock: number;
   label: string;
   kind: "pct" | "price";
   id: string;
   group: string;
-  /** Added by the reader rather than shipped as a default. Styled apart so it
-   *  is obvious at a glance which columns are theirs to change. */
   custom: boolean;
 };
 
-/** The columns a set of percentage magnitudes and absolute prices produce.
- *
- *  A percentage is two columns and a price is one: "seven percent" asks about
- *  both directions, while "7,800" is a single place the underlying might be.
- *  A price is converted at the reference in force, so it follows the spot while
- *  still naming the level the reader typed.
- */
 export function buildColumns(percents: number[], prices: number[], spot: number): Column[] {
   const columns = new Map<number, Column>();
   for (const shock of signedLevels(percents)) {
@@ -79,21 +60,6 @@ const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
 export const COLUMN_ORDER_KEY = "rms.columns.order";
 
-/** The grid's columns, in whatever order the desk last left them in.
- *
- *  `columns` arrives sorted by level — the natural, useful default. `order` is
- *  a list of ids from a previous visit: known ids keep the position the reader
- *  left them in, and anything not yet in that list — a level just added — is
- *  appended after them, in its own natural (level-sorted) order.
- *
- *  A newcomer is not threaded into the middle of a custom arrangement: once
- *  the reader has moved even one column, there is no longer a single
- *  well-defined "natural place" for something new to slot into — the order by
- *  then answers to the reader, not to level, and a heuristic that assumes
- *  otherwise gets it wrong the moment that order is anything but ascending
- *  (reverse it, and "insert before the next-higher level" inserts at the
- *  front instead of the back). Appending is the rule that is always right.
- */
 export function orderColumns(columns: Column[], order: string[]): Column[] {
   const known = new Map(columns.map(column => [column.id, column]));
   const placed = new Set<string>();
@@ -111,8 +77,10 @@ export function orderColumns(columns: Column[], order: string[]): Column[] {
   return ordered;
 }
 
-/** The class every cell in a column carries, so the column reads as one thing
- *  top to bottom rather than only at its heading. */
+const DEFAULT_PCTS = new Set<number>(RMS_SHOCKS.filter(shock => shock > 0));
+const isDefaultPct = (column: Column) =>
+  column.kind === "pct" && DEFAULT_PCTS.has(Math.abs(column.shock));
+
 const cellClass = (column: Column) =>
   `col ${column.kind}${column.custom ? " custom" : ""}`;
 
@@ -122,9 +90,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
   const [range, setRange] = useState(10);
   const [withCommissions, setWithCommissions] = useState(false);
   const [withClosed, setWithClosed] = useState(true);
-  /* Levels the desk added itself, kept in the browser so a number worth asking
-     about once is still there tomorrow. Magnitudes only: each becomes a pair of
-     columns, because "what about seven percent" is two questions. */
   const custom = parseLevels(usePersisted(CUSTOM_LEVELS_KEY, DEFAULT_LEVELS));
   const prices = parsePrices(usePersisted(PRICE_LEVELS_KEY, ""));
   const [draft, setDraft] = useState("");
@@ -169,18 +134,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
   const { legs: allLegs, excluded } = prepareLegs(scoped, now);
   const [chosen, setChosen] = useState<string[]>([]);
   const expiries = [...new Set(allLegs.map(l => l.position.expiry).filter(Boolean))].sort();
-  /* Empty means every cycle, which is also what an all-on selection means — so
-     deselecting the last one falls back to all rather than modelling nothing. */
   const picked = chosen.filter(value => expiries.includes(value));
   const shown = picked.length ? picked : expiries;
   const legs = allLegs.filter(l => shown.includes(l.position.expiry));
   const toggleExpiry = (value: string) =>
     setChosen(current => {
-      /* Toggles against what is *effectively* shown, not against the stored
-         list: with none stored every cycle is on, so the first click has to
-         take one away rather than reduce the selection to it. */
       const next = shown.includes(value) ? shown.filter(e => e !== value) : [...shown, value];
-      // All of them selected is the same statement as none of them.
       return next.length === expiries.length ? [] : next;
     });
   const keys = [...new Set(legs.map(l => underlyingKey(l.position)))].sort();
@@ -205,12 +164,13 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
     ? new Date(now + horizon * 86400000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
     : `${horizon.toFixed(1)}d`;
   const ready = !loading && !error && legs.length > 0 && missing.length === 0;
-  /* Price columns are only meaningful against one underlying: "7,800" means
-     nothing when the grid is adding two different instruments together. */
   const priceLevels = keys.length === 1 ? prices : [];
   const naturalColumns = buildColumns(custom, priceLevels, assumptions[keys[0]]?.spot ?? 0);
   const columnOrder = usePersisted(COLUMN_ORDER_KEY, "").split(",").filter(Boolean);
   const columns = orderColumns(naturalColumns, columnOrder);
+  const chipColumns = columns.filter(column =>
+    (column.shock > 0 || column.kind === "price") && !isDefaultPct(column),
+  );
   const moveColumn = (id: string, delta: -1 | 1) => {
     const ids = columns.map(column => column.id);
     const from = ids.indexOf(id);
@@ -235,30 +195,13 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
   const realizedLegs = (realizedQuery.data?.legs ?? []).filter(
     leg => (leg.currency || "Unknown") === currency
   );
-  /* Two separate costs, and they were conflated. `booked` is P&L the desk
-     realised by closing something; `commission` is what every fill in the cycle
-     cost, opening ones included. Netting commissions only into booked P&L meant
-     the toggle did nothing at all on a book that had not been adjusted — which
-     is most books, most of the time. */
-  /* IBKR's average cost already carries the commission, moved against the
-     trader: a buy costs more than it printed and a sale realises less. Verified
-     to four decimals on the live book — 2155.00 + 1.6303 = 2156.6303 on a long,
-     2473.00 − 1.1303 = 2471.8697 on a short. Every payoff figure derived from
-     average cost is therefore already *net*, which is why this panel read
-     11.04 worse than a tool that prices off the premium alone.
 
-     So the toggle does the opposite of what it looks like: showing the payoff
-     "without commissions" means adding back what the broker already took out. */
   const realizedCommission = realizedLegs.reduce((sum, leg) => sum + (numeric(leg.commission) ?? 0), 0);
   const booked = realizedLegs.reduce((sum, leg) => sum + (numeric(leg.realized_pnl) ?? 0), 0);
-  /* Only fills that closed nothing: their commission is still embedded in the
-     average cost of a leg being modelled. A closing fill's commission is
-     already accounted for in the realized P&L the broker reports for it. */
   const openCommission = realizedLegs
     .filter(leg => (numeric(leg.realized_pnl) ?? 0) === 0)
     .reduce((sum, leg) => sum + (numeric(leg.commission) ?? 0), 0);
   const charged = withCommissions ? 0 : openCommission;
-  /** Booked P&L actually applied, which is nothing when it is switched off. */
   const applied = withClosed ? booked : 0;
   const realized = applied + charged;
   const realizedByAccount: Record<string, number> = {};
@@ -284,9 +227,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
     return { ...prev, [key]: next };
   });
   const [inputs, setInputs] = useState(false);
-  /* Paired to the columns the reader asked for, rather than filtered out of the
-     curve: a column keeps its own heading — a percentage or a price — and the
-     point behind it is looked up by the shock that column resolves to. */
   const byShock = new Map(adjusted.map(point => [round(point.shock), point]));
   const scenarioRows = columns
     .map(column => ({ column, point: byShock.get(round(column.shock)) }))
@@ -294,8 +234,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
   const currentPoint = adjusted.find(point => point.shock === 0);
   const openPoint = points.find(point => point.shock === 0);
   const accountIds = points.length ? Object.keys(points[0].accounts).sort() : [];
-  /* Which accounts get a row of their own. Empty means all of them, so a desk
-     that has never touched this control sees what it always saw. */
   const [shownAccounts, setShownAccounts] = useState<string[]>([]);
   const pickedAccounts = shownAccounts.filter(id => accountIds.includes(id));
   const accountRows = pickedAccounts.length ? pickedAccounts : accountIds;
@@ -304,7 +242,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
       const shown = current.filter(a => accountIds.includes(a));
       const effective = shown.length ? shown : accountIds;
       const next = effective.includes(id) ? effective.filter(a => a !== id) : [...effective, id];
-      // All of them is the same statement as none, and keeps the default clean.
       return next.length === accountIds.length ? [] : next;
     });
   const scenarioLevel = (shock: number) => keys
@@ -358,9 +295,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
           <span>Include closed legs</span>
           <small><Amount value={String(booked)} /> {currency} booked</small>
         </label>}
-        {/* A magnitude, not a signed level: entering 7 adds both the −7% and
-            the +7% column, because the move that helps and the one that hurts
-            are the same question. */}
         <label className="custom-level">
           <span>Add scenario level (%)</span>
           <span className="level-entry">
@@ -372,8 +306,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
               onChange={e => setDraft(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLevel(); } }}
             />
-            {/* Outline, not ghost: a ghost button beside a text input reads as
-                a label, and this one is the action that does the thing. */}
             <Button type="button" variant="outline" size="sm" onClick={addLevel} disabled={!canAdd}>
               <Plus size={14} aria-hidden="true" />Add
             </Button>
@@ -386,8 +318,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
                 : `Adds a −x% and +x% column alongside ${RMS_SHOCKS.filter(s => s > 0).join(", ")}`}
           </small>
         </label>
-        {/* A price the underlying might reach, rather than a move away from
-            where it is. One column, and its percentage follows the reference. */}
         {keys.length === 1 && <label className="custom-level">
           <span>Add {keys[0].split(":").at(-1)} price level</span>
           <span className="level-entry">
@@ -424,8 +354,8 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
             </div>
           </Dropdown>
         )}
-        {columns.some(column => column.custom) && <span className="level-chips" role="group" aria-label="Scenario columns">
-          {columns.filter(column => column.custom && (column.shock > 0 || column.kind === "price")).map(column => (
+        {chipColumns.length > 0 && <span className="level-chips" role="group" aria-label="Scenario columns">
+          {chipColumns.map(column => (
             <button
               key={column.id}
               type="button"
@@ -458,10 +388,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
             {applied !== 0 && " · includes booked P&L from closed legs"}
             {charged !== 0 && " · gross of commissions"}
             {withCommissions && " · net of commissions"}</caption>
-          {/* An explicit aria-label on each header keeps its accessible name the
-              bare level — "+1%" — regardless of the move buttons inside it;
-              without it their own labels ("Move +1% left") fold into the
-              header's own name too, and a lookup by level stops matching. */}
           <thead><tr><th scope="col">Measure</th>{scenarioRows.map(({ column }, index) => (
             <th key={column.id} scope="col" className={cellClass(column)} aria-label={column.label}>
               <span className="col-head">

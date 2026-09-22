@@ -262,6 +262,16 @@ describe("payoff panel", () => {
     for (const level of ["±1%", "±3%", "±5%", "±10%"]) {
       expect(screen.queryByRole("button", { name: `Remove the ${level} scenario column` })).toBeNull();
     }
+
+    fireEvent.change(screen.getByLabelText("Add a scenario level at an absolute price"), { target: { value: "7600" } });
+    const addPrice = screen.getByLabelText("Add a scenario level at an absolute price")
+      .closest("label")!
+      .querySelector("button")!;
+    fireEvent.click(addPrice);
+    expect(screen.getByRole("button", { name: "Remove the 7,600 scenario column" })).toBeInTheDocument();
+    for (const level of ["±1%", "±3%", "±5%", "±10%"]) {
+      expect(screen.queryByRole("button", { name: `Remove the ${level} scenario column` })).toBeNull();
+    }
   });
 
   it("adds booked P&L from closed legs back into the curve and shows it apart", async () => {
