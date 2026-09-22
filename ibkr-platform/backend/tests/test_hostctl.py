@@ -74,3 +74,22 @@ def test_missing_keys_are_appended(tmp_path):
 async def test_process_action_rejects_unknown_action():
     with pytest.raises(ValueError):
         await hostctl.process_action("destroy", "ibkr-gateway.service")
+
+@pytest.mark.parametrize(
+    "action, expected",
+    [
+        ("start", [("reset-failed",), ("start",), ("is-active",)]),
+        ("restart", [("reset-failed",), ("restart",), ("is-active",)]),
+        ("stop", [("stop",), ("is-active",)]),
+    ],
+)
+async def test_process_action_clears_start_limit_before_starting(monkeypatch, action, expected):
+    calls = []
+
+    async def fake_systemctl(*args):
+        calls.append(args[:-1])
+        return 0, "active"
+
+    monkeypatch.setattr(hostctl, "_systemctl", fake_systemctl)
+    assert await hostctl.process_action(action, "ibkr-gateway.service") == "active"
+    assert calls == expected

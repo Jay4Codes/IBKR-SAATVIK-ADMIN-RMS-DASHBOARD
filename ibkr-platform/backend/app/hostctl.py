@@ -84,6 +84,8 @@ async def process_state(unit: str) -> str:
 async def process_action(action: str, unit: str) -> str:
     if action not in ("start", "stop", "restart"):
         raise ValueError("Unsupported gateway process action")
+    if action != "stop":
+        await _systemctl("reset-failed", unit)
     code, output = await _systemctl(action, unit)
     if code != 0:
         raise RuntimeError(output or f"systemctl {action} {unit} failed")

@@ -2,6 +2,8 @@
 Description=IB Gateway (headless, managed by IBC)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=3600
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -18,8 +20,14 @@ ExecStartPre=/bin/mkdir -p /var/log/ibc
 # which matched the guard's own command line, so Xvfb was never actually started
 # and IBC died with "Can't connect to X11 window server using ':99'".
 ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1280x1024x24" /opt/ibc/gatewaystart.sh -inline
-Restart=on-failure
-RestartSec=30
+# Gateway exits *cleanly* on its own schedule; on-failure left it down for 33
+# hours once. The daily restart is Gateway's own AutoRestart (set through
+# AutoRestartTime in /opt/ibc/config.ini) and never reaches systemd, so this
+# only covers crashes. A missed 2FA push does not exit either
+# (ReloginAfterSecondFactorAuthenticationTimeout=no): IBC waits at the expired
+# prompt for an operator to press Start, and no further push is sent.
+Restart=always
+RestartSec=60
 TimeoutStopSec=60
 KillMode=mixed
 KillSignal=SIGTERM
