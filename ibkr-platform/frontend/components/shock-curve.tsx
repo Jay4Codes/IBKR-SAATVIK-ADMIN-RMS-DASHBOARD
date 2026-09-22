@@ -5,10 +5,6 @@ import { money } from "./tables";
 
 export type ShockPoint = { shock: number; terminal: number; modeled: number };
 
-/**
- * P&L against the scenario shock in percent. Used where a group spans more
- * than one underlying, so a price axis would belong to none of them.
- */
 export function ShockCurve({ points, currency, light, betaSymbol, height = 260 }: {
   points: ShockPoint[];
   currency: string;

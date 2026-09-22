@@ -4,11 +4,6 @@ import { ReactNode, useEffect, useId, useRef, useState } from "react";
 
 const HOVER_DELAY = 300;
 
-/**
- * A defined term. Hover or focus shows the definition after a short delay;
- * on touch it toggles. The tip is positioned in viewport space so it is
- * never clipped by a scrolling grid, and it sits on the tooltip layer.
- */
 export function Term({ children, hint, className = "" }: { children: ReactNode; hint: ReactNode; className?: string }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);

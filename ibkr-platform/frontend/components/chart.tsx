@@ -24,8 +24,6 @@ const NAMES: Record<keyof Tokens, string> = {
   red: "--red",
 };
 
-// jsdom (and a first paint before tokens land) returns "" for custom
-// properties. visualMap lerps those stops and crashes on an empty color.
 const FALLBACKS: Tokens = {
   text: "#e8e4dc",
   muted: "#9a958c",

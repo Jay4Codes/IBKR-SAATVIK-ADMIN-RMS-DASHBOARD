@@ -244,9 +244,6 @@ function Terminal({
   });
   const isAdmin = !!user.data?.is_super_admin;
   const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "RMS" : requestedView;
-  // Keep the address bar honest without remounting: the page keys on ?view,
-  // so router.replace would rebuild the whole workspace on every click. RMS is
-  // the default, so it gets a bare /dashboard and a reload lands back on it.
   const showView = (next: View) => {
     setView(next);
     if (typeof window !== "undefined")

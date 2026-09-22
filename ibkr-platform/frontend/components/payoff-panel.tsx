@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { Account, Position, RealizedSummary } from "@/lib/types";
 import { ASSUMED_VOL, Assumption, brokerSpot, buildCurves, DEFAULT_DIV_YIELD, DEFAULT_RATE, impliedByUnderlying, numeric, prepareLegs, RMS_SHOCKS, spotLabel, underlyingKey, upsideRisks, validAssumption } from "@/lib/payoff";
 import { buildRows, dominantKey, expiryLabel, expiryOf, Lens, LENSES, LensRow, NO_EXPIRY, realizedByGroup, ShockMode, unpricedPositions } from "@/lib/risk-lenses";
-import { buildColumns, cellClass, Column, COLUMN_ORDER_KEY, CUSTOM_LEVELS_KEY, DEFAULT_LEVELS, isDefaultPct, levelLabel, MAX_CUSTOM, orderColumns, PRICE_LEVELS_KEY, round } from "@/lib/scenario-columns";
+import { buildColumns, Column, COLUMN_ORDER_KEY, CUSTOM_LEVELS_KEY, DEFAULT_LEVELS, isDefaultPct, MAX_CUSTOM, orderColumns, PRICE_LEVELS_KEY } from "@/lib/scenario-columns";
 import { ChevronDown, ChevronUp, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Denomination, LensTable, TOTAL_ROW } from "./lens-table";
@@ -119,7 +119,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const scoped = rows.filter(p => (p.currency || "Unknown") === currency);
   const { legs: allLegs, excluded } = prepareLegs(scoped, now);
 
-  // One filter, applied before any lens: accounts × underlyings × expiries.
   const accountIds = [...new Set(allLegs.map(l => l.position.account_id))].sort();
   const allKeys = [...new Set(allLegs.map(l => underlyingKey(l.position)))].sort();
   const expiries = [...new Set(allLegs.map(l => expiryOf(l.position)))].sort((a, b) => (a === NO_EXPIRY ? 1 : b === NO_EXPIRY ? -1 : a.localeCompare(b)));
@@ -223,7 +222,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const currentPoint = adjusted.find(point => point.shock === 0);
   const openPoint = points.find(point => point.shock === 0);
 
-  // Net liquidation is only a valid denominator in the account's own currency.
   const nlv: Record<string, number | null> = {};
   for (const account of accounts) {
     nlv[account.account_id] = account.currency === currency ? numeric(account.net_liquidation) : null;

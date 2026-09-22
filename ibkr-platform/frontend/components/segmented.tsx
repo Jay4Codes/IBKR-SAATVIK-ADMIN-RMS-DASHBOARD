@@ -2,7 +2,6 @@
 
 export type Segment<T extends string> = { id: T; label: string; count?: number | string; title?: string; disabled?: boolean };
 
-/** A radio group drawn as one control. For two to four values a menu is a step too many. */
 export function Segmented<T extends string>({ label, value, options, onChange, size = "md", className = "" }: {
   label: string;
   value: T;

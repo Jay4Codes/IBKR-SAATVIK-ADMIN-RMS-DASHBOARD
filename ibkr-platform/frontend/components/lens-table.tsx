@@ -3,7 +3,7 @@
 import { Fragment, ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { spotLabel } from "@/lib/payoff";
-import { breachClass, Bucket, Lens, LensRow, percentOf } from "@/lib/risk-lenses";
+import { breachClass, Lens, LensRow, percentOf } from "@/lib/risk-lenses";
 import { cellClass, Column } from "@/lib/scenario-columns";
 import { Sparkline } from "./sparkline";
 import { Amount, money } from "./tables";
@@ -78,7 +78,11 @@ export function LensTable({
   const toggle = (id: string) => onExpand(expanded === id ? null : id);
   const buckets = new Set(rows.map(row => row.bucket));
   const showBuckets = lens === "expiry" && buckets.size > 1;
-  let lastBucket: Bucket | undefined;
+  const firstInBucket = new Set(
+    rows
+      .filter((row, index) => showBuckets && row.bucket && (index === 0 || rows[index - 1].bucket !== row.bucket))
+      .map(row => row.id),
+  );
 
   const numberCells = (row: LensRow, isTotal = false) => (
     <>
@@ -182,10 +186,9 @@ export function LensTable({
             <td className="worst" /><td className="shape" />
           </tr>
           {rows.map(row => {
-            const bucketHead = showBuckets && row.bucket !== lastBucket
+            const bucketHead = firstInBucket.has(row.id)
               ? <tr className="bucket" key={`bucket:${row.bucket}`}><th colSpan={span} scope="colgroup">{row.bucket}</th></tr>
               : null;
-            lastBucket = row.bucket;
             const open = expanded === row.id;
             return (
               <Fragment key={row.id}>

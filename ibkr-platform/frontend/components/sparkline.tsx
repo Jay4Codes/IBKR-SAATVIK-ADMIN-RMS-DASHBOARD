@@ -2,11 +2,6 @@
 
 import { useId } from "react";
 
-/**
- * A 120×24 payoff shape: terminal P&L across the plotted range, zero as a
- * baseline, gains and losses drawn in their own colours. Reads as a condor,
- * a collar or a naked short before any number does.
- */
 export function Sparkline({ values, width = 120, height = 24, label }: { values: number[]; width?: number; height?: number; label: string }) {
   const id = useId();
   if (values.length < 2) return <span className="spark empty" aria-hidden="true" />;

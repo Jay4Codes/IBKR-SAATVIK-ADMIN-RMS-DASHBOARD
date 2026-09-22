@@ -2,21 +2,11 @@
 
 import { useState } from "react";
 
-/**
- * A pick-many control over a list of options that can be in one of three
- * shapes: everything (the default), an explicit subset, or nothing at all.
- *
- * `null` stands for "everything", so options that appear later are included
- * automatically; an array is an explicit pick and may be empty. A stale pick
- * whose members have all vanished from `options` falls back to everything,
- * but an empty pick made on purpose stays empty.
- */
 export type Selection = {
   options: string[];
   selected: string[];
   isAll: boolean;
   isNone: boolean;
-  /** "All 4", "2 of 4" or "None" — for a dropdown's summary. */
   summary: string;
   has: (value: string) => boolean;
   toggle: (value: string) => void;
@@ -47,7 +37,6 @@ export function useSelection(options: string[]): Selection {
   };
 }
 
-/** The "Select all · Clear" pair that heads every pick-many list. */
 export function SelectionActions({ selection, noun }: { selection: Selection; noun: string }) {
   return (
     <div className="selection-actions">
