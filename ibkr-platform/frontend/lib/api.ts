@@ -1,6 +1,6 @@
 import { activeTenant } from "./tenant";
 
-type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown };
+type Options = { method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown };
 
 async function request<T>(path: string, options: Options = {}): Promise<T> {
   const tenant = activeTenant();
@@ -33,6 +33,11 @@ async function request<T>(path: string, options: Options = {}): Promise<T> {
 
 export async function api<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, body !== undefined ? { body } : {});
+}
+
+/** PATCH changes one field of something that already exists. */
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: "PATCH", body });
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {

@@ -50,6 +50,12 @@ class AccountState(BaseModel):
     realized_pnl: Decimal | None = None
     unrealized_pnl: Decimal | None = None
     day_pnl: Decimal | None = None
+    #: Excess liquidity over net liquidation, as IBKR computes it. Lower is
+    #: closer to a margin call.
+    cushion: Decimal | None = None
+    #: IBKR reports -1 for "unlimited", which is not a count and is rendered
+    #: as such rather than shown as a negative number of trades.
+    day_trades_remaining: Decimal | None = None
     updated_at: datetime = Field(default_factory=now)
 
 

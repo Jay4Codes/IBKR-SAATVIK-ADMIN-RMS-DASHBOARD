@@ -57,6 +57,16 @@ async def _create_indexes(db):
     )
     await db.account_snapshots.create_index([("tenant_id", ASCENDING), ("report_date", ASCENDING)])
     await db.visibility_tests.create_index([("tenant_id", ASCENDING), ("checked_at", DESCENDING)])
+    await db.telegram_links.create_index("chat_id", unique=True)
+    await db.alerts.create_index([("tenant_id", ASCENDING), ("timestamp", DESCENDING)])
+    # Platform-wide, not per tenant: a market holiday is the same holiday for
+    # everyone, and fetching it once is the whole point.
+    await db.market_events.create_index(
+        [("date", ASCENDING), ("kind", ASCENDING), ("name", ASCENDING)], unique=True
+    )
+    await db.alert_preferences.create_index(
+        [("tenant_id", ASCENDING), ("user_id", ASCENDING)], unique=True
+    )
 
     for role in ("ADMIN", "TRADER"):
         await db.roles.update_one({"_id": role}, {"$setOnInsert": {"name": role}}, upsert=True)
@@ -107,6 +117,16 @@ async def persist(db, event, *, tenant_id: str, connection_id: str):
                     "connection_id": connection_id,
                 }
             },
+            upsert=True,
+        )
+    elif kind == "alert.raised":
+        await db.alerts.update_one(
+            {"_id": event.event_id},
+            {"$setOnInsert": {
+                **event.model_dump(mode="json"),
+                "tenant_id": tenant_id,
+                "connection_id": connection_id,
+            }},
             upsert=True,
         )
     elif kind == "execution.created":

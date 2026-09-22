@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
 import { safeNext, loginUrl } from "@/lib/session";
+import { visibleNav } from "@/components/dashboard";
 
 const request = (url: string, cookie?: string) =>
   new NextRequest(new URL(url, "https://rms.example.com"), {
@@ -74,5 +75,49 @@ describe("loginUrl", () => {
     expect(loginUrl("/accounts/U1", "?tab=orders")).toBe(
       "/login?next=%2Faccounts%2FU1%3Ftab%3Dorders",
     );
+  });
+});
+
+describe("navigation visibility", () => {
+  const groups = (admin: boolean, platform: boolean) =>
+    visibleNav(admin, platform).map((s) => s.group);
+  const views = (admin: boolean, platform: boolean) =>
+    visibleNav(admin, platform).flatMap((s) => s.items.map((i) => i.view));
+
+  it("shows every trader their own profile", () => {
+    // It used to live under Administration, and a group-wide admin check hid
+    // the whole group — so a trader could not reach their profile at all, and
+    // with alerts living there, could not connect their own Telegram chat.
+    expect(views(false, false)).toContain("Profile");
+    expect(groups(false, false)).toContain("Account");
+  });
+
+  it("still keeps administration to administrators", () => {
+    const trader = views(false, false);
+    expect(trader).not.toContain("Connections");
+    expect(trader).not.toContain("Members");
+    expect(trader).not.toContain("Tenants");
+    expect(groups(false, false)).not.toContain("Administration");
+  });
+
+  it("gives an admin the administration group without platform views", () => {
+    expect(views(true, false)).toContain("Connections");
+    expect(views(true, false)).toContain("Members");
+    expect(views(true, false)).not.toContain("Tenants");
+    expect(views(true, true)).toContain("Tenants");
+  });
+
+  it("never renders an empty group", () => {
+    for (const [admin, platform] of [[false, false], [true, false], [true, true]] as const) {
+      for (const section of visibleNav(admin, platform)) {
+        expect(section.items.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("leaves monitoring open to everyone", () => {
+    for (const view of ["RMS", "Overview", "Positions", "Orders"]) {
+      expect(views(false, false)).toContain(view);
+    }
   });
 });

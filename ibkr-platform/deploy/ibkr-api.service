@@ -3,6 +3,14 @@ Description=IBKR Admin RMS API (FastAPI/uvicorn)
 After=network-online.target mongod.service redis-server.service
 Wants=network-online.target
 Requires=mongod.service
+# Generous headroom for how long Mongo can plausibly take to become ready on
+# a reboot — there is no downside here to trying for a while, unlike the
+# gateway's 2FA push, so this errs on the side of not giving up. (These two
+# belong in [Unit], not [Service]: systemd on this host silently ignores
+# StartLimitIntervalSec under [Service] — "Unknown key ... ignoring" — while
+# accepting StartLimitBurst there regardless, which is how this got missed.)
+StartLimitIntervalSec=300
+StartLimitBurst=30
 
 [Service]
 Type=simple
@@ -11,7 +19,17 @@ Environment=TZ=Asia/Kolkata
 EnvironmentFile=__PLATFORM_ROOT__/backend/.env
 ExecStart=__PLATFORM_ROOT__/backend/.venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 --port 8120 --workers 2 --proxy-headers --forwarded-allow-ips 127.0.0.1
-Restart=on-failure
+# `After=`/`Requires=mongod.service` only guarantee ordering — that mongod's
+# unit has been *started* — not that MongoDB is done recovering its journal
+# and accepting connections yet, which after a reboot can take longer than a
+# few seconds. Hitting that gap, uvicorn's multi-worker parent treats a
+# child's Mongo-connect failure as a managed shutdown and exits 0 ("Child
+# process failed to start, stopping the parent process") — a *successful*
+# exit as far as systemd is concerned, so Restart=on-failure never fires and
+# the API stays down until someone notices. (The worker survives the same
+# race only because its own code lets the exception propagate as a genuine
+# non-zero exit.) Restart=always covers the clean exit as well as a crash.
+Restart=always
 RestartSec=5
 KillSignal=SIGINT
 TimeoutStopSec=20

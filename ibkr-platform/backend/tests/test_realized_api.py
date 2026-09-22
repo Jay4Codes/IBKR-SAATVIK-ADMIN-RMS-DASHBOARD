@@ -46,14 +46,33 @@ async def test_realized_totals_the_closed_legs(client, stores):
     ]
 
 
-async def test_an_opening_fill_books_nothing_and_is_left_out(client, stores):
+async def test_an_opening_fill_books_nothing_but_still_costs_commission(client, stores):
+    """It realises no P&L and is not counted as though it had.
+
+    Its commission is another matter: the desk paid it to hold the position the
+    payoff is modelling. Leaving it out made "include commissions" do nothing on
+    a book that had not been adjusted yet — every fill was an opening one, so
+    every commission was invisible.
+    """
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", realized="0.0", commission="1.73")
     await execution(db, TENANT, "DU1", "e2", realized="-100.00", commission="1.00")
     body = (await client.get("/api/v1/realized")).json()["data"]
     assert body["total"] == "-100.00"
     assert body["count"] == 1
-    assert body["commission"] == "1.00"
+    assert body["commission"] == "2.73"
+    assert len(body["legs"]) == 2
+
+
+async def test_a_book_with_no_closings_still_reports_what_it_cost(client, stores):
+    """The live case: six opening fills, nothing booked, eleven dollars spent."""
+    _, db = stores
+    for index in range(6):
+        await execution(db, TENANT, "DU1", f"open{index}", realized="0.0", commission="1.84")
+    body = (await client.get("/api/v1/realized")).json()["data"]
+    assert body["total"] == "0"
+    assert body["count"] == 0
+    assert body["commission"] == "11.04"
 
 
 async def test_realized_is_narrowed_to_the_modelled_expiry_cycle(client, stores):

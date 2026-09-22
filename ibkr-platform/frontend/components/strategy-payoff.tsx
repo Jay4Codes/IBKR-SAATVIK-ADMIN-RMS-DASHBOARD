@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, ReactNode, useEffect, useRef, useState } from "react";
 import {
   Assumption,
   buildPriceCurve,
@@ -259,7 +259,7 @@ function PayoffGraph({
 }
 
 export const StrategyPayoff = memo(function StrategyPayoff({
-  legs, assumptions, keys, currency, rate, offset, light, range, horizon,
+  legs, assumptions, keys, currency, rate, offset, light, range, horizon, toolbar,
 }: {
   legs: RiskLeg[];
   assumptions: Record<string, Assumption>;
@@ -270,6 +270,8 @@ export const StrategyPayoff = memo(function StrategyPayoff({
   light: boolean;
   range: number;
   horizon: number;
+  /** Controls that belong on the header line, beside the underlying's price. */
+  toolbar?: ReactNode;
 }) {
   const key = keys[0];
   const assumption = assumptions[key];
@@ -302,6 +304,9 @@ export const StrategyPayoff = memo(function StrategyPayoff({
 
   return (
     <div className="strategy" style={{ ["--plot-left" as string]: `${PLOT_LEFT}px`, ["--plot-right" as string]: `${PLOT_RIGHT}px` }}>
+      {/* The expiry control belongs on this line — it names which book the price
+          describes — but after the price, not before it: the number is what the
+          eye comes here for. */}
       <div className="strategy-head">
         <span className="ticker">{symbol}</span>
         <b>{money(String(spot))}</b>
@@ -312,6 +317,7 @@ export const StrategyPayoff = memo(function StrategyPayoff({
             <small>since {money(String(change.from))}</small>
           </span>
         )}
+        {toolbar}
       </div>
 
       <StrikeRuler legs={scoped} lo={points[0].price} hi={points[points.length - 1].price} spot={spot} symbol={symbol} />

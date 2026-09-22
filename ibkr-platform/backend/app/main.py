@@ -16,8 +16,8 @@ from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, Field
 from redis.asyncio import Redis
 
+from app import alerts, flex, gateway_login, hostctl, provisioning, secrets, snaptrade, telegram
 from app import connections as registry
-from app import flex, gateway_login, hostctl, provisioning, secrets, snaptrade
 from app.auth import (
     COOKIE,
     DUMMY_HASH,
@@ -824,25 +824,70 @@ async def primary_reconnect(request: Request, user: Principal = Depends(require_
 async def accounts(request: Request, user: Principal = Depends(require_tenant)):
     repo = repository(request, user)
     ids = await repo.accounts()
-    return ok([await summary_data(repo, account) for account in sorted(ids) if user.sees(account)])
+    labels = await account_labels(request.app.state.db, user.tenant_id)
+    return ok([
+        await summary_data(repo, account, labels.get(account, ""))
+        for account in sorted(ids)
+        if user.sees(account)
+    ])
 
 
-async def summary_data(repo: StateRepository, account: str):
+async def summary_data(repo: StateRepository, account: str, label: str = ""):
     data = await repo.account(account)
     if data is None or not await repo.knows_account(account):
         raise HTTPException(404, "Account not found")
     return {
         **data,
+        # A desk calls its accounts things like "Income" and "Hedge"; a screen
+        # full of U-numbers makes everyone translate in their head.
+        "label": label,
         "open_positions": len(await repo.rows(account, "positions")),
         "open_orders": len(await repo.rows(account, "orders")),
     }
+
+
+async def account_labels(db, tenant_id: str) -> dict[str, str]:
+    cursor = db.ibkr_accounts.find({"tenant_id": tenant_id}, {"account_id": 1, "label": 1})
+    return {
+        doc["account_id"]: doc.get("label") or ""
+        for doc in await cursor.to_list(5000)
+        if doc.get("account_id")
+    }
+
+
+@app.patch("/api/v1/accounts/{account_id}")
+async def name_account(
+    account_id: str,
+    request: Request,
+    body: dict[str, Any],
+    user: Principal = Depends(require_tenant_admin),
+):
+    """Give an account a name the desk actually uses.
+
+    Tenant-wide rather than per person: an account called "Income" should be
+    called that for everyone looking at it, or the name is worse than the
+    number it replaced.
+    """
+    user.require_account(account_id)
+    label = str(body.get("label") or "").strip()[:60]
+    await request.app.state.db.ibkr_accounts.update_one(
+        {"tenant_id": user.tenant_id, "account_id": account_id},
+        {"$set": {"label": label}, "$setOnInsert": {
+            "tenant_id": user.tenant_id, "account_id": account_id,
+        }},
+        upsert=True,
+    )
+    return ok({"account_id": account_id, "label": label})
 
 
 @app.get("/api/v1/accounts/{account_id}")
 @app.get("/api/v1/accounts/{account_id}/summary")
 async def summary(account_id: str, request: Request, user: Principal = Depends(require_tenant)):
     user.require_account(account_id)
-    return ok(await summary_data(repository(request, user), account_id))
+    labels = await account_labels(request.app.state.db, user.tenant_id)
+    return ok(await summary_data(
+        repository(request, user), account_id, labels.get(account_id, ""),
+    ))
 
 
 @app.get("/api/v1/accounts/{account_id}/positions")
@@ -1042,6 +1087,22 @@ async def realized_rows(
     return await cursor.sort("executed_at", 1).to_list(200_000)
 
 
+def leg_row(row: dict[str, Any], amount: Decimal) -> dict[str, Any]:
+    return {
+        "symbol": row.get("symbol"),
+        "underlying": row.get("underlying"),
+        "currency": row.get("currency"),
+        "expiry": row.get("expiry"),
+        "account_id": row.get("account_id") or "",
+        "side": row.get("side"),
+        "quantity": str(row.get("quantity") or ""),
+        "price": str(row.get("price") or ""),
+        "realized_pnl": str(amount),
+        "commission": str(row.get("commission") or 0),
+        "executed_at": row.get("executed_at"),
+    }
+
+
 def realized_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = Decimal(0)
     commission = Decimal(0)
@@ -1049,31 +1110,23 @@ def realized_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     by_leg: list[dict[str, Any]] = []
     for row in rows:
         amount = Decimal(str(row["realized_pnl"]))
-        if not amount:
-            continue
-        total += amount
+        # Every fill in the cycle is carried, not only the ones that booked a
+        # P&L. An opening trade realises nothing but still costs commission, and
+        # that cost is just as real to the position being held as a closing
+        # one's — leaving it out made "include commissions" a no-op on a book
+        # that had not been adjusted yet.
         commission += Decimal(str(row.get("commission") or 0))
         account = row.get("account_id") or ""
+        if not amount:
+            by_leg.append(leg_row(row, amount))
+            continue
+        total += amount
         by_account[account] = by_account.get(account, Decimal(0)) + amount
-        by_leg.append(
-            {
-                "symbol": row.get("symbol"),
-                "underlying": row.get("underlying"),
-                "currency": row.get("currency"),
-                "expiry": row.get("expiry"),
-                "account_id": account,
-                "side": row.get("side"),
-                "quantity": str(row.get("quantity") or ""),
-                "price": str(row.get("price") or ""),
-                "realized_pnl": str(amount),
-                "commission": str(row.get("commission") or 0),
-                "executed_at": row.get("executed_at"),
-            }
-        )
+        by_leg.append(leg_row(row, amount))
     return {
         "total": str(total),
         "commission": str(commission),
-        "count": len(by_leg),
+        "count": sum(1 for leg in by_leg if Decimal(leg["realized_pnl"]) != 0),
         "by_account": [
             {"account_id": a, "realized_pnl": str(by_account[a])} for a in sorted(by_account)
         ],
@@ -1097,6 +1150,119 @@ async def portfolio_realized(
     cycles = [e.strip() for e in expiries.split(",") if e.strip()]
     rows = await realized_rows(request.app.state.db, user, wanted, cycles, active_on)
     return ok(realized_summary(rows))
+
+
+async def alert_settings(db, user: Principal) -> dict[str, Any]:
+    link = await db.telegram_links.find_one({"_id": user.id}, {"_id": 0})
+    prefs = await db.alert_preferences.find_one(
+        {"tenant_id": user.tenant_id, "user_id": user.id}, {"_id": 0}
+    )
+    enabled = prefs.get("triggers") if prefs else None
+    return {
+        "configured": telegram.configured(),
+        "linked": bool(link),
+        "chat_name": (link or {}).get("name"),
+        "linked_at": (link or {}).get("linked_at"),
+        "triggers": sorted(enabled if enabled is not None else alerts.DEFAULT_TRIGGERS),
+        "available": list(alerts.TRIGGERS),
+        "move_percent": str(alerts.threshold(prefs, "move_percent")),
+        "risk_percent": str(alerts.threshold(prefs, "risk_percent")),
+        # Absolute levels to be told about when the underlying crosses them.
+        "price_levels": [str(level) for level in (prefs or {}).get("price_levels") or []],
+        # Specific moves to be told about, as magnitudes. Empty means fall back
+        # to the repeating band above.
+        "move_levels": [str(level) for level in (prefs or {}).get("move_levels") or []],
+        "limits": {name: {"default": d, "min": lo, "max": hi}
+                   for name, (d, lo, hi) in alerts.THRESHOLDS.items()},
+    }
+
+
+@app.get("/api/v1/me/alerts")
+async def my_alerts(request: Request, user: Principal = Depends(require_tenant)):
+    return ok(await alert_settings(request.app.state.db, user))
+
+
+@app.post("/api/v1/me/alerts/link")
+async def link_telegram(request: Request, user: Principal = Depends(require_tenant)):
+    if not telegram.configured():
+        raise HTTPException(503, "No Telegram bot is configured for this platform")
+    code = telegram.link_code()
+    await request.app.state.redis.set(
+        f"telegram:link:{code}", user.id, ex=settings.telegram_link_ttl_seconds
+    )
+    return ok({
+        "code": code,
+        "url": telegram.deep_link(code),
+        "expires_in": settings.telegram_link_ttl_seconds,
+    })
+
+
+@app.delete("/api/v1/me/alerts/link")
+async def unlink_telegram(request: Request, user: Principal = Depends(require_tenant)):
+    await request.app.state.db.telegram_links.delete_one({"_id": user.id})
+    return ok(await alert_settings(request.app.state.db, user))
+
+
+@app.post("/api/v1/me/alerts")
+async def set_my_alerts(
+    request: Request, body: dict[str, Any], user: Principal = Depends(require_tenant)
+):
+    wanted = body.get("triggers")
+    if not isinstance(wanted, list):
+        raise HTTPException(400, "triggers must be a list")
+    
+    triggers = sorted({t for t in wanted if t in alerts.TRIGGERS})
+    update: dict[str, Any] = {"triggers": triggers}
+    for name in alerts.THRESHOLDS:
+        if name in body:
+            # Clamped rather than rejected: a number outside the sane band is a
+            # slip, and refusing the whole save would lose the trigger choices
+            # made alongside it.
+            _, low, high = alerts.THRESHOLDS[name]
+            value = alerts.decimal(body.get(name))
+            if value is not None:
+                update[name] = str(min(max(value, Decimal(str(low))), Decimal(str(high))))
+    for field, ceiling in (("price_levels", None), ("move_levels", Decimal(100))):
+        if field not in body:
+            continue
+        levels = body.get(field)
+        if not isinstance(levels, list):
+            raise HTTPException(400, f"{field} must be a list")
+        clean = []
+        for level in levels[:20]:
+            value = alerts.decimal(level)
+            if value is None or value <= 0 or (ceiling is not None and value >= ceiling):
+                continue
+            clean.append(str(abs(value)))
+        update[field] = sorted(set(clean), key=Decimal)
+    await request.app.state.db.alert_preferences.update_one(
+        {"tenant_id": user.tenant_id, "user_id": user.id},
+        {"$set": update, "$setOnInsert": {
+            "tenant_id": user.tenant_id, "user_id": user.id,
+        }},
+        upsert=True,
+    )
+    return ok(await alert_settings(request.app.state.db, user))
+
+
+@app.get("/api/v1/alerts")
+async def alert_feed(
+    request: Request, limit: int = 50, user: Principal = Depends(require_tenant)
+):
+    """What the bell shows on a fresh load, newest first.
+
+    Filtered the same way the socket filters the live ones, so reloading the
+    page can never reveal an alert the open tab would not have shown.
+    """
+    cursor = request.app.state.db.alerts.find(
+        {"tenant_id": user.tenant_id}, {"_id": 0, "tenant_id": 0, "connection_id": 0}
+    )
+    rows = await cursor.sort("timestamp", -1).to_list(max(1, min(limit, 200)) * 4)
+    visible = [
+        row for row in rows
+        if not row.get("account_id") or row["account_id"] == "*" or user.sees(row["account_id"])
+    ]
+    return ok(visible[: max(1, min(limit, 200))])
 
 
 @app.post("/api/v1/admin/history/backfill")
@@ -1308,7 +1474,14 @@ async def live(ws: WebSocket):
                     cursor = event_id
                     event = json.loads(fields["event"])
                     account = event["account_id"]
-                    if event["event_type"].startswith("gateway."):
+                    if event["event_type"].startswith("alert."):
+                        # Tenant-wide alerts (an index move, the gateway) name no
+                        # account; one about an account still obeys who may see it.
+                        if not subscribed:
+                            continue
+                        if account and account != "*" and not user.sees(account):
+                            continue
+                    elif event["event_type"].startswith("gateway."):
                         if not subscribed:
                             continue
                         event["event_type"] = "gateway.updated"

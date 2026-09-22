@@ -10,6 +10,12 @@ type DiagnosticsCache = {
 
 export function applyEvent(client: QueryClient, event: LiveEvent) {
   const { event_type: type, account_id: account, data } = event;
+  
+  if (type === "alert.raised") {
+    client.setQueryData<LiveEvent[]>(["alerts", "feed"], (rows) =>
+      [event, ...(rows ?? []).filter((row) => row.event_id !== event.event_id)].slice(0, 200),
+    );
+  }
   client.setQueryData<DiagnosticsCache>(["diagnostics"], (current) => {
     if (!current) return current;
     const category = type.split(".")[0];

@@ -22,17 +22,17 @@ import {
   LogOut,
   Menu,
   Moon,
-  Percent,
   Plug,
   Receipt,
   UserRound,
+  Bell,
   Sun,
   Users,
   Wallet,
   Waves,
   X,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, apiPatch } from "@/lib/api";
 import { connectLive } from "@/lib/live";
 import {
   Account,
@@ -55,6 +55,10 @@ import { Diagnostics } from "./diagnostics";
 import { AllocationChart } from "./allocation-chart";
 import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "./searchable-select";
+import { AlertBell } from "./alert-bell";
+import { BalancePanel } from "./balance-panel";
+import { PnlCards } from "./pnl-cards";
+import { AlertsPanel } from "./alerts-panel";
 import { PayoffPanel } from "./payoff-panel";
 import { DayPnlPanel } from "./day-pnl";
 import { SkewPanel } from "./skew-panel";
@@ -77,7 +81,6 @@ type View =
   | "Skew"
   | "Orders"
   | "Executions"
-  | "Commissions"
   | "Connections"
   | "Members"
   | "Tenants"
@@ -102,7 +105,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { view: "Skew", icon: Waves },
       { view: "Orders", icon: ListChecks },
       { view: "Executions", icon: Receipt },
-      { view: "Commissions", icon: Percent },
       { view: "Performance", icon: TrendingUp },
     ],
   },
@@ -112,14 +114,47 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { view: "Connections", icon: Plug, admin: true },
       { view: "Members", icon: Users, admin: true },
       { view: "Tenants", icon: Building2, platform: true },
-      { view: "Profile", icon: UserRound },
     ],
+  },
+  /* Its own group, not a tail on Administration. Sitting there it was hidden
+     from every non-admin along with the group — so a trader could not reach
+     their own profile at all, and with alerts now living there, could not
+     connect the Telegram chat that is theirs alone. */
+  {
+    group: "Account",
+    items: [{ view: "Profile", icon: UserRound }],
   },
 ];
 
 const VIEWS = NAV.flatMap((section) => section.items.map((item) => item.view));
 
-const ACCOUNT_TABS = ["RMS", "Summary", "Positions", "Skew", "Performance", "Orders", "Executions", "Commissions"] as const;
+/** The navigation a given role actually sees.
+ *
+ *  Extracted because this is where access is decided, and it was wrong: a
+ *  group-wide admin check hid every item in the group, including the ones that
+ *  carried no requirement of their own.
+ */
+export function visibleNav(isAdmin: boolean, isPlatformAdmin: boolean) {
+  return NAV.map((section) => ({
+    group: section.group,
+    items: section.items.filter(
+      (item) => (!item.admin || isAdmin) && (!item.platform || isPlatformAdmin),
+    ),
+  })).filter((section) => section.items.length > 0);
+}
+
+const ACCOUNT_TABS = ["RMS", "Summary", "Positions", "Skew", "Performance", "Orders", "Executions"] as const;
+
+/** Profile's own sections. Alerts is its own tab because it is configuration
+ *  the reader comes to change; everything else — identity, organisations,
+ *  session and admin links — is one page about who you are signed in as.
+ *
+ *  Organisations was briefly a tab of its own and showed an empty panel to
+ *  anyone belonging to a single organisation, which is almost everyone. */
+const PROFILE_TABS = ["Account", "Alerts"] as const;
+/** The same glyphs the account tabs carry, so both tablists read alike. */
+const PROFILE_TAB_ICONS = { Account: UserRound, Alerts: Bell } as const;
+type ProfileTab = (typeof PROFILE_TABS)[number];
 type AccountTab = (typeof ACCOUNT_TABS)[number];
 
 const TAB_ICONS: Record<AccountTab, typeof LayoutGrid> = {
@@ -130,7 +165,6 @@ const TAB_ICONS: Record<AccountTab, typeof LayoutGrid> = {
   Performance: TrendingUp,
   Orders: ListChecks,
   Executions: Receipt,
-  Commissions: Percent,
 };
 
 const ADMIN_VIEWS: View[] = ["Connections", "Members", "Tenants"];
@@ -227,6 +261,7 @@ function Terminal({
   const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "RMS" : requestedView;
   const zone = useZone();
   const [tabs, setTabs] = useState<Record<string, AccountTab>>({});
+  const [profileTab, setProfileTab] = useState<ProfileTab>("Account");
   const tab: AccountTab = (accountId && tabs[accountId]) || "RMS";
   const setTab = (next: AccountTab) =>
     accountId && setTabs(previous => ({ ...previous, [accountId]: next }));
@@ -328,6 +363,7 @@ function Terminal({
           <time>{clock ? formatClock(clock, zone) : "--:--:--"}</time>
           <TimezonePicker />
           <span className="badge">{user.data?.role ?? "SESSION"}</span>
+          <AlertBell />
           <button
             type="button"
             aria-label={light ? "Switch to dark theme" : "Switch to light theme"}
@@ -363,13 +399,8 @@ function Terminal({
         id="workspace-nav"
         className={`sidebar ${menuOpen ? "open" : ""}`}
       >
-        {NAV.map((section) => {
-          if (section.group !== "Monitor" && !isAdmin) return null;
-          const items = section.items.filter(
-            (item) =>
-              (!item.admin || isAdmin) && (!item.platform || isPlatformAdmin),
-          );
-          if (!items.length) return null;
+        {visibleNav(isAdmin, isPlatformAdmin).map((section) => {
+          const items = section.items;
           return (
             <div className="nav-group" key={section.group}>
               <p>{section.group}</p>
@@ -570,7 +601,20 @@ function Terminal({
                 )}
               </>
             )}
-            {!accountId && (view === "Overview" || view === "Accounts") && (
+            {/* One account needs no table to tell it apart from the others, and
+                the wide row of bare numbers said less than the labelled cards
+                below it. The table earns its place once there are several. */}
+            {!accountId && (view === "Overview" || view === "Accounts") && selected.length === 1 && (
+              <BalancePanel
+                account={selected[0]}
+                canRename={isAdmin}
+                onRename={async (label) => {
+                  await apiPatch(`/accounts/${selected[0].account_id}`, { label });
+                  await client.invalidateQueries({ queryKey: ["accounts"] });
+                }}
+              />
+            )}
+            {!accountId && (view === "Overview" || view === "Accounts") && selected.length > 1 && (
               <section className="panel">
                 <h2>
                   Accounts <ArrowUpRight size={16} />
@@ -664,6 +708,9 @@ function Terminal({
                 error={accounts.isError || positions.some((p) => p.isError)}
               />
             )}
+            {/* One view, not two: commissions are what the performance above
+                them cost, and reading either alone gives half the picture. */}
+            {shows("Performance") && <PnlCards accountId={accountId} />}
             {shows("Performance") && (
               <PerformancePanel
                 key={accountId ?? "desk"}
@@ -690,11 +737,38 @@ function Terminal({
                 </p>
               </section>
             )}
-            {shows("Commissions") && <CommissionsPanel accountId={accountId} />}
+            {shows("Performance") && <CommissionsPanel accountId={accountId} />}
             </div>
             {view === "Profile" && !accountId && (
               <>
-                <section className="panel">
+                <div className="tabs" role="tablist" aria-label="Profile sections">
+                  {PROFILE_TABS.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      role="tab"
+                      id={`profile-tab-${name}`}
+                      aria-selected={profileTab === name}
+                      aria-controls="profile-panel"
+                      className={profileTab === name ? "active" : ""}
+                      onClick={() => setProfileTab(name)}
+                    >
+                      {(() => {
+                        const Icon = PROFILE_TAB_ICONS[name];
+                        return <Icon size={14} aria-hidden="true" />;
+                      })()}
+                      {name}
+                    </button>
+                  ))}
+                </div>
+                <div
+                  id="profile-panel"
+                  role="tabpanel"
+                  aria-labelledby={`profile-tab-${profileTab}`}
+                  tabIndex={-1}
+                >
+                {profileTab === "Alerts" && <AlertsPanel />}
+                {profileTab === "Account" && <section className="panel">
                   <h2>
                     Signed in as
                     <span>{user.data.email}</span>
@@ -731,8 +805,8 @@ function Terminal({
                       <small>Per-organisation event stream</small>
                     </div>
                   </div>
-                </section>
-                {user.data.tenants.length > 1 && (
+                </section>}
+                {profileTab === "Account" && user.data.tenants.length > 1 && (
                   <section className="panel">
                     <h2>
                       Your organisations
@@ -749,7 +823,7 @@ function Terminal({
                     </div>
                   </section>
                 )}
-                <section className="panel">
+                {profileTab === "Account" && <section className="panel">
                   <h2>Session</h2>
                   <div className="panel-body">
                     <p className="muted">
@@ -771,8 +845,8 @@ function Terminal({
                       </Button>
                     </div>
                   </div>
-                </section>
-                {isAdmin && (
+                </section>}
+                {profileTab === "Account" && isAdmin && (
                   <section className="panel">
                     <h2>Administration</h2>
                     <div className="panel-body">
@@ -802,6 +876,7 @@ function Terminal({
                     </div>
                   </section>
                 )}
+                </div>
               </>
             )}
           </>

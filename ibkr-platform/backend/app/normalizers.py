@@ -110,4 +110,8 @@ ACCOUNT_TAGS = {
     "GrossPositionValue": "gross_position_value",
     "RealizedPnL": "realized_pnl",
     "UnrealizedPnL": "unrealized_pnl",
+    # IBKR's own cushion, rather than one derived here: it is the number a
+    # margin call is actually measured against.
+    "Cushion": "cushion",
+    "DayTradesRemaining": "day_trades_remaining",
 }

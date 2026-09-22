@@ -43,12 +43,15 @@ export function DataTable<T>({
   id,
   onRow,
   facets = [],
+  toolbar,
 }: {
   rows: T[];
   columns: Column<T>[];
   id: (row: T) => string;
   onRow?: (row: T) => void;
   facets?: Facet<T>[];
+  /** Controls belonging to this table, shown beside its search box. */
+  toolbar?: ReactNode;
 }) {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<string, string>>({});
@@ -115,6 +118,9 @@ export function DataTable<T>({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {/* A table's own controls belong on its toolbar, beside the search, not
+            stranded on a line above it. */}
+        {toolbar}
         {facets.map((facet) => (
           <label key={facet.label} className="table-facet">
             <span>{facet.label}</span>
@@ -279,6 +285,12 @@ export function DataTable<T>({
     </>
   );
 }
+/** An account's name, falling back to its number. Kept here as well as in the
+ *  balance panel so every table that lists accounts agrees. */
+export function accountLabel(row: { account_id: string; label?: string }) {
+  return row.label?.trim() || row.account_id;
+}
+
 export function AccountsTable({
   rows,
   onRow,
@@ -302,11 +314,14 @@ export function AccountsTable({
                 onRow(r);
               }}
             >
-              {r.account_id}
-              <small>{r.currency}</small>
+              {accountLabel(r)}
+              {/* The number stays visible beneath the name: it is what IBKR,
+                  the statements and support all use. */}
+              <small>{r.label ? `${r.account_id} · ${r.currency}` : r.currency}</small>
             </button>
           ),
-          value: (r) => r.account_id,
+          // Sorted and searched by both, so typing either finds the row.
+          value: (r) => `${accountLabel(r)} ${r.account_id}`,
         },
         {
           label: "Net liquidation",
@@ -522,12 +537,13 @@ export function ExecutionsTable({ rows }: { rows: Execution[] }) {
   const zone = useZone();
   const [withCommissions, setWithCommissions] = useState(false);
   return (
-    <>
-    <label className="commission-toggle table-toggle">
-      <input type="checkbox" checked={withCommissions} onChange={(e) => setWithCommissions(e.target.checked)} />
-      <span>Include commissions in traded rate</span>
-    </label>
     <DataTable
+      toolbar={
+        <label className="commission-toggle table-toggle">
+          <input type="checkbox" checked={withCommissions} onChange={(e) => setWithCommissions(e.target.checked)} />
+          <span>Include commissions in traded rate</span>
+        </label>
+      }
       rows={rows}
       id={(r) => r.execution_id}
       columns={[
@@ -574,6 +590,5 @@ export function ExecutionsTable({ rows }: { rows: Execution[] }) {
         },
       ]}
     />
-    </>
   );
 }

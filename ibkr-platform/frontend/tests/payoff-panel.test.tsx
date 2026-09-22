@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PayoffPanel } from "@/components/payoff-panel";
 import { Position } from "@/lib/types";
+import { expiryDate } from "@/lib/payoff";
 
 const charts: { option: Record<string, unknown>; setOption: ReturnType<typeof vi.fn>; disposed: boolean }[] = [];
 vi.mock("echarts/core", () => ({
@@ -23,7 +24,13 @@ vi.mock("echarts/core", () => ({
 vi.mock("echarts/charts", () => ({ LineChart: {} }));
 vi.mock("echarts/components", () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {}, MarkLineComponent: {}, DataZoomInsideComponent: {}, DataZoomSliderComponent: {}, AxisPointerComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ SVGRenderer: {} }));
-afterEach(() => { vi.unstubAllGlobals(); charts.length = 0; });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  charts.length = 0;
+  localStorage.removeItem("rms.levels.custom");
+  localStorage.removeItem("rms.levels.price");
+  localStorage.removeItem("rms.columns.order");
+});
 
 function futureExpiry(days: number): string {
   const date = new Date(Date.now() + days * 86400000);
@@ -237,6 +244,26 @@ describe("payoff panel", () => {
     expect(screen.getAllByRole("row")).toHaveLength(6);
   });
 
+  it("does not put removable chips on the default 1/3/5/10 percent levels", () => {
+    localStorage.removeItem("rms.levels.custom");
+    localStorage.removeItem("rms.levels.price");
+    panel([position({ sec_type: "STK", average_cost: "80", market_price: "100" })]);
+    expect(screen.queryByRole("group", { name: "Scenario columns" })).toBeNull();
+    for (const level of ["±1%", "±3%", "±5%", "±10%"]) {
+      expect(screen.queryByRole("button", { name: `Remove the ${level} scenario column` })).toBeNull();
+    }
+
+    fireEvent.change(screen.getByLabelText("Add a custom scenario level, in percent"), { target: { value: "7" } });
+    const add = screen.getByLabelText("Add a custom scenario level, in percent")
+      .closest("label")!
+      .querySelector("button")!;
+    fireEvent.click(add);
+    expect(screen.getByRole("button", { name: "Remove the ±7% scenario column" })).toBeInTheDocument();
+    for (const level of ["±1%", "±3%", "±5%", "±10%"]) {
+      expect(screen.queryByRole("button", { name: `Remove the ${level} scenario column` })).toBeNull();
+    }
+  });
+
   it("adds booked P&L from closed legs back into the curve and shows it apart", async () => {
     panel(
       [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
@@ -245,12 +272,72 @@ describe("payoff panel", () => {
     );
     const table = await screen.findByRole("table", { name: /RMS by account ID/ });
     await waitFor(() => expect(table).toHaveTextContent("Booked P&L (closed legs)"));
-    expect(table).toHaveTextContent("Open legs terminal");
+    expect(table).toHaveTextContent("Open legs, as broker reports");
     expect(screen.getAllByText("-1,265.36").length).toBeGreaterThanOrEqual(1);
-    const open = Number(screen.getByRole("row", { name: /Open legs terminal/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""));
+    const open = Number(screen.getByRole("row", { name: /Open legs, as broker reports/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""));
     const total = Number(screen.getByRole("row", { name: /Desk total terminal/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""));
     expect(open).toBeGreaterThan(0);
     expect(total).toBeCloseTo(open - 1265.36, 2);
+  });
+
+  it("moves a column when its arrow is clicked, and remembers the order", async () => {
+    localStorage.removeItem("rms.columns.order");
+    const { unmount } = panel([
+      position({ account_id: "A", sec_type: "STK", average_cost: "80", market_price: "100" }),
+    ]);
+    const table = screen.getByRole("table", { name: /RMS by account ID/ });
+    const headerOrder = () =>
+      [...table.querySelectorAll("thead th")].slice(1).map(th => th.getAttribute("aria-label"));
+    expect(headerOrder()).toEqual(["-10%", "-5%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
+
+    // Capture the underlying level shown under each heading before moving —
+    // the values are position-dependent, not hardcoded, so the row cells can
+    // be checked to have moved along with their header rather than stayed put.
+    const level = screen.getByRole("row", { name: /Scenario underlying level/ });
+    const before = [...level.querySelectorAll("td")].map(td => td.textContent);
+
+    // Move -10% one step right, past -5%.
+    fireEvent.click(screen.getByRole("button", { name: "Move -10% right" }));
+    expect(headerOrder()).toEqual(["-5%", "-10%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
+    // The row cells follow the header: the two swapped levels traded places,
+    // not just their labels.
+    const after = [...level.querySelectorAll("td")].map(td => td.textContent);
+    expect(after[0]).toBe(before[1]);
+    expect(after[1]).toBe(before[0]);
+    expect(after.slice(2)).toEqual(before.slice(2));
+
+    // A leading column has nowhere left to go.
+    expect(screen.getByRole("button", { name: "Move -5% left" })).toBeDisabled();
+
+    unmount();
+
+    // The order survives a remount, the same way the levels themselves do.
+    panel([position({ account_id: "A", sec_type: "STK", average_cost: "80", market_price: "100" })]);
+    expect(headerOrder()).toEqual(["-5%", "-10%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
+    localStorage.removeItem("rms.columns.order");
+  });
+
+  it("chooses which accounts get a row, from a menu beside the grid", async () => {
+    panel([
+      position({ account_id: "U1", con_id: 1, sec_type: "STK", average_cost: "80", market_price: "100" }),
+      position({ account_id: "U2", con_id: 2, sec_type: "STK", average_cost: "90", market_price: "100" }),
+    ]);
+    await screen.findByRole("table", { name: /RMS by account ID/ });
+    const rowFor = (id: string) => screen.queryByRole("row", { name: new RegExp(`^${id} terminal`) });
+    expect(rowFor("U1")).toBeInTheDocument();
+    expect(rowFor("U2")).toBeInTheDocument();
+
+    // The summary says what is shown without having to open it.
+    expect(screen.getByText("All 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "U2" }));
+    expect(rowFor("U2")).toBeNull();
+    expect(rowFor("U1")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+
+    // "Show all" puts it back, and the desk total never depended on the choice.
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(rowFor("U2")).toBeInTheDocument();
   });
 
   it("seeds implied volatility from the broker's own option marks", () => {
@@ -271,17 +358,34 @@ describe("payoff panel", () => {
     expect(screen.getByText(/Manual · market/)).toBeInTheDocument();
   });
 
-  it("models one expiry at a time when the book spans several", () => {
+  it("lets a book spanning several cycles be modelled a cycle at a time", () => {
+    const near = futureExpiry(4);
+    const far = futureExpiry(11);
     panel([
-      position({ con_id: 1, expiry: futureExpiry(4), strike: "7650", underlying_price: "7650" }),
-      position({ con_id: 2, expiry: futureExpiry(11), strike: "7700", underlying_price: "7650" }),
+      position({ con_id: 1, expiry: near, strike: "7650", underlying_price: "7650" }),
+      position({ con_id: 2, expiry: far, strike: "7700", underlying_price: "7650" }),
     ]);
+    // Both cycles on to begin with: every live expiry is modelled.
+    expect(screen.getByText("All 2")).toBeInTheDocument();
     expect(screen.getByText(/2 included legs/)).toBeInTheDocument();
-    const filter = screen.getByLabelText("Expiry");
-    fireEvent.change(filter, { target: { value: futureExpiry(4) } });
+
+    // Deselecting one leaves the other, rather than selecting only the one
+    // clicked — the bug a naive toggle has when nothing is stored yet.
+    fireEvent.click(screen.getByRole("checkbox", { name: expiryDate(far) }));
     expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
-    fireEvent.change(filter, { target: { value: "" } });
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all cycles" }));
     expect(screen.getByText(/2 included legs/)).toBeInTheDocument();
+  });
+
+  it("names the single cycle outright when there is only one", async () => {
+    const only = futureExpiry(9);
+    panel([position({ con_id: 1, expiry: only, strike: "7650", underlying_price: "7650" })]);
+    // "All 1" would be a strange thing to tell someone holding one expiry, so
+    // the summary names the cycle itself.
+    const summary = document.querySelector(".expiry-picker summary")!;
+    expect(summary.textContent).toContain(expiryDate(only));
   });
 
   it("asks for booked P&L by live cycle rather than by the open legs", async () => {
@@ -440,7 +544,68 @@ describe("payoff panel", () => {
     expect(below + above).toBeCloseTo(100, 0);
   });
 
-  it("leaves commissions out of booked P&L until the box is ticked", async () => {
+  it("adds back the commission IBKR buried in average cost", async () => {
+    /* The finding that prompted this: IBKR's average_cost already contains the
+       commission, moved against the trader. Verified on the live book to four
+       decimals — a long's cost is price + commission, a short's is price −
+       commission. So a payoff built from average cost is already net, and the
+       dashboard read 11.04 worse than a tool pricing off the premium alone.
+       Unticked means gross, which means adding it back. */
+    panel(
+      [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
+      {},
+      [
+        { realized_pnl: "0.0", commission: "5.00", currency: "USD", account_id: "A" },
+        { realized_pnl: "0.0", commission: "6.04", currency: "USD", account_id: "A" },
+      ],
+    );
+    await screen.findByRole("table", { name: /RMS by account ID/ });
+    const total = () => Number(
+      screen.getByRole("row", { name: /Desk total terminal/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""),
+    );
+    const says = (re: RegExp) => re.test(document.body.textContent ?? "");
+    // Default is gross: the 11.04 the broker took out is put back. Waited for,
+    // because reading before the realized data lands measures the raw curve.
+    await waitFor(() => expect(says(/added back/)).toBe(true));
+    const grossShown = total();
+    // The adjustment is labelled for what it is. Nothing has been closed, so
+    // there is no booked P&L row to confuse it with.
+    const row = (name: RegExp) => screen.queryByRole("row", { name });
+    expect(row(/Commissions added back/)).toBeInTheDocument();
+    expect(row(/Booked P&L \(closed legs\)/)).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Include commissions"));
+    // Ticked is what the broker actually charged, which is 11.04 worse.
+    await waitFor(() => expect(total()).toBeCloseTo(grossShown - 11.04, 2));
+    expect(says(/Net of commissions/)).toBe(true);
+  });
+
+  it("does not add back a closing fill's commission twice", async () => {
+    // A closing fill's commission is already inside the realized P&L the broker
+    // reports for it; adding it back as well would overstate the gross figure.
+    panel(
+      [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
+      {},
+      [
+        { realized_pnl: "-100.00", commission: "4.00", currency: "USD", account_id: "A" },
+        { realized_pnl: "0.0", commission: "3.00", currency: "USD", account_id: "A" },
+      ],
+    );
+    await screen.findByRole("table", { name: /RMS by account ID/ });
+    // Only the opening fill's 3.00 is described as added back.
+    await waitFor(() =>
+      expect(document.body.textContent ?? "").toMatch(/3\.00 USD IBKR embedded/),
+    );
+    expect(document.body.textContent ?? "").not.toMatch(/7\.00 USD IBKR embedded/);
+    // Both adjustments present, each under its own name.
+    expect(screen.getByRole("row", { name: /Booked P&L \(closed legs\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Commissions added back/ })).toBeInTheDocument();
+  });
+
+  it("leaves a closing fill's commission where the broker already put it", async () => {
+    /* IBKR reports realized P&L for a closing fill with its commission already
+       accounted for, so there is nothing for the toggle to add or remove: the
+       box changes what is *embedded in average cost*, which only open legs have. */
     panel(
       [position({ sec_type: "STK", average_cost: "80", market_price: "100" })],
       {},
@@ -450,6 +615,6 @@ describe("payoff panel", () => {
     const booked = () => screen.getByText(/Booked P&L from closed legs/).parentElement!.textContent!;
     expect(booked()).toContain("-1,000.00");
     fireEvent.click(screen.getByLabelText("Include commissions"));
-    await waitFor(() => expect(booked()).toContain("-1,025.00"));
+    await waitFor(() => expect(booked()).toContain("-1,000.00"));
   });
 });

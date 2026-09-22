@@ -44,6 +44,233 @@
   font-size: var(--text-sm);
 }
 .reference-bar > .bar-action > * { grid-row: 2; width: 100%; }
+/* Sits on the same three bands as every other control in the bar. */
+.reference-bar .custom-level .level-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.reference-bar .custom-level input[type="number"] { flex: 1; min-width: 0; }
+/* Sized and weighted to read as the action beside the field, not as a caption:
+   full control height so it sits square with the input, a visible edge, and the
+   accent picked up on hover so it is obviously pressable. */
+.reference-bar .custom-level .level-entry .btn {
+  flex: none;
+  gap: 4px;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 500;
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.reference-bar .custom-level .level-entry .btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.reference-bar .custom-level .level-entry .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* The chips, the commissions box and the account menu belong together: they
+   are all "what is in the table", as against the model inputs above them. */
+.reference-bar .bar-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+/* Every control on the row shares one height, so chips, a checkbox and a menu
+   sit on one line instead of three slightly different ones. */
+.reference-bar .bar-row > * { align-self: center; }
+.reference-bar .bar-row .level-chips { gap: var(--space-2); }
+.reference-bar .bar-row .level-chips button { height: var(--control-height); }
+.reference-bar .bar-row .commission-toggle {
+  display: flex;
+  grid-template-rows: none;
+  align-items: center;
+  gap: var(--space-2);
+}
+.reference-bar .bar-row .commission-toggle > input,
+.reference-bar .bar-row .commission-toggle > span { grid-row: auto; grid-column: auto; }
+.reference-bar .bar-row .dropdown { margin: 0; }
+
+.level-chips {
+  grid-row: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: var(--space-2);
+}
+.level-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.level-chips button:hover { border-color: var(--red); color: var(--red); }
+
+/* Three kinds of column, told apart so it is obvious which are the reader's
+   own: a shipped default is plain, a level they added is accented, and a price
+   is accented and dashed because it asks a different question from a move. */
+.level-chips button.custom { border-color: var(--accent); color: var(--accent); }
+.level-chips button.price { border-style: dashed; }
+/* Column separators. A grid this wide is read by tracking one column down the
+   page, and without a rule to follow the eye slides between neighbours. */
+.scenario-grid .col { border-left: 1px solid var(--line); }
+/* A column the reader added gets a rule of its own, full height, so it is
+   findable among the defaults without having to read the heading. */
+.scenario-grid .col.custom { border-left: 1px solid var(--accent); }
+.scenario-grid tbody .col.custom { background: var(--accent-soft); }
+.scenario-grid .col.price { border-left-style: dashed; }
+.scenario-grid thead th.custom { color: var(--accent); }
+.scenario-grid thead th.custom::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-top: 3px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.scenario-grid thead th.price::after { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
+/* A native disclosure rather than a hand-built popover: it is keyboard
+   accessible, closes on Escape, and needs no outside-click handling to get
+   right. */
+/* Named `dropdown`, not `account-picker`: that class already belonged to a
+   bordered fieldset elsewhere in this file, and being defined later it won —
+   which drew a second box around every menu.
+
+   The element itself draws nothing — only its summary does. Without this it
+   inherits the panel's `details` margin and reads as a box inside a box. */
+.dropdown {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  width: max-content;
+  flex: none;
+}
+.dropdown summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  list-style: none;
+  user-select: none;
+}
+.dropdown summary::-webkit-details-marker { display: none; }
+.dropdown summary::after {
+  content: "▾";
+  color: var(--muted);
+  font-size: 10px;
+}
+.dropdown summary:hover { border-color: var(--line-strong); color: var(--text); }
+.dropdown[open] summary { border-color: var(--accent); color: var(--accent); }
+.dropdown summary b {
+  color: var(--text);
+  font-weight: 500;
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+}
+.dropdown-menu {
+  position: absolute;
+  z-index: 20;
+  margin-top: var(--space-1);
+  min-width: 200px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 12px 32px #0006;
+}
+.dropdown-menu label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.dropdown-menu label:hover { background: var(--accent-soft); }
+.dropdown-menu input { width: 14px; height: 14px; accent-color: var(--accent); }
+.dropdown-menu .all {
+  width: 100%;
+  margin-bottom: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.dropdown-menu .all:disabled { color: var(--muted); cursor: default; }
+/* The expiry picker leads the panel rather than trailing the grid, because it
+   changes the curve as well as the table. */
+/* Sits after the price, separated by a rule rather than by guesswork about
+   spacing: it is a control, and the numbers before it are a reading. */
+.strategy-head .expiry-picker {
+  margin-left: auto;
+  align-self: center;
+}
+@media (max-width: 700px) {
+  /* Wrapped onto its own line, "auto" would shove it to the far right of an
+     otherwise empty row. */
+  .strategy-head .expiry-picker { margin-left: 0; }
+}
+
+
+/* A panel clips its own corners, which also clips a menu escaping it. Lifted
+   only while a menu is actually open, so nothing else changes. */
+.panel:has(.dropdown[open]) { overflow: visible; }
+.dropdown-menu { top: 100%; left: 0; }
+/* Near the right edge it opens leftwards instead of off the screen. */
+.strategy-head .dropdown-menu { left: auto; right: 0; }
+
+.level-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: 0 var(--gutter) var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.level-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.level-legend i {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+.level-legend .is-custom i { background: var(--accent); }
+.level-legend .is-price i { background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); }
+.level-chips b { color: var(--muted); font-weight: 400; }
+.level-chips button:hover b { color: var(--red); }
+
 .commission-toggle {
   grid-template-columns: auto 1fr;
   column-gap: var(--space-2);
@@ -55,10 +282,16 @@
 .strategy { padding: 0 var(--gutter); }
 .strategy-head {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
   padding: var(--space-3) 0;
 }
+/* The numbers keep their baseline alignment; only the control beside them is
+   centred, so a 20px price and a 28px menu sit together without one riding high. */
+.strategy-head > .ticker,
+.strategy-head > b,
+.strategy-head > .change { align-self: baseline; }
 .strategy-head .ticker {
   padding: 2px var(--space-2);
   border: 1px solid var(--line);
@@ -196,8 +429,234 @@
 .payoff-sliders small { margin-left: auto; color: var(--muted); }
 .payoff-sliders input[type="range"] { width: 100%; accent-color: var(--accent); }
 
-.commission-toggle.table-toggle { padding: var(--space-2) var(--gutter); color: var(--muted); font-size: var(--text-sm); }
+.alert-bell { position: relative; }
+/* Matches the theme and sign-out buttons it now sits beside: borderless, with
+   the same hover treatment. A boxed control in that row reads as a different
+   kind of thing. */
+.bell-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+}
+.bell-button:hover { background: var(--accent-soft); color: var(--text); }
+.bell-button[aria-expanded="true"] { background: var(--accent-soft); color: var(--text); }
+.bell-button b {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 9px;
+  line-height: 16px;
+  font-weight: 700;
+}
+.bell-panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 40;
+  width: min(360px, calc(100vw - var(--space-4) * 2));
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 12px 32px #0006;
+}
+.bell-panel header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.bell-panel header button { border: 0; background: none; color: var(--muted); display: inline-flex; }
+.bell-panel header button:hover { color: var(--text); }
+.bell-panel p { margin: var(--space-3); }
+.bell-panel ul { list-style: none; margin: 0; padding: 0; }
+.bell-panel li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+.bell-panel li:last-child { border-bottom: 0; }
+.bell-panel li.urgent { border-left: 2px solid var(--red); }
+.bell-panel .tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.bell-panel li p { margin: 0; white-space: pre-line; color: var(--text); }
+.bell-panel time { color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
+
+.alert-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  padding: var(--space-4) var(--gutter);
+}
+.alert-link p { margin: 0; font-size: var(--text-base); line-height: var(--leading); }
+.alert-link small { color: var(--muted); font-size: var(--text-sm); }
+.alert-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  text-decoration: underline;
+}
+.alert-link p.linked { display: inline-flex; align-items: baseline; gap: var(--space-2); }
+.alert-link p.linked svg { position: relative; top: 2px; color: var(--accent); flex: none; }
+.panel h2 .channel { display: inline-flex; align-items: center; gap: 5px; }
+.alert-triggers + .footnote {
+  margin: 0;
+  padding: var(--space-3) var(--gutter) var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.alert-link code {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  font-family: var(--font-mono);
+}
+.panel h2 .rename {
+  margin-left: var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+}
+.panel h2 .rename:hover { color: var(--text); }
+
+.balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--gutter);
+}
+.balance-grid > div { display: grid; gap: 2px; align-content: start; }
+.balance-grid label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.balance-grid small { color: var(--muted); font-size: var(--text-sm); line-height: var(--leading); min-height: 2.6em; }
+.balance-grid strong { font-size: 18px; font-variant-numeric: tabular-nums; color: var(--text); }
+.balance-grid > div.negative strong { color: var(--red); }
+
+.alert-thresholds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--gutter);
+  border-top: 1px solid var(--line);
+}
+.alert-thresholds > label { display: grid; gap: var(--space-1); }
+.alert-thresholds > label > span:first-child { font-size: var(--text-base); color: var(--text); }
+.alert-thresholds .level-entry { display: flex; align-items: center; gap: var(--space-2); }
+.alert-thresholds input[type="number"] {
+  width: 110px;
+  height: var(--control-height);
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+}
+.alert-thresholds .level-entry b { color: var(--muted); font-weight: 400; font-size: var(--text-base); }
+.alert-thresholds small { color: var(--muted); font-size: var(--text-sm); line-height: var(--leading); }
+.alert-thresholds .level-chips { grid-column: 1 / -1; }
+
+.alert-triggers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--space-5);
+  padding: var(--space-5) var(--gutter);
+  border-top: 1px solid var(--line);
+}
+/* `.commission-toggle` gets its `display: grid` from `.reference-bar > label`,
+   which does not apply here — so out on the Profile page the checkbox and its
+   label collapsed into an inline run with no gap between them at all. */
+.alert-triggers .commission-toggle {
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: var(--space-1) var(--space-3);
+  height: auto;
+}
+/* The box sits on the cap-height of the label beside it, and the description
+   lines up under the label rather than under the box. */
+.alert-triggers .commission-toggle > input { grid-row: 1; grid-column: 1; margin-top: 3px; }
+.alert-triggers .commission-toggle > span {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--text);
+  font-size: var(--text-base);
+}
+.alert-triggers .commission-toggle > small { grid-row: 2; grid-column: 2; line-height: var(--leading); }
+
+/* On the toolbar now, so it sits inline with the search box rather than
+   claiming a line of its own above the table. */
+.commission-toggle.table-toggle {
+  display: flex;
+  grid-template-rows: none;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.commission-toggle.table-toggle > input,
+.commission-toggle.table-toggle > span { grid-row: auto; grid-column: auto; }
 .reference-bar .iv-control input[type="range"] { width: 100%; accent-color: var(--accent); }
+.expiry-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.expiry-chips button {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.expiry-chips button:hover { border-color: var(--line-strong); color: var(--text); }
+.expiry-chips button.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
 .reference-bar .expiry-filter select {
   width: 100%;
   height: var(--control-height);
@@ -220,6 +679,42 @@
 }
 .scenario-grid thead th { text-align: right; color: var(--muted); }
 .scenario-grid thead th:first-child { text-align: left; }
+/* Reorder controls: invisible until the header is hovered or focused, so the
+   grid still reads as a plain table at a glance and the arrows do not compete
+   with the numbers for attention. */
+.scenario-grid .col-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.scenario-grid .col-move {
+  display: inline-flex;
+  gap: 1px;
+  opacity: 0;
+}
+.scenario-grid th:hover .col-move,
+.scenario-grid .col-move:focus-within {
+  opacity: 1;
+}
+.scenario-grid .col-move button {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+.scenario-grid .col-move button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.scenario-grid .col-move button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
 .scenario-grid tr.total th[scope="row"], .scenario-grid tr.total td {
   border-top: 1px solid var(--line-strong);
   font-weight: 600;

@@ -195,11 +195,31 @@ export function scenarioPnl(leg: RiskLeg, assumption: Assumption, shock: number,
   return raw + (marked - rawAtAnchor) * remaining;
 }
 
-export function buildCurves(legs: RiskLeg[], assumptions: Record<string, Assumption>, range: number, horizon: number, rate: number) {
+/** Turn a list of magnitudes into the signed levels a scenario grid reads at.
+ *
+ *  A desk asking "what about seven percent" means both directions: the move
+ *  that helps and the one that hurts are the same question asked twice. */
+export function signedLevels(magnitudes: readonly number[]): number[] {
+  const levels = new Set<number>();
+  for (const value of magnitudes) {
+    if (!Number.isFinite(value) || value === 0) continue;
+    levels.add(Math.abs(value));
+    levels.add(-Math.abs(value));
+  }
+  return [...levels].sort((a, b) => a - b);
+}
+
+export function buildCurves(
+  legs: RiskLeg[], assumptions: Record<string, Assumption>, range: number, horizon: number,
+  rate: number, levels: readonly number[] = RMS_SHOCKS,
+) {
   const shocks = new Set(Array.from({ length: 81 }, (_, i) => -Math.min(range, 100) + (Math.min(range, 100) + range) * i / 80));
   shocks.add(0);
-  for (const shock of RMS_SHOCKS) {
-    if (shock >= -Math.min(range, 100) && shock <= range) shocks.add(shock);
+  /* Scenario levels are sampled whether or not they fall inside the plotted
+     range: the reader asked for that number specifically, and answering "it is
+     off the chart" would be a worse answer than the figure they wanted. */
+  for (const shock of levels) {
+    if (Number.isFinite(shock) && shock > -100) shocks.add(shock);
   }
   for (const leg of legs) {
     if (leg.position.sec_type === "OPT") {

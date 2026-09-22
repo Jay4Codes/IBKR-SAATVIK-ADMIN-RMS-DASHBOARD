@@ -1,6 +1,8 @@
 export type Money = string | null;
 export type Account = {
   account_id: string;
+  /** A name the desk gave this account, tenant-wide. Empty when unnamed. */
+  label?: string;
   currency: string;
   net_liquidation: Money;
   cash: Money;
@@ -13,6 +15,10 @@ export type Account = {
   realized_pnl: Money;
   unrealized_pnl: Money;
   day_pnl: Money;
+  /** IBKR's own cushion: excess liquidity over net liquidation. */
+  cushion?: Money;
+  /** -1 from IBKR means unlimited, which is not a count. */
+  day_trades_remaining?: Money;
   updated_at: string;
   open_positions: number;
   open_orders: number;
@@ -215,6 +221,22 @@ export type RealizedSummary = {
     commission: string;
     executed_at: string | null;
   }[];
+};
+
+export type AlertSettings = {
+  configured: boolean;
+  linked: boolean;
+  chat_name?: string | null;
+  linked_at?: string | null;
+  triggers: string[];
+  available: string[];
+  /** Thresholds this member has set for themselves, as decimal strings. */
+  move_percent: string;
+  risk_percent: string;
+  price_levels: string[];
+  /** Specific moves to be alerted at. Empty falls back to the repeating band. */
+  move_levels: string[];
+  limits: Record<string, { default: number; min: number; max: number }>;
 };
 
 export type CommissionSummary = {

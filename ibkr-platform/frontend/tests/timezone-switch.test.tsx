@@ -32,26 +32,31 @@ afterEach(() => localStorage.clear());
 describe("switching the display timezone", () => {
   it("re-renders every timestamp on the page at the chosen desk's clock", () => {
     page();
-    const picker = screen.getByLabelText("Display timezone");
-    expect(picker).toHaveValue("ET");
+    // A searchable menu now, not a native select: open it, then pick.
+    const pick = (zone: string) => {
+      fireEvent.click(screen.getByRole("button", { name: "Display timezone" }));
+      fireEvent.click(screen.getByRole("option", { name: zone }));
+    };
+    expect(screen.getByRole("button", { name: "Display timezone" })).toHaveTextContent("ET");
     expect(screen.getByText(/7:30:00.PM/)).toBeInTheDocument();
-    fireEvent.change(picker, { target: { value: "IST" } });
+    pick("IST");
     expect(screen.getByText(/5:00:00.AM/)).toBeInTheDocument();
     expect(screen.queryByText(/7:30:00.PM/)).not.toBeInTheDocument();
-    fireEvent.change(picker, { target: { value: "UTC" } });
+    pick("UTC");
     expect(screen.getByText(/11:30:00.PM/)).toBeInTheDocument();
   });
   it("remembers the choice for the next visit", () => {
     const { unmount } = page();
-    fireEvent.change(screen.getByLabelText("Display timezone"), { target: { value: "CT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Display timezone" }));
+    fireEvent.click(screen.getByRole("option", { name: "CT" }));
     expect(localStorage.getItem(STORAGE_KEY)).toBe("CT");
     unmount();
     page();
-    expect(screen.getByLabelText("Display timezone")).toHaveValue("CT");
+    expect(screen.getByRole("button", { name: "Display timezone" })).toHaveTextContent("CT");
   });
   it("ignores a stored value that is not one of the four", () => {
     localStorage.setItem(STORAGE_KEY, "Mars/Olympus");
     page();
-    expect(screen.getByLabelText("Display timezone")).toHaveValue("ET");
+    expect(screen.getByRole("button", { name: "Display timezone" })).toHaveTextContent("ET");
   });
 });

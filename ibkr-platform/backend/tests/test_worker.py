@@ -576,3 +576,30 @@ async def test_a_request_error_on_our_own_market_data_line_spares_the_gateway(st
     assert not worker.fault.is_set()
     worker.broker_error(8, 321, "Error validating request. cause - Please enter exchange", None)
     assert worker.state.status == GatewayStatus.DEGRADED
+
+
+async def test_ibkrs_aggregate_is_not_counted_as_an_account(stores):
+    """`managedAccounts()` returns an "All" entry beside the real accounts.
+
+    It holds no positions and cannot be traded, but it was reaching the
+    dashboard's account list — which then reported two accounts for a desk that
+    has one.
+    """
+    redis, db = stores
+    worker = session(redis, db)
+    assert worker.accept_account("U22050074") is True
+    assert worker.accept_account("All") is False
+    assert worker.accept_account("ALL") is False
+    assert worker.accept_account("") is False
+    assert worker.accept_account(None) is False
+
+
+async def test_an_explicit_account_filter_still_wins(stores):
+    redis, db = stores
+    worker = session(redis, db)
+    worker.account_filter = "U22050074"
+    assert worker.accept_account("U22050074") is True
+    assert worker.accept_account("U99999999") is False
+    # …and never admits the aggregate, whatever the filter says.
+    worker.account_filter = "All"
+    assert worker.accept_account("All") is False
