@@ -4,6 +4,7 @@ from pymongo.errors import DuplicateKeyError, OperationFailure
 from app.config import settings
 from app.domain import order_key
 
+
 def database():
     client = AsyncMongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=3000, tz_aware=True)
     return client, client[settings.mongodb_database]

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from app.config import settings
 from app.domain import AccountState, Execution, Order, Position, now
 
+
 def configured() -> bool:
     return bool(settings.snaptrade_client_id and settings.snaptrade_consumer_key)
 

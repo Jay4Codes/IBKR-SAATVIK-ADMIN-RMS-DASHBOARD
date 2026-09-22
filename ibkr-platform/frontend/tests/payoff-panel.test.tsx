@@ -30,6 +30,9 @@ afterEach(() => {
   localStorage.removeItem("rms.levels.custom");
   localStorage.removeItem("rms.levels.price");
   localStorage.removeItem("rms.columns.order");
+  localStorage.removeItem("rms.lens");
+  localStorage.removeItem("rms.shock");
+  localStorage.removeItem("rms.denomination");
 });
 
 function futureExpiry(days: number): string {
@@ -88,19 +91,46 @@ describe("payoff panel", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     rerender(<PayoffPanel rows={[position({ underlying_price: "100" })]} loading={false} error={false} light={false} />);
     expect(await screen.findByRole("img")).toBeInTheDocument();
-    expect(screen.getByRole("table")).toHaveAccessibleName("RMS by account ID · Scenario P&L (USD)");
+    expect(screen.getByRole("table")).toHaveAccessibleName("RMS by underlying · Scenario P&L (USD)");
     fireEvent.change(screen.getByLabelText("Volatility (%)"), { target: { value: "" } });
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
   it("separates currencies and labels account scope", async () => {
     panel([position({ sec_type: "STK", average_cost: "80", market_price: "100" }), position({ sec_type: "STK", currency: "EUR", con_id: 2, average_cost: "90", market_price: "100" })], { accountId: "A" });
     expect(screen.getByRole("heading")).toHaveTextContent("Account payoff");
-    expect(screen.getByRole("table")).toHaveAccessibleName("RMS by account ID · Scenario P&L (EUR)");
+    expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(EUR\)/);
     fireEvent.click(screen.getByLabelText("Risk currency"));
     fireEvent.click(screen.getByRole("option", { name: "USD" }));
-    expect(screen.getByRole("table")).toHaveAccessibleName("RMS by account ID · Scenario P&L (USD)");
+    expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(USD\)/);
     expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+  it("opens on the currency that has reference prices", () => {
+    panel([
+      position({ currency: "AED", sec_type: "STK", symbol: "EMAAR", expiry: "", market_price: null, quantity: "1600", con_id: 1 }),
+      position({ currency: "AED", sec_type: "STK", symbol: "DIC", expiry: "", market_price: null, quantity: "5000", con_id: 2 }),
+      position({ currency: "AED", sec_type: "STK", symbol: "DEYAAR", expiry: "", market_price: null, quantity: "24000", con_id: 3 }),
+      position({ underlying_price: "7650", con_id: 4 }),
+    ]);
+    expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(USD\)/);
+    expect(screen.queryByText(/nothing in this currency can be modeled/)).toBeNull();
+  });
+  it("models the priced underlyings when one name has no broker mark", () => {
+    panel([
+      position({ symbol: "SPX", underlying_price: "7650", con_id: 1 }),
+      position({ symbol: "MCD", underlying_price: null, con_id: 2 }),
+    ]);
+    expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(USD\)/);
+    expect(screen.getByText(/No broker reference price for USD:MCD/)).toBeInTheDocument();
+    expect(screen.getByLabelText("SPX reference price")).toHaveTextContent("7,650.00");
+  });
+  it("includes stocks that carry no expiry when every cycle is selected", () => {
+    panel([
+      position({ sec_type: "STK", symbol: "NVDA", expiry: "", average_cost: "80", market_price: "100", con_id: 1 }),
+      position({ symbol: "SPX", underlying_price: "7650", con_id: 2 }),
+    ]);
+    expect(screen.getByText(/NVDA reference price/)).toBeInTheDocument();
+    expect(screen.getByText(/SPX reference price/)).toBeInTheDocument();
   });
   it("reports unsupported positions without treating them as zero risk", () => {
     panel([position({ sec_type: "FOP" })]);
@@ -114,7 +144,7 @@ describe("payoff panel", () => {
     expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("100.00");
     rerender(<PayoffPanel rows={[{ ...stock, market_price: "110", unrealized_pnl: "30" }]} accountId="A" loading={false} error={false} light={false} />);
     expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("110.00");
-    expect(screen.getAllByText("31.10")).toHaveLength(2);
+    expect(screen.getAllByText("31.10").length).toBeGreaterThanOrEqual(2);
   });
   it("shows the broker's underlying mark as text and models it", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5" })]);
@@ -122,7 +152,7 @@ describe("payoff panel", () => {
     expect(readout.tagName).toBe("OUTPUT");
     expect(readout).toHaveTextContent("7,612.50");
     expect(screen.getByRole("table")).toBeInTheDocument();
-    expect(screen.getByText("Live broker mark")).toBeInTheDocument();
+    expect(screen.getAllByText("Live broker mark").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("USD:XYZ reference").parentElement).toHaveTextContent("7,612.50");
     rerender(<PayoffPanel rows={[position({ underlying_price: "7650" })]} loading={false} error={false} light={false} />);
     expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("7,650.00");
@@ -154,17 +184,17 @@ describe("payoff panel", () => {
   });
   it("names a vendor previous-session close instead of calling it a live mark", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5", underlying_source: "aggs_prev" })]);
-    expect(screen.getByText(/previous session close, not a live mark/)).toBeInTheDocument();
+    expect(screen.getAllByText(/previous session close, not a live mark/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Live broker mark")).not.toBeInTheDocument();
     rerender(<PayoffPanel rows={[position({ underlying_price: "7612.5", underlying_source: "indices_snapshot" })]} loading={false} error={false} light={false} />);
-    expect(screen.getByText("Massive live snapshot")).toBeInTheDocument();
+    expect(screen.getAllByText("Massive live snapshot").length).toBeGreaterThanOrEqual(1);
     rerender(<PayoffPanel rows={[position({ underlying_price: "7612.5" })]} loading={false} error={false} light={false} />);
-    expect(screen.getByText("Live broker mark")).toBeInTheDocument();
+    expect(screen.getAllByText("Live broker mark").length).toBeGreaterThanOrEqual(1);
   });
   it("labels a stored underlying LTP as cached rather than live", () => {
     panel([position({ underlying_price: "7583.88", underlying_source: "ib_und_price_cached" })]);
     expect(screen.getByLabelText("XYZ reference price")).toHaveTextContent("7,583.88");
-    expect(screen.getByText("Stored last underlying price — not live")).toBeInTheDocument();
+    expect(screen.getAllByText("Stored last underlying price — not live").length).toBeGreaterThanOrEqual(1);
   });
   it("follows the broker mark instead of keeping a typed price", () => {
     const { rerender } = panel([position({ underlying_price: "7612.5" })]);
@@ -229,14 +259,16 @@ describe("payoff panel", () => {
       position({ account_id: "A", sec_type: "STK", average_cost: "80", market_price: "100" }),
       position({ account_id: "B", con_id: 2, sec_type: "STK", average_cost: "90", market_price: "100" }),
     ]);
+    fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
     const table = screen.getByRole("table", { name: /RMS by account ID/ });
-    expect(table).toHaveTextContent("A terminal");
-    expect(table).toHaveTextContent("B terminal");
+    expect(table).toHaveTextContent("A");
+    expect(table).toHaveTextContent("B");
     for (const level of ["-10%", "-5%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"])
       expect(screen.getByRole("columnheader", { name: level })).toBeInTheDocument();
     for (const gone of ["-4%", "-2%", "+2%", "+4%"])
       expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
-    expect(screen.getAllByRole("row")).toHaveLength(6);
+    expect(screen.getByRole("row", { name: /^A terminal/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /^B terminal/ })).toBeInTheDocument();
   });
 
   it("does not put removable chips on the default 1/3/5/10 percent levels", () => {
@@ -275,12 +307,14 @@ describe("payoff panel", () => {
       {},
       [{ realized_pnl: "-1265.36", commission: "1.73", currency: "USD", account_id: "A" }],
     );
-    const table = await screen.findByRole("table", { name: /RMS by account ID/ });
+    const table = await screen.findByRole("table", { name: /RMS by/ });
     await waitFor(() => expect(table).toHaveTextContent("Booked P&L (closed legs)"));
     expect(table).toHaveTextContent("Open legs, as broker reports");
     expect(screen.getAllByText("-1,265.36").length).toBeGreaterThanOrEqual(1);
-    const open = Number(screen.getByRole("row", { name: /Open legs, as broker reports/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""));
-    const total = Number(screen.getByRole("row", { name: /Desk total terminal/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""));
+    const shockCell = (row: HTMLElement, index: number) =>
+      Number([...row.querySelectorAll("td.col")][index].textContent!.replace(/,/g, ""));
+    const open = shockCell(screen.getByRole("row", { name: /Open legs, as broker reports/ }), 3);
+    const total = shockCell(screen.getByRole("row", { name: /Desk total/ }), 3);
     expect(open).toBeGreaterThan(0);
     expect(total).toBeCloseTo(open - 1265.36, 2);
   });
@@ -290,18 +324,19 @@ describe("payoff panel", () => {
     const { unmount } = panel([
       position({ account_id: "A", sec_type: "STK", average_cost: "80", market_price: "100" }),
     ]);
-    const table = screen.getByRole("table", { name: /RMS by account ID/ });
     const headerOrder = () =>
-      [...table.querySelectorAll("thead th")].slice(1).map(th => th.getAttribute("aria-label"));
+      [...screen.getByRole("table", { name: /RMS by/ }).querySelectorAll("thead th")]
+        .map(th => th.getAttribute("aria-label"))
+        .filter((label): label is string => !!label && /%/.test(label));
     expect(headerOrder()).toEqual(["-10%", "-5%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
 
-    const level = screen.getByRole("row", { name: /Scenario underlying level/ });
-    const before = [...level.querySelectorAll("td")].map(td => td.textContent);
+    const shocks = () => [...screen.getByRole("row", { name: /Scenario underlying level/ }).querySelectorAll("td.col")].map(td => td.textContent);
+    const before = shocks();
 
     fireEvent.click(screen.getByRole("button", { name: "Move -10% right" }));
     expect(headerOrder()).toEqual(["-5%", "-10%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"]);
 
-    const after = [...level.querySelectorAll("td")].map(td => td.textContent);
+    const after = shocks();
     expect(after[0]).toBe(before[1]);
     expect(after[1]).toBe(before[0]);
     expect(after.slice(2)).toEqual(before.slice(2));
@@ -320,8 +355,11 @@ describe("payoff panel", () => {
       position({ account_id: "U1", con_id: 1, sec_type: "STK", average_cost: "80", market_price: "100" }),
       position({ account_id: "U2", con_id: 2, sec_type: "STK", average_cost: "90", market_price: "100" }),
     ]);
+    fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
     await screen.findByRole("table", { name: /RMS by account ID/ });
-    const rowFor = (id: string) => screen.queryByRole("row", { name: new RegExp(`^${id} terminal`) });
+    const open = screen.queryByRole("button", { name: /^U[12] terminal/, expanded: true });
+    if (open) fireEvent.click(open);
+    const rowFor = (id: string) => screen.queryByRole("row", { name: new RegExp(`^${id}\\b`) });
     expect(rowFor("U1")).toBeInTheDocument();
     expect(rowFor("U2")).toBeInTheDocument();
 
@@ -341,7 +379,8 @@ describe("payoff panel", () => {
     expect(rowFor("U2")).toBeNull();
     expect(screen.getByText("None")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear accounts" })).toBeDisabled();
-    expect(screen.getByRole("row", { name: /^Desk total terminal/ })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/accounts/);
+    expect(screen.queryByRole("table", { name: /RMS by/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "U1" }));
     expect(rowFor("U1")).toBeInTheDocument();
@@ -420,14 +459,14 @@ describe("payoff panel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear cycles" }));
     expect(screen.getByText(/0 included legs/)).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: /RMS by account ID/ })).toBeNull();
+    expect(screen.queryByRole("table", { name: /RMS by/ })).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(/No expiry cycles selected/);
     expect(screen.getByText("None")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear cycles" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("checkbox", { name: expiryDate(near) }));
     expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: /RMS by account ID/ })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /RMS by/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Select all cycles" }));
     expect(screen.getByText(/2 included legs/)).toBeInTheDocument();
@@ -505,9 +544,9 @@ describe("payoff panel", () => {
       {},
       [{ realized_pnl: "-1265.36", commission: "1.73", currency: "USD", account_id: "A" }],
     );
-    const table = await screen.findByRole("table", { name: /RMS by account ID/ });
+    const table = await screen.findByRole("table", { name: /RMS by/ });
     await waitFor(() => expect(table).toHaveTextContent("Booked P&L (closed legs)"));
-    const total = () => screen.getByRole("row", { name: /Desk total terminal/ }).querySelectorAll("td")[3].textContent!;
+    const total = () => [...screen.getByRole("row", { name: /Desk total/ }).querySelectorAll("td.col")][3].textContent!;
     const withClosed = Number(total().replace(/,/g, ""));
 
     fireEvent.click(screen.getByLabelText(/Include closed legs/));
@@ -523,7 +562,7 @@ describe("payoff panel", () => {
 
   it("offers no closed-leg switch when nothing was booked", async () => {
     panel([position({ sec_type: "STK", average_cost: "80", market_price: "100" })]);
-    await screen.findByRole("table", { name: /RMS by account ID/ });
+    await screen.findByRole("table", { name: /RMS by/ });
     expect(screen.queryByLabelText(/Include closed legs/)).toBeNull();
   });
 
@@ -607,9 +646,9 @@ describe("payoff panel", () => {
         { realized_pnl: "0.0", commission: "6.04", currency: "USD", account_id: "A" },
       ],
     );
-    await screen.findByRole("table", { name: /RMS by account ID/ });
+    await screen.findByRole("table", { name: /RMS by/ });
     const total = () => Number(
-      screen.getByRole("row", { name: /Desk total terminal/ }).querySelectorAll("td")[3].textContent!.replace(/,/g, ""),
+      [...screen.getByRole("row", { name: /Desk total/ }).querySelectorAll("td.col")][3].textContent!.replace(/,/g, ""),
     );
     const says = (re: RegExp) => re.test(document.body.textContent ?? "");
 
@@ -636,7 +675,7 @@ describe("payoff panel", () => {
         { realized_pnl: "0.0", commission: "3.00", currency: "USD", account_id: "A" },
       ],
     );
-    await screen.findByRole("table", { name: /RMS by account ID/ });
+    await screen.findByRole("table", { name: /RMS by/ });
 
     await waitFor(() =>
       expect(document.body.textContent ?? "").toMatch(/3\.00 USD IBKR embedded/),
@@ -659,5 +698,57 @@ describe("payoff panel", () => {
     expect(booked()).toContain("-1,000.00");
     fireEvent.click(screen.getByLabelText("Include commissions"));
     await waitFor(() => expect(booked()).toContain("-1,000.00"));
+  });
+
+  it("opens on the asset lens and lets the same legs be regrouped", () => {
+    panel([
+      position({ account_id: "A", symbol: "SPX", underlying_price: "7650", expiry: futureExpiry(1), con_id: 1 }),
+      position({ account_id: "B", symbol: "NVDA", sec_type: "STK", expiry: "", average_cost: "80", market_price: "100", con_id: 2 }),
+    ]);
+    expect(screen.getByRole("table")).toHaveAccessibleName(/RMS by underlying/);
+    expect(screen.getByRole("row", { name: /^SPX terminal/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /^NVDA terminal/ })).toBeInTheDocument();
+    expect(document.querySelector(".spark")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: /By expiry/ }));
+    expect(screen.getByRole("table")).toHaveAccessibleName(/RMS by expiry/);
+    expect(screen.getByRole("row", { name: /Stock, no expiry/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
+    expect(screen.getByRole("table")).toHaveAccessibleName(/RMS by account ID/);
+    expect(screen.getByRole("row", { name: /^A terminal/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /^B terminal/ })).toBeInTheDocument();
+  });
+
+  it("lists unpriced names instead of hiding the rest of the book", () => {
+    panel([
+      position({ symbol: "SPX", underlying_price: "7650", con_id: 1 }),
+      position({ symbol: "MCD", underlying_price: null, con_id: 2 }),
+    ]);
+    expect(screen.getByText("Unpriced — no broker reference, not modeled")).toBeInTheDocument();
+    expect(screen.getByText(/No broker reference price for USD:MCD/)).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /^SPX terminal/ })).toBeInTheDocument();
+  });
+
+  it("offers a beta-weighted shock when more than one name is priced", () => {
+    panel([
+      position({ symbol: "SPX", underlying_price: "7650", con_id: 1 }),
+      position({ symbol: "NVDA", sec_type: "STK", expiry: "", average_cost: "80", market_price: "100", con_id: 2 }),
+    ]);
+    fireEvent.click(screen.getByRole("radio", { name: /vs SPX/ }));
+    expect(screen.getByLabelText("SPX beta")).toBeInTheDocument();
+    expect(screen.getByLabelText("NVDA beta")).toBeInTheDocument();
+    expect(screen.getByRole("table")).toHaveAccessibleName(/moves scaled by β to SPX/);
+  });
+
+  it("expresses an account row as a share of net liquidation", () => {
+    panel(
+      [position({ account_id: "U1", sec_type: "STK", average_cost: "80", market_price: "100", unrealized_pnl: "20" })],
+      { accounts: [{ account_id: "U1", currency: "USD", net_liquidation: "1000" } as never] },
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /% of NLV/ }));
+    expect(screen.getByRole("table")).toHaveAccessibleName(/% of net liquidation/);
+    expect(screen.getAllByText(/2\.0%/).length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -4,6 +4,7 @@ from app.auth import COOKIE, digest
 from app.tenancy import COMMAND_CHANNEL, TenantKeys
 from tests.conftest import CONNECTION, TENANT
 
+
 def as_user(role):
     return {COOKIE: role}
 

@@ -6,6 +6,7 @@ from app.auth import COOKIE
 from app.config import settings
 from tests.conftest import CONNECTION, OTHER_TENANT, TENANT
 
+
 def as_user(role):
     return {COOKIE: role}
 

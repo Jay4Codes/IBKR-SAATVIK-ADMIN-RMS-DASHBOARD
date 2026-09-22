@@ -8,6 +8,7 @@ from ib_async.objects import Position
 
 from app import normalizers as norm
 
+
 @pytest.mark.parametrize("value", [None, "", float("nan"), float("inf"), 1.7976931348623157e308])
 def test_missing_money(value):
     assert norm.decimal(value) is None

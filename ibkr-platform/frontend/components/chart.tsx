@@ -24,6 +24,20 @@ const NAMES: Record<keyof Tokens, string> = {
   red: "--red",
 };
 
+// jsdom (and a first paint before tokens land) returns "" for custom
+// properties. visualMap lerps those stops and crashes on an empty color.
+const FALLBACKS: Tokens = {
+  text: "#e8e4dc",
+  muted: "#9a958c",
+  grid: "#2a2824",
+  line: "#3a3834",
+  lineStrong: "#55524c",
+  accent: "#c4a35a",
+  raised: "#1c1b18",
+  green: "#5ccba4",
+  red: "#f08b8f",
+};
+
 export function Chart({
   option,
   deps,
@@ -91,7 +105,10 @@ export function Chart({
     if (!instance || !ref.current) return;
     const styles = getComputedStyle(ref.current);
     const tokens = Object.fromEntries(
-      Object.entries(NAMES).map(([key, name]) => [key, styles.getPropertyValue(name).trim()]),
+      Object.entries(NAMES).map(([key, name]) => {
+        const value = styles.getPropertyValue(name).trim();
+        return [key, value || FALLBACKS[key as keyof Tokens]];
+      }),
     ) as Tokens;
     const current = instance.getOption() as
       | { dataZoom?: { start?: number; end?: number }[]; legend?: { selected?: Selected }[] }

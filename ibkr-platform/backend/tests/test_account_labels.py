@@ -1,5 +1,6 @@
 from tests.conftest import TENANT
 
+
 async def test_an_account_starts_with_no_name(client, stores):
     rows = (await client.get("/api/v1/accounts")).json()["data"]
     assert rows

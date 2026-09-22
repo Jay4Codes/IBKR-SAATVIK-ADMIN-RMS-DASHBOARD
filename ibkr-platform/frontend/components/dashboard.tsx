@@ -244,6 +244,18 @@ function Terminal({
   });
   const isAdmin = !!user.data?.is_super_admin;
   const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "RMS" : requestedView;
+  // Keep the address bar honest without remounting: the page keys on ?view,
+  // so router.replace would rebuild the whole workspace on every click. RMS is
+  // the default, so it gets a bare /dashboard and a reload lands back on it.
+  const showView = (next: View) => {
+    setView(next);
+    if (typeof window !== "undefined")
+      window.history.replaceState(
+        window.history.state,
+        "",
+        next === "RMS" ? "/dashboard" : `/dashboard?view=${encodeURIComponent(next)}`,
+      );
+  };
   const zone = useZone();
   const [tabs, setTabs] = useState<Record<string, AccountTab>>({});
   const [profileTab, setProfileTab] = useState<ProfileTab>("Account");
@@ -408,8 +420,8 @@ function Terminal({
                     onClick={() => {
                       setMenuOpen(false);
                       if (accountId || diagnostics) {
-                        router.push(`/dashboard?view=${item.view}`);
-                      } else setView(item.view);
+                        router.push(item.view === "RMS" ? "/dashboard" : `/dashboard?view=${item.view}`);
+                      } else showView(item.view);
                     }}
                   >
                     <Icon size={15} aria-hidden="true" />
@@ -684,6 +696,7 @@ function Terminal({
               <PayoffPanel
                 key={accountId ?? "desk"}
                 rows={positions.flatMap((p) => p.data ?? [])}
+                accounts={selected}
                 accountId={accountId}
                 loading={accounts.isPending || positions.some((p) => p.isPending)}
                 error={accounts.isError || positions.some((p) => p.isError)}
@@ -846,14 +859,14 @@ function Terminal({
                         <button
                           type="button"
                           className="account-link"
-                          onClick={() => setView("Connections")}
+                          onClick={() => showView("Connections")}
                         >
                           Broker connections →
                         </button>
                         <button
                           type="button"
                           className="account-link"
-                          onClick={() => setView("Members")}
+                          onClick={() => showView("Members")}
                         >
                           Members →
                         </button>

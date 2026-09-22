@@ -7,6 +7,7 @@
 import app.alerts as alerts
 from app.worker import AlertDispatcher
 
+
 class FakeRedis:
 
     def __init__(self):

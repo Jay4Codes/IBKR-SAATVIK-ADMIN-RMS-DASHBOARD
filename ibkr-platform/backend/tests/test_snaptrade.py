@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app import secrets, snaptrade
 from app.config import settings
 
+
 @pytest.fixture(autouse=True)
 def configured(monkeypatch):
     monkeypatch.setattr(settings, "snaptrade_client_id", "test-client")

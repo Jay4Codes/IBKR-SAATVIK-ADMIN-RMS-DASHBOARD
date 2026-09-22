@@ -5,6 +5,7 @@ from app.domain import Event, GatewayState, Position, now
 from app.state import StateRepository
 from tests.conftest import CONNECTION, OTHER_CONNECTION, OTHER_TENANT, TENANT
 
+
 def position(quantity="2", con_id=1):
     return Position(
         account_id="DU1", con_id=con_id, symbol="SAME", sec_type="OPT", quantity=quantity, average_cost="1200"

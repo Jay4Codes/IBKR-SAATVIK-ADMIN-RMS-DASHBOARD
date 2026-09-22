@@ -1,5 +1,6 @@
 from tests.conftest import TENANT
 
+
 async def execution(
     db, tenant, account, execution_id, *, realized=None, commission=None, expiry="20260918", currency="USD"
 ):

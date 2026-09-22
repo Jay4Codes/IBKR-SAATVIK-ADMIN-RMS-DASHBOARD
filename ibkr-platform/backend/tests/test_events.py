@@ -1,5 +1,6 @@
 from app.events import decision_day, describe, seed_releases, upcoming, valid_day
 
+
 def test_a_meeting_is_dated_by_the_day_its_decision_lands():
 
     assert decision_day(2026, "September", "15-16*") == "2026-09-16"

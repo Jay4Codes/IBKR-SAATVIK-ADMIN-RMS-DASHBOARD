@@ -1,5 +1,6 @@
 from tests.conftest import TENANT
 
+
 async def execution(db, tenant, account, execution_id, *, executed_at, commission=None):
     await db.executions.update_one(
         {"_id": f"{tenant}:{execution_id}"},

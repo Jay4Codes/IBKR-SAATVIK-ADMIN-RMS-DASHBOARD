@@ -5,6 +5,7 @@ from app.auth import COOKIE, TENANT_COOKIE, subscriptions
 from app.tenancy import Membership, Principal, TenantRole
 from tests.conftest import OTHER_TENANT, TENANT, promote_super
 
+
 def principal(role: TenantRole, accounts=(), super_admin=False) -> Principal:
     membership = Membership(TENANT, "t1", "T1", "ACTIVE", role, tuple(accounts))
     return Principal("u", "u@test.local", super_admin, (membership,), membership)

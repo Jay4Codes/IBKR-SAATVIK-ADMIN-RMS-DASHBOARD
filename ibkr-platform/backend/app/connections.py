@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.tenancy import now
 
+
 class Provider(StrEnum):
     IBKR_GATEWAY = "ibkr_gateway"
     SNAPTRADE = "snaptrade"

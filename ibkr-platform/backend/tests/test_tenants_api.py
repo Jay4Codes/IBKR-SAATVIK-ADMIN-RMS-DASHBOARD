@@ -1,6 +1,7 @@
 from app.auth import COOKIE, TENANT_COOKIE
 from tests.conftest import OTHER_TENANT, TENANT, promote_super
 
+
 def as_user(role):
     return {COOKIE: role}
 

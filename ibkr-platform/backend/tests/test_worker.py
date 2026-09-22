@@ -11,6 +11,7 @@ from app.tenancy import TenantKeys
 from app.worker import GatewaySession, backoff, durable_consumer
 from tests.conftest import CONNECTION, TENANT, gateway_connection
 
+
 def keep(db, event):
     return persist(db, event, tenant_id=TENANT, connection_id=CONNECTION)
 

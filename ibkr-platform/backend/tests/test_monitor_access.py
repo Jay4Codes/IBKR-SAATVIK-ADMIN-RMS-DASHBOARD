@@ -3,6 +3,7 @@ import pytest
 from app.auth import COOKIE, TENANT_COOKIE
 from tests.conftest import OTHER_TENANT
 
+
 @pytest.mark.parametrize('user_id', ['ADMIN', 'TRADER', 'OUTSIDER', 'SUPER'])
 async def test_other_accounts_keep_platform_admin_restricted(client, stores, user_id):
     _, db = stores

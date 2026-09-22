@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+
 def now() -> datetime:
     return datetime.now(UTC)
 

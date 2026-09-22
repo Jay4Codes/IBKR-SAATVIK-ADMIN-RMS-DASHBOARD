@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 from app.domain import Execution, Order, Position
 
+
 def decimal(value):
     try:
         result = Decimal(str(value))

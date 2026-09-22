@@ -14,6 +14,7 @@ from app.domain import Event
 from app.worker import GatewaySession
 from tests.conftest import CONNECTION, TENANT, gateway_connection
 
+
 def bodies(**by_path):
 
     async def fake(client, path, params=None):

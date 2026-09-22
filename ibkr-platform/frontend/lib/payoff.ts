@@ -1,6 +1,7 @@
 import { Position } from "./types";
 
-export type Assumption = { spot: number; volatility: number; dividend: number };
+export type Assumption = { spot: number; volatility: number; dividend: number; beta?: number };
+export const ownShock = (assumption: Assumption, shock: number) => shock * (assumption.beta ?? 1);
 export type RiskLeg = { position: Position; quantity: number; cost: number; multiplier: number; strike: number; days: number };
 export const RMS_SHOCKS = [-10, -5, -3, -1, 1, 3, 5, 10] as const;
 export const underlyingKey = (p: Position) => `${p.currency}:${p.symbol}`;
@@ -172,7 +173,7 @@ export function validAssumption(a: Assumption | undefined): a is Assumption {
 }
 
 export function scenarioPnl(leg: RiskLeg, assumption: Assumption, shock: number, horizon: number, rate: number, terminal: boolean) {
-  const spot = assumption.spot * (1 + shock / 100);
+  const spot = assumption.spot * (1 + ownShock(assumption, shock) / 100);
   const value = leg.position.sec_type === "STK" ? spot : optionValue(spot, leg.strike, leg.position.right, terminal ? 0 : Math.max(0, leg.days - horizon) / 365, assumption.volatility, rate, assumption.dividend);
   const raw = leg.quantity * (value * leg.multiplier - leg.cost);
   if (terminal) return raw;
@@ -217,7 +218,10 @@ export function buildCurves(
   }
   for (const leg of legs) {
     if (leg.position.sec_type === "OPT") {
-      const shock = (leg.strike / assumptions[underlyingKey(leg.position)].spot - 1) * 100;
+      const a = assumptions[underlyingKey(leg.position)];
+      const beta = a.beta ?? 1;
+      if (!(beta > 0)) continue;
+      const shock = (leg.strike / a.spot - 1) * 100 / beta;
       if (shock >= -Math.min(range, 100) && shock <= range) shocks.add(shock);
     }
   }
@@ -270,8 +274,10 @@ export function buildPriceCurve(
     prices.add(leg.strike * (1 - 1e-6));
     prices.add(leg.strike * (1 + 1e-6));
   }
+  
+  const ownBeta = assumptions[key].beta ?? 1;
   return [...prices].sort((a, b) => a - b).map(price => {
-    const shock = (price / spot - 1) * 100;
+    const shock = (price / spot - 1) * 100 / (ownBeta > 0 ? ownBeta : 1);
     let terminal = 0, modeled = 0;
     const accounts: Record<string, number> = {};
     for (const leg of legs) {

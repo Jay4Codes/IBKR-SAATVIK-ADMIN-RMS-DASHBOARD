@@ -1,5 +1,6 @@
 import app.telegram as telegram
 
+
 async def configured(monkeypatch):
     monkeypatch.setattr(telegram.settings, "telegram_bot_token", "test-token")
     monkeypatch.setattr(telegram.settings, "telegram_bot_username", "rmsbot")

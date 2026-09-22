@@ -34,6 +34,9 @@ describe("position payoff and desk aggregation", () => {
   it("handles stock quantities without an option multiplier", () => {
     expect(scenarioPnl(leg({ sec_type: "STK", quantity: "-10", average_cost: "90" }), assumption, 20, 0, 0, true)).toBe(-300);
   });
+  it("scales a name's own move by its beta against the scenario shock", () => {
+    expect(scenarioPnl(leg({ sec_type: "STK", quantity: "1", average_cost: "100" }), { ...assumption, beta: 2 }, 10, 0, 0, true)).toBe(20);
+  });
   it("models a bounded vertical spread including strikes between grid points", () => {
     const legs = prepareLegs([position(), position({ con_id: 2, strike: "107", quantity: "-1", average_cost: "200" })], today).legs;
     const curve = buildCurves(legs, { "USD:XYZ": assumption }, 50, 0, 0);

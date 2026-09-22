@@ -6,6 +6,7 @@ import re
 import stat
 import tempfile
 
+
 def _assign(text: str, key: str, value: str) -> str:
     pattern = re.compile(rf"^{re.escape(key)}=.*$", re.M)
     line = f"{key}={value}"

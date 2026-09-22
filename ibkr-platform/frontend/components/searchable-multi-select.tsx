@@ -10,12 +10,16 @@ export function SearchableMultiSelect({
   noun,
   searchFrom = 7,
   describe,
+  format = value => value,
+  className,
 }: {
   label: string;
   selection: Selection;
   noun: string;
   searchFrom?: number;
   describe?: (value: string) => string;
+  format?: (value: string) => string;
+  className?: string;
 }) {
   const [query, setQuery] = useState("");
   const searchable = selection.options.length >= searchFrom;
@@ -24,11 +28,12 @@ export function SearchableMultiSelect({
     ? selection.options
     : selection.options.filter(option => {
         const extra = describe?.(option) ?? "";
-        return option.toLowerCase().includes(needle) || extra.toLowerCase().includes(needle);
+        return option.toLowerCase().includes(needle) || format(option).toLowerCase().includes(needle) || extra.toLowerCase().includes(needle);
       });
 
+  const value = selection.options.length === 1 && selection.isAll ? format(selection.options[0]) : selection.summary;
   return (
-    <Dropdown label={label} value={selection.summary}>
+    <Dropdown label={label} value={value} className={className}>
       <div className="dropdown-menu" role="group" aria-label={label}>
         <SelectionActions selection={selection} noun={noun} />
         {searchable && (
@@ -48,12 +53,12 @@ export function SearchableMultiSelect({
             <label key={value}>
               <input
                 type="checkbox"
-                aria-label={value}
+                aria-label={format(value)}
                 checked={selection.has(value)}
                 onChange={() => selection.toggle(value)}
               />
               <span>
-                {value}
+                {format(value)}
                 {extra ? <small>{extra}</small> : null}
               </span>
             </label>
