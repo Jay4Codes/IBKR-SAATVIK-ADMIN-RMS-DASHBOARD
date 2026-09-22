@@ -960,6 +960,7 @@ def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = Decimal(0)
     by_day: dict[str, Decimal] = {}
     by_account: dict[str, Decimal] = {}
+    fills: list[dict[str, Any]] = []
     for row in rows:
         amount = Decimal(str(row["commission"]))
         total += amount
@@ -968,6 +969,13 @@ def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         )
         account = row.get("account_id") or ""
         by_account[account] = by_account.get(account, Decimal(0)) + amount
+        fills.append(
+            {
+                "execution_id": row.get("execution_id") or "",
+                "account_id": account,
+                "commission": str(amount),
+            }
+        )
     return {
         "total": str(total),
         "count": len(rows),
@@ -975,6 +983,7 @@ def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "by_account": [
             {"account_id": a, "commission": str(by_account[a])} for a in sorted(by_account)
         ],
+        "fills": fills,
     }
 
 @app.get("/api/v1/accounts/{account_id}/commissions")
@@ -1018,6 +1027,7 @@ async def realized_rows(
 
 def leg_row(row: dict[str, Any], amount: Decimal) -> dict[str, Any]:
     return {
+        "execution_id": row.get("execution_id") or "",
         "symbol": row.get("symbol"),
         "underlying": row.get("underlying"),
         "currency": row.get("currency"),
@@ -1074,27 +1084,41 @@ async def portfolio_realized(
     rows = await realized_rows(request.app.state.db, user, wanted, cycles, active_on)
     return ok(realized_summary(rows))
 
+def channel_fields(prefs, default_triggers) -> dict[str, Any]:
+    enabled = prefs.get("triggers") if prefs else None
+    return {
+        "triggers": sorted(enabled if enabled is not None else default_triggers),
+        "move_percent": str(alerts.threshold(prefs, "move_percent")),
+        "risk_percent": str(alerts.threshold(prefs, "risk_percent")),
+        "price_levels": [str(level) for level in (prefs or {}).get("price_levels") or []],
+        "move_levels": [str(level) for level in (prefs or {}).get("move_levels") or []],
+    }
+
 async def alert_settings(db, user: Principal) -> dict[str, Any]:
     link = await db.telegram_links.find_one({"_id": user.id}, {"_id": 0})
     prefs = await db.alert_preferences.find_one(
         {"tenant_id": user.tenant_id, "user_id": user.id}, {"_id": 0}
     )
-    enabled = prefs.get("triggers") if prefs else None
+    common = None
+    if settings.telegram_team_chat_id:
+        shared = await db.alert_preferences.find_one(
+            {"tenant_id": user.tenant_id, "user_id": alerts.COMMON_USER}, {"_id": 0}
+        )
+        common = {
+            "configured": True,
+            "available": list(alerts.COMMON_AVAILABLE),
+            **channel_fields(shared, alerts.COMMON_DEFAULT),
+        }
     return {
         "configured": telegram.configured(),
         "linked": bool(link),
         "chat_name": (link or {}).get("name"),
         "linked_at": (link or {}).get("linked_at"),
-        "triggers": sorted(enabled if enabled is not None else alerts.DEFAULT_TRIGGERS),
         "available": list(alerts.TRIGGERS),
-        "move_percent": str(alerts.threshold(prefs, "move_percent")),
-        "risk_percent": str(alerts.threshold(prefs, "risk_percent")),
-
-        "price_levels": [str(level) for level in (prefs or {}).get("price_levels") or []],
-
-        "move_levels": [str(level) for level in (prefs or {}).get("move_levels") or []],
+        **channel_fields(prefs, alerts.DEFAULT_TRIGGERS),
         "limits": {name: {"default": d, "min": lo, "max": hi}
                    for name, (d, lo, hi) in alerts.THRESHOLDS.items()},
+        "common": common,
     }
 
 @app.get("/api/v1/me/alerts")
@@ -1127,8 +1151,14 @@ async def set_my_alerts(
     wanted = body.get("triggers")
     if not isinstance(wanted, list):
         raise HTTPException(400, "triggers must be a list")
-
-    triggers = sorted({t for t in wanted if t in alerts.TRIGGERS})
+    channel = body.get("channel") or "personal"
+    if channel not in ("personal", "common"):
+        raise HTTPException(400, "channel must be personal or common")
+    if channel == "common" and not settings.telegram_team_chat_id:
+        raise HTTPException(404, "No common Telegram channel is configured")
+    owner = alerts.COMMON_USER if channel == "common" else user.id
+    allowed = alerts.COMMON_AVAILABLE if channel == "common" else alerts.TRIGGERS
+    triggers = sorted({t for t in wanted if t in allowed})
     update: dict[str, Any] = {"triggers": triggers}
     for name in alerts.THRESHOLDS:
         if name in body:
@@ -1151,9 +1181,9 @@ async def set_my_alerts(
             clean.append(str(abs(value)))
         update[field] = sorted(set(clean), key=Decimal)
     await request.app.state.db.alert_preferences.update_one(
-        {"tenant_id": user.tenant_id, "user_id": user.id},
+        {"tenant_id": user.tenant_id, "user_id": owner},
         {"$set": update, "$setOnInsert": {
-            "tenant_id": user.tenant_id, "user_id": user.id,
+            "tenant_id": user.tenant_id, "user_id": owner,
         }},
         upsert=True,
     )

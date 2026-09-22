@@ -54,6 +54,21 @@ describe("portfolio performance", () => {
     expect(apiMock.mock.calls.at(-1)?.[0]).not.toContain("U2");
   });
 
+  it("offers select-all and clear on the account picker", async () => {
+    apiMock.mockResolvedValue({ accounts: ["U1", "U2"], series: [point("U1", "2026-09-01", "100")], combined: [] });
+    panel();
+    await screen.findByRole("img");
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear accounts" }));
+    expect(screen.getByText("0 of 2 accounts")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/No accounts selected/);
+    expect(screen.queryByRole("img")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select all accounts" }));
+    expect(screen.getByText("2 of 2 accounts")).toBeInTheDocument();
+    await screen.findByRole("img");
+  });
+
   it("narrows the window when a shorter range is picked", async () => {
     apiMock.mockResolvedValue({ accounts: ["U1"], series: [point("U1", "2026-09-01", "100")], combined: [] });
     panel();

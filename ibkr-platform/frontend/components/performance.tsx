@@ -8,6 +8,7 @@ import { HistoryResponse } from "@/lib/types";
 import { DownloadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Chart } from "./chart";
+import { SelectionActions, useSelection } from "./selection";
 import { money } from "./tables";
 
 const RANGES = [
@@ -36,10 +37,10 @@ export function PerformancePanel({
 }) {
   const client = useQueryClient();
   const [days, setDays] = useState<number>(91);
-  const [chosen, setChosen] = useState<string[]>([]);
+  const choice = useSelection(accounts);
   const [combined, setCombined] = useState(true);
 
-  const scope = accountId ? [accountId] : chosen.length ? chosen : accounts;
+  const scope = accountId ? [accountId] : choice.selected;
   const key = ["history", scope.join(","), days];
   const history = useQuery({
     queryKey: key,
@@ -148,25 +149,18 @@ export function PerformancePanel({
       {!accountId && accounts.length > 1 && (
         <fieldset className="account-picker">
           <legend>Accounts in this view</legend>
+          <SelectionActions selection={choice} noun="accounts" />
           {accounts.map((id) => (
             <label key={id}>
-              <input
-                type="checkbox"
-                checked={scope.includes(id)}
-                onChange={(event) =>
-                  setChosen((current) => {
-                    const base = current.length ? current : accounts;
-                    const next = event.target.checked ? [...base, id] : base.filter((a) => a !== id);
-                    return next.length ? [...new Set(next)] : accounts;
-                  })
-                }
-              />
+              <input type="checkbox" checked={choice.has(id)} onChange={() => choice.toggle(id)} />
               {id}
             </label>
           ))}
         </fieldset>
       )}
-      {history.isPending ? (
+      {!scope.length ? (
+        <p role="status" className="footnote">No accounts selected. Tick an account above to draw its history.</p>
+      ) : history.isPending ? (
         <p role="status">Loading history…</p>
       ) : history.isError ? (
         <p role="alert">History could not be loaded.</p>

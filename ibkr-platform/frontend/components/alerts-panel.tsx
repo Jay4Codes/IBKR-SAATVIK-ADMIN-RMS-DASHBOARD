@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDelete } from "@/lib/api";
-import { AlertSettings } from "@/lib/types";
+import { AlertChannel, AlertSettings } from "@/lib/types";
 import { Plus, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -14,6 +14,170 @@ const TRIGGERS: Record<string, { title: string; detail: string }> = {
   gateway: { title: "Gateway notices", detail: "Disconnects, failures and 2FA prompts" },
   events: { title: "Event days", detail: "FOMC decisions, holidays and half-days" },
 };
+
+type Limits = AlertSettings["limits"];
+
+function ChannelControls({
+  label,
+  note,
+  prefs,
+  limits,
+  disabled,
+  showThresholds,
+  onSave,
+}: {
+  label: string;
+  note: string;
+  prefs: AlertChannel;
+  limits: Limits;
+  disabled?: boolean;
+  showThresholds: boolean;
+  onSave: (patch: Record<string, unknown>) => void;
+}) {
+  const [movePct, setMovePct] = useState("");
+  const [riskPct, setRiskPct] = useState("");
+  const [priceDraft, setPriceDraft] = useState("");
+  const [moveDraft, setMoveDraft] = useState("");
+  const wantedMove = Math.round(Math.abs(Number(moveDraft)) * 10) / 10;
+  const canAddMove =
+    Number.isFinite(wantedMove) && wantedMove > 0 && wantedMove < 100 &&
+    !prefs.move_levels.includes(String(wantedMove));
+  const addMove = () => {
+    if (!canAddMove) return;
+    onSave({ triggers: prefs.triggers, move_levels: [...prefs.move_levels, String(wantedMove)] });
+    setMoveDraft("");
+  };
+  const wantedPrice = Math.round(Number(priceDraft) * 100) / 100;
+  const canAddPrice =
+    Number.isFinite(wantedPrice) && wantedPrice > 0 &&
+    !prefs.price_levels.includes(String(wantedPrice));
+  const addPrice = () => {
+    if (!canAddPrice) return;
+    onSave({ triggers: prefs.triggers, price_levels: [...prefs.price_levels, String(wantedPrice)] });
+    setPriceDraft("");
+  };
+  const toggle = (name: string) => {
+    const next = prefs.triggers.includes(name)
+      ? prefs.triggers.filter(t => t !== name)
+      : [...prefs.triggers, name];
+    onSave({ triggers: next });
+  };
+
+  return (
+    <>
+      <h3 className="alert-channel">
+        {label}
+        <small>{note}</small>
+      </h3>
+      <div className="alert-triggers" role="group" aria-label={label}>
+        {prefs.available.map(name => (
+          <label key={name} className="commission-toggle">
+            <input
+              type="checkbox"
+              checked={prefs.triggers.includes(name)}
+              disabled={disabled}
+              onChange={() => toggle(name)}
+            />
+            <span>{TRIGGERS[name]?.title ?? name}</span>
+            <small>{TRIGGERS[name]?.detail ?? ""}</small>
+          </label>
+        ))}
+      </div>
+      {showThresholds && <div className="alert-thresholds">
+        <label>
+          <span>Alert me at these moves</span>
+          <span className="level-entry">
+            <input
+              type="number" min="0.1" max="99" step="0.1" placeholder="e.g. 3"
+              aria-label={`${label} move level, in percent`}
+              value={moveDraft}
+              onChange={e => setMoveDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addMove(); } }}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={addMove} disabled={!canAddMove}>
+              <Plus size={14} aria-hidden="true" />Add
+            </Button>
+          </span>
+          <small>Each one fires when the underlying crosses it, up or down</small>
+        </label>
+        {prefs.move_levels.length > 0 && <span className="level-chips">
+          {prefs.move_levels.map(level => (
+            <button
+              key={level}
+              type="button"
+              className="custom"
+              aria-label={`Remove the ${level}% move alert from ${label}`}
+              onClick={() => onSave({ triggers: prefs.triggers, move_levels: prefs.move_levels.filter(l => l !== level) })}
+            >
+              ±{level}%<b aria-hidden="true">×</b>
+            </button>
+          ))}
+        </span>}
+        <label>
+          <span>{prefs.move_levels.length ? "Otherwise alert me every" : "Alert me every"}</span>
+          <span className="level-entry">
+            <input
+              type="number" min={limits?.move_percent?.min ?? 0.1}
+              max={limits?.move_percent?.max ?? 50} step="0.1"
+              aria-label={`${label} underlying move, in percent`}
+              value={movePct === "" ? prefs.move_percent : movePct}
+              onChange={e => setMovePct(e.target.value)}
+              onBlur={() => { if (movePct !== "") { onSave({ triggers: prefs.triggers, move_percent: movePct }); setMovePct(""); } }}
+            />
+            <b>% move</b>
+          </span>
+          <small>{prefs.move_levels.length
+            ? "Unused while specific moves are set above"
+            : "Each band the underlying crosses from where it was"}</small>
+        </label>
+        <label>
+          <span>Alert me when risk moves</span>
+          <span className="level-entry">
+            <input
+              type="number" min={limits?.risk_percent?.min ?? 1}
+              max={limits?.risk_percent?.max ?? 500} step="1"
+              aria-label={`${label} risk change, in percent`}
+              value={riskPct === "" ? prefs.risk_percent : riskPct}
+              onChange={e => setRiskPct(e.target.value)}
+              onBlur={() => { if (riskPct !== "") { onSave({ triggers: prefs.triggers, risk_percent: riskPct }); setRiskPct(""); } }}
+            />
+            <b>%</b>
+          </span>
+          <small>Worst-case terminal P&amp;L, against what it was</small>
+        </label>
+        <label>
+          <span>Alert me at a price</span>
+          <span className="level-entry">
+            <input
+              type="number" min="0.01" step="any" placeholder="e.g. 7800"
+              aria-label={`${label} price level`}
+              value={priceDraft}
+              onChange={e => setPriceDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addPrice(); } }}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={addPrice} disabled={!canAddPrice}>
+              <Plus size={14} aria-hidden="true" />Add
+            </Button>
+          </span>
+          <small>When the underlying crosses it, either way</small>
+        </label>
+        {prefs.price_levels.length > 0 && <span className="level-chips">
+          {prefs.price_levels.map(level => (
+            <button
+              key={level}
+              type="button"
+              className="price"
+              aria-label={`Remove the ${level} price alert from ${label}`}
+              onClick={() => onSave({ triggers: prefs.triggers, price_levels: prefs.price_levels.filter(l => l !== level) })}
+            >
+              {Number(level).toLocaleString()}<b aria-hidden="true">×</b>
+            </button>
+          ))}
+        </span>}
+      </div>}
+    </>
+  );
+}
 
 export function AlertsPanel() {
   const client = useQueryClient();
@@ -33,44 +197,22 @@ export function AlertsPanel() {
     mutationFn: () => apiDelete<AlertSettings>("/me/alerts/link"),
     onSuccess: () => { setPending(null); client.invalidateQueries({ queryKey: ["alerts"] }); },
   });
-  const [movePct, setMovePct] = useState("");
-  const [riskPct, setRiskPct] = useState("");
-  const [priceDraft, setPriceDraft] = useState("");
-  const [moveDraft, setMoveDraft] = useState("");
   const save = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
-      api<AlertSettings>("/me/alerts", { triggers: data?.triggers ?? [], ...patch }),
-    onSuccess: (next) => client.setQueryData(["alerts"], next),
-  });
-  const wantedMove = Math.round(Math.abs(Number(moveDraft)) * 10) / 10;
-  const canAddMove =
-    Number.isFinite(wantedMove) && wantedMove > 0 && wantedMove < 100 &&
-    !(settings.data?.move_levels ?? []).includes(String(wantedMove));
-  const addMove = () => {
-    if (!canAddMove || !settings.data) return;
-    save.mutate({ move_levels: [...settings.data.move_levels, String(wantedMove)] });
-    setMoveDraft("");
-  };
-  const wantedPrice = Math.round(Number(priceDraft) * 100) / 100;
-  const canAddPrice =
-    Number.isFinite(wantedPrice) && wantedPrice > 0 &&
-    !(settings.data?.price_levels ?? []).includes(String(wantedPrice));
-  const addPrice = () => {
-    if (!canAddPrice || !settings.data) return;
-    save.mutate({ price_levels: [...settings.data.price_levels, String(wantedPrice)] });
-    setPriceDraft("");
-  };
-  const choose = useMutation({
-    mutationFn: (triggers: string[]) => api<AlertSettings>("/me/alerts", { triggers }),
+      api<AlertSettings>("/me/alerts", patch),
     onSuccess: (next) => client.setQueryData(["alerts"], next),
   });
 
   if (data?.linked && pending) setPending(null);
 
-  const toggle = (name: string) => {
-    const current = data?.triggers ?? [];
-    choose.mutate(current.includes(name) ? current.filter(t => t !== name) : [...current, name]);
-  };
+  const personal: AlertChannel | null = data ? {
+    triggers: data.triggers,
+    available: data.available,
+    move_percent: data.move_percent,
+    risk_percent: data.risk_percent,
+    price_levels: data.price_levels,
+    move_levels: data.move_levels,
+  } : null;
 
   return (
     <section className="panel">
@@ -124,116 +266,31 @@ export function AlertsPanel() {
             )}
           </div>
 
-          <div className="alert-triggers">
-            {data!.available.map(name => (
-              <label key={name} className="commission-toggle">
-                <input
-                  type="checkbox"
-                  checked={data!.triggers.includes(name)}
-                  disabled={!data!.linked}
-                  onChange={() => toggle(name)}
-                />
-                <span>{TRIGGERS[name]?.title ?? name}</span>
-                <small>{TRIGGERS[name]?.detail ?? ""}</small>
-              </label>
-            ))}
-          </div>
-          {data!.linked && <div className="alert-thresholds">
-
-            <label>
-              <span>Alert me at these moves</span>
-              <span className="level-entry">
-                <input
-                  type="number" min="0.1" max="99" step="0.1" placeholder="e.g. 3"
-                  aria-label="Add a move level, in percent"
-                  value={moveDraft}
-                  onChange={e => setMoveDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addMove(); } }}
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addMove} disabled={!canAddMove}>
-                  <Plus size={14} aria-hidden="true" />Add
-                </Button>
-              </span>
-              <small>Each one fires when the underlying crosses it, up or down</small>
-            </label>
-            {data!.move_levels.length > 0 && <span className="level-chips">
-              {data!.move_levels.map(level => (
-                <button
-                  key={level}
-                  type="button"
-                  className="custom"
-                  aria-label={`Remove the ${level}% move alert`}
-                  onClick={() => save.mutate({ move_levels: data!.move_levels.filter(l => l !== level) })}
-                >
-                  ±{level}%<b aria-hidden="true">×</b>
-                </button>
-              ))}
-            </span>}
-            <label>
-              <span>{data!.move_levels.length ? "Otherwise alert me every" : "Alert me every"}</span>
-              <span className="level-entry">
-                <input
-                  type="number" min={data!.limits?.move_percent?.min ?? 0.1}
-                  max={data!.limits?.move_percent?.max ?? 50} step="0.1"
-                  aria-label="Underlying move, in percent"
-                  value={movePct === "" ? data!.move_percent : movePct}
-                  onChange={e => setMovePct(e.target.value)}
-                  onBlur={() => { if (movePct !== "") { save.mutate({ move_percent: movePct }); setMovePct(""); } }}
-                />
-                <b>% move</b>
-              </span>
-              <small>{data!.move_levels.length
-                ? "Unused while specific moves are set above"
-                : "Each band the underlying crosses from where it was"}</small>
-            </label>
-            <label>
-              <span>Alert me when risk moves</span>
-              <span className="level-entry">
-                <input
-                  type="number" min={data!.limits?.risk_percent?.min ?? 1}
-                  max={data!.limits?.risk_percent?.max ?? 500} step="1"
-                  aria-label="Risk change, in percent"
-                  value={riskPct === "" ? data!.risk_percent : riskPct}
-                  onChange={e => setRiskPct(e.target.value)}
-                  onBlur={() => { if (riskPct !== "") { save.mutate({ risk_percent: riskPct }); setRiskPct(""); } }}
-                />
-                <b>%</b>
-              </span>
-              <small>Worst-case terminal P&amp;L, against what it was</small>
-            </label>
-            <label>
-              <span>Alert me at a price</span>
-              <span className="level-entry">
-                <input
-                  type="number" min="0.01" step="any" placeholder="e.g. 7800"
-                  aria-label="Add a price level to be alerted on"
-                  value={priceDraft}
-                  onChange={e => setPriceDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addPrice(); } }}
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addPrice} disabled={!canAddPrice}>
-                  <Plus size={14} aria-hidden="true" />Add
-                </Button>
-              </span>
-              <small>When the underlying crosses it, either way</small>
-            </label>
-            {data!.price_levels.length > 0 && <span className="level-chips">
-              {data!.price_levels.map(level => (
-                <button
-                  key={level}
-                  type="button"
-                  className="price"
-                  aria-label={`Remove the ${level} price alert`}
-                  onClick={() => save.mutate({ price_levels: data!.price_levels.filter(l => l !== level) })}
-                >
-                  {Number(level).toLocaleString()}<b aria-hidden="true">×</b>
-                </button>
-              ))}
-            </span>}
-          </div>}
+          {personal && (
+            <ChannelControls
+              label="Your chat"
+              note="Only the chat you connected"
+              prefs={personal}
+              limits={data!.limits}
+              disabled={!data!.linked}
+              showThresholds={data!.linked}
+              onSave={(patch) => save.mutate(patch)}
+            />
+          )}
+          {data!.common && (
+            <ChannelControls
+              label="Common channel"
+              note="Shared desk chat"
+              prefs={data!.common}
+              limits={data!.limits}
+              showThresholds
+              onSave={(patch) => save.mutate({ channel: "common", ...patch })}
+            />
+          )}
           <p className="footnote">
-            Choices are yours alone and apply to this organisation. Switching one off stops
-            the message; it does not stop the event being recorded.
+            {data!.common
+              ? "Each channel keeps its own choices. Entries and exits stay off on the common channel until you turn them on there. Switching one off stops the message; it does not stop the event being recorded."
+              : "Choices are yours alone and apply to this organisation. Switching one off stops the message; it does not stop the event being recorded."}
           </p>
         </>
       )}

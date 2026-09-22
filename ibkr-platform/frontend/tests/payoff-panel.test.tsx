@@ -332,8 +332,20 @@ describe("payoff panel", () => {
     expect(rowFor("U1")).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select all accounts" }));
     expect(rowFor("U2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select all accounts" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear accounts" }));
+    expect(rowFor("U1")).toBeNull();
+    expect(rowFor("U2")).toBeNull();
+    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear accounts" })).toBeDisabled();
+    expect(screen.getByRole("row", { name: /^Desk total terminal/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "U1" }));
+    expect(rowFor("U1")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
   });
 
   it("seeds implied volatility from the broker's own option marks", () => {
@@ -393,7 +405,31 @@ describe("payoff panel", () => {
     expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show all cycles" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select all cycles" }));
+    expect(screen.getByText(/2 included legs/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select all cycles" })).toBeDisabled();
+  });
+
+  it("keeps the cycle picker in reach after every cycle is cleared", () => {
+    const near = futureExpiry(4);
+    const far = futureExpiry(11);
+    panel([
+      position({ con_id: 1, expiry: near, strike: "7650", underlying_price: "7650" }),
+      position({ con_id: 2, expiry: far, strike: "7700", underlying_price: "7650" }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear cycles" }));
+    expect(screen.getByText(/0 included legs/)).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: /RMS by account ID/ })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/No expiry cycles selected/);
+    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear cycles" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: expiryDate(near) }));
+    expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /RMS by account ID/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select all cycles" }));
     expect(screen.getByText(/2 included legs/)).toBeInTheDocument();
   });
 

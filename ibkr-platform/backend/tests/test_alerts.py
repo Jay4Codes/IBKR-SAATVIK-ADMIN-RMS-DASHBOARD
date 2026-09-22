@@ -62,15 +62,45 @@ def test_a_fill_reports_what_it_booked_only_when_it_booked_something():
         "data": {"side": "SLD", "quantity": "1", "symbol": "SPXW  260918P07480000",
                  "price": "11.83", "realized_pnl": "-1265.36"},
     })
-    assert "Sold" in closing
+    assert "Sold 1 × SPXW 18 Sep 26 7480 Put" in closing
     assert "-1,265.36" in closing
+    assert "260918" not in closing
     opening = fill_message({
         "account_id": "U22050074",
         "data": {"side": "BOT", "quantity": "1", "symbol": "SPXW  260918P07485000",
                  "price": "12.28", "realized_pnl": "0.0"},
     })
-    assert "Bought" in opening
+    assert "Bought 1 × SPXW 18 Sep 26 7485 Put" in opening
     assert "Booked" not in opening
+
+def test_a_fill_reads_as_a_contract_rather_than_an_occ_code():
+    expired = fill_message({
+        "account_id": "U21854485",
+        "data": {"side": "SLD", "quantity": "1.0", "symbol": "SPXW  260921C07800000",
+                 "sec_type": "OPT", "price": "0.0"},
+    })
+    assert "Sold 1 × SPXW 21 Sep 26 7800 Call" in expired
+    assert "at 0.00 · U21854485" in expired
+    put = fill_message({
+        "account_id": "U21854485",
+        "data": {"side": "BOT", "quantity": "2.0", "symbol": "SPXW  260921P07590000",
+                 "sec_type": "OPT", "price": "0.0"},
+    })
+    assert "Bought 2 × SPXW 21 Sep 26 7590 Put" in put
+    booked = fill_message({
+        "account_id": "U21854485",
+        "data": {"side": "SLD", "quantity": "1.0", "symbol": "SPXW  260922C07845000",
+                 "sec_type": "OPT", "price": "0.32", "realized_pnl": "-48.08"},
+    })
+    assert "Sold 1 × SPXW 22 Sep 26 7845 Call" in booked
+    assert "at 0.32 · U21854485" in booked
+    assert "Booked <b>-48.08</b>" in booked
+    stock = fill_message({
+        "account_id": "U21854485",
+        "data": {"side": "BOT", "quantity": "1.0", "symbol": "SPX", "sec_type": "STK", "price": "0.2"},
+    })
+    assert "Bought 1 × SPX" in stock
+    assert "at 0.20 · U21854485" in stock
 
 def test_messages_escape_what_the_broker_sends():
     message = fill_message({"account_id": "<b>x</b>", "data": {"side": "BOT", "symbol": "A&B<c>", "quantity": "1", "price": "1"}})

@@ -557,6 +557,11 @@ function Terminal({
                     <small>Broker reported</small>
                   </div>
                   <div>
+                    <label>Margin blocked · {currencyLabel}</label>
+                    <strong>{money(sum("initial_margin"))}</strong>
+                    <small>Initial margin requirement</small>
+                  </div>
+                  <div>
                     <label>Lowest margin cushion</label>
                     <strong>
                       {cushions.length === monetary.length && cushions.length
@@ -645,17 +650,18 @@ function Terminal({
                 <div className="summary-grid">
                   {(
                     [
-                      "cash",
-                      "buying_power",
-                      "initial_margin",
-                      "maintenance_margin",
-                      "gross_position_value",
-                      "realized_pnl",
-                      "unrealized_pnl",
+                      ["cash", "Cash"],
+                      ["buying_power", "Buying power"],
+                      ["available_funds", "Available funds"],
+                      ["initial_margin", "Margin blocked"],
+                      ["maintenance_margin", "Maintenance margin"],
+                      ["gross_position_value", "Gross position value"],
+                      ["realized_pnl", "Realized P&L"],
+                      ["unrealized_pnl", "Unrealized P&L"],
                     ] as const
-                  ).map((key) => (
+                  ).map(([key, label]) => (
                     <div key={key}>
-                      <label>{key.replaceAll("_", " ")}</label>
+                      <label>{label}</label>
                       <strong>{money(selected[0][key])}</strong>
                     </div>
                   ))}

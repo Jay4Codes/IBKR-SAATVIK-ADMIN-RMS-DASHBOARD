@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -8,6 +9,10 @@ from app.telegram import escape
 
 TRIGGERS = ("fills", "move", "risk", "gateway", "events")
 DEFAULT_TRIGGERS = frozenset(TRIGGERS)
+
+COMMON_USER = "__common__"
+COMMON_AVAILABLE = ("fills", "move", "risk", "events")
+COMMON_DEFAULT = frozenset(("move", "risk", "events"))
 
 def decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
@@ -79,17 +84,58 @@ def band_of(price: Decimal, anchor: Decimal, step_percent: Decimal) -> int:
         return 0
     return int((price / anchor - Decimal(1)) * 100 / step_percent)
 
+_OCC = re.compile(r"^([A-Z0-9]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+def compact(value: Any) -> str:
+    number = decimal(value)
+    if number is None:
+        return str(value or "")
+    text = format(number, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+def price_text(value: Any) -> str:
+    number = decimal(value)
+    if number is None:
+        return str(value if value is not None else "")
+    whole, frac = f"{number:,.4f}".split(".")
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac.ljust(2, '0')}"
+
+def contract_name(data: dict[str, Any]) -> str:
+    raw = str(data.get("symbol") or data.get("underlying") or "").strip()
+    kind = str(data.get("sec_type") or "").upper()
+    if kind not in ("", "OPT", "FOP"):
+        return raw
+    match = _OCC.fullmatch(re.sub(r"\s+", "", raw))
+    if not match:
+        return raw
+    root, yy, mm, dd, right, strike_raw = match.groups()
+    month, day = int(mm), int(dd)
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return raw
+    strike = decimal(strike_raw)
+    if strike is None:
+        return raw
+    side = "Call" if right == "C" else "Put"
+    return f"{root} {day} {_MONTHS[month - 1]} {yy} {compact(strike / Decimal(1000))} {side}"
+
+def selected(prefs: dict[str, Any] | None, trigger: str, default: frozenset[str]) -> bool:
+    chosen = None if not prefs else prefs.get("triggers")
+    if chosen is None:
+        chosen = default
+    return trigger in chosen
+
 def fill_message(event: dict[str, Any]) -> str:
     data = event.get("data") or {}
     side = str(data.get("side") or "").upper()
     action = "Bought" if side == "BOT" else "Sold" if side == "SLD" else side or "Filled"
-    quantity = data.get("quantity") or ""
-    symbol = data.get("symbol") or data.get("underlying") or ""
-    price = data.get("price")
     realized = decimal(data.get("realized_pnl"))
     lines = [
-        f"<b>{escape(action)} {escape(quantity)} × {escape(symbol)}</b>",
-        f"at {escape(price)} · {escape(event.get('account_id') or '')}",
+        f"<b>{escape(action)} {escape(compact(data.get('quantity')))} × {escape(contract_name(data))}</b>",
+        f"at {escape(price_text(data.get('price')))} · {escape(event.get('account_id') or '')}",
     ]
     if realized is not None and realized != 0:
         lines.append(f"Booked <b>{escape(f'{realized:,.2f}')}</b>")

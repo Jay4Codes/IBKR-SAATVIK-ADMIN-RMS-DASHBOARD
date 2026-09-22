@@ -210,6 +210,7 @@ export type RealizedSummary = {
   count: number;
   by_account: { account_id: string; realized_pnl: string }[];
   legs: {
+    execution_id: string;
     symbol: string | null;
     underlying: string | null;
     currency: string | null;
@@ -222,6 +223,16 @@ export type RealizedSummary = {
     commission: string;
     executed_at: string | null;
   }[];
+};
+
+export type AlertChannel = {
+  triggers: string[];
+  available: string[];
+  move_percent: string;
+  risk_percent: string;
+  price_levels: string[];
+  move_levels: string[];
+  configured?: boolean;
 };
 
 export type AlertSettings = {
@@ -238,6 +249,7 @@ export type AlertSettings = {
 
   move_levels: string[];
   limits: Record<string, { default: number; min: number; max: number }>;
+  common: AlertChannel | null;
 };
 
 export type CommissionSummary = {
@@ -245,4 +257,5 @@ export type CommissionSummary = {
   count: number;
   by_day: { date: string; commission: string }[];
   by_account: { account_id: string; commission: string }[];
+  fills?: { execution_id: string; account_id: string; commission: string }[];
 };

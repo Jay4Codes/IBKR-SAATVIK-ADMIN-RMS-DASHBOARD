@@ -8,9 +8,9 @@ const FIELDS: { key: keyof Account; title: string; detail: string }[] = [
   { key: "cash", title: "Cash", detail: "Total cash value." },
   { key: "buying_power", title: "Buying power", detail: "Available buying power." },
   { key: "gross_position_value", title: "Position value", detail: "Gross market value of positions." },
-  { key: "initial_margin", title: "Init margin", detail: "Full initial margin requirement." },
-  { key: "maintenance_margin", title: "Maint margin", detail: "Full maintenance margin requirement." },
   { key: "available_funds", title: "Avail funds", detail: "Funds available for trading." },
+  { key: "initial_margin", title: "Margin blocked", detail: "Initial margin currently blocked by positions." },
+  { key: "maintenance_margin", title: "Maint margin", detail: "Full maintenance margin requirement." },
   { key: "excess_liquidity", title: "Excess liq", detail: "Excess liquidity buffer above maintenance margin." },
 ];
 

@@ -322,9 +322,53 @@ async def test_gateway_alerts_are_not_copied_to_the_shared_channel(monkeypatch):
 
     await worker.deliver(None, "gateway", None, "Gateway down", urgent=True)
     await worker.deliver(None, "fills", "U1", "Bought")
+    await worker.deliver(None, "move", None, "SPX up")
 
+    assert sent == ["111", "111", "111", "-100common"]
+    assert raised == ["gateway", "fills", "move"]
+
+async def test_the_common_channel_can_opt_back_into_fills(monkeypatch):
+    from app import telegram
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "telegram_team_chat_id", "-100common")
+    sent: list[str] = []
+
+    async def send(client, chat_id, text):
+        sent.append(chat_id)
+
+    monkeypatch.setattr(telegram, "send", send)
+
+    class Preferences:
+        def __init__(self):
+            self.doc = {"triggers": ["move", "risk", "events"]}
+
+        async def find_one(self, query, projection=None):
+            return self.doc
+
+    db = type("DB", (), {})()
+    db.alert_preferences = Preferences()
+    worker = AlertDispatcher(FakeRedis(), db, "t1")
+
+    async def recipients(account_id):
+        return ["111"]
+
+    async def wants(trigger):
+        return {"111"}
+
+    async def raise_alert(trigger, account_id, text, urgent):
+        return None
+
+    worker.recipients = recipients
+    worker.wants = wants
+    worker.raise_alert = raise_alert
+
+    await worker.deliver(None, "fills", "U1", "Bought")
+    assert sent == ["111"]
+
+    db.alert_preferences.doc = {"triggers": ["fills", "move"]}
+    await worker.deliver(None, "fills", "U1", "Bought")
     assert sent == ["111", "111", "-100common"]
-    assert raised == ["gateway", "fills"]
 
 async def test_each_login_problem_says_what_it_actually_is(monkeypatch):
     from app.alerts import login_message

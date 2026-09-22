@@ -92,6 +92,7 @@ async def test_realized_legs_carry_what_the_panel_groups_on(client, stores):
     _, db = stores
     await execution(db, TENANT, "DU1", "e1", realized="-1265.36", commission="1.73")
     leg = (await client.get("/api/v1/realized")).json()["data"]["legs"][0]
+    assert leg["execution_id"] == "e1"
     assert leg["underlying"] == "SPX"
     assert leg["currency"] == "USD"
     assert leg["expiry"] == "20260918"

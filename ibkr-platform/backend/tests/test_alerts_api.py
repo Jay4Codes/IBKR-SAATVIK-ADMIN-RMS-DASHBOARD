@@ -122,6 +122,42 @@ async def test_move_levels_are_magnitudes_and_deduplicated(client, stores):
 
     assert body["move_levels"] == ["1.5", "3"]
 
+async def test_the_common_channel_starts_without_entries_and_exits(client, stores, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "telegram_team_chat_id", "-100desk")
+    body = (await client.get("/api/v1/me/alerts")).json()["data"]
+    assert body["common"]["configured"] is True
+    assert body["common"]["triggers"] == ["events", "move", "risk"]
+    assert "fills" in body["common"]["available"]
+    assert "gateway" not in body["common"]["available"]
+    assert "fills" in body["triggers"]
+
+    saved = (await client.post("/api/v1/me/alerts", json={
+        "channel": "common",
+        "triggers": ["fills", "move", "gateway"],
+        "move_percent": "3",
+        "price_levels": ["7800"],
+    })).json()["data"]
+    assert saved["common"]["triggers"] == ["fills", "move"]
+    assert saved["common"]["move_percent"] == "3"
+    assert saved["common"]["price_levels"] == ["7800"]
+    assert "fills" in saved["triggers"]
+    _, db = stores
+    stored = await db.alert_preferences.find_one({"user_id": "__common__"})
+    assert stored["triggers"] == ["fills", "move"]
+    assert await db.alert_preferences.find_one({"user_id": "ADMIN"}) is None
+
+async def test_common_channel_settings_need_a_configured_chat(client, stores, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "telegram_team_chat_id", "")
+    body = (await client.get("/api/v1/me/alerts")).json()["data"]
+    assert body["common"] is None
+    assert (await client.post(
+        "/api/v1/me/alerts", json={"channel": "common", "triggers": ["move"]}
+    )).status_code == 404
+
 async def test_move_levels_can_be_cleared(client, stores):
     await client.post("/api/v1/me/alerts", json={"triggers": ["move"], "move_levels": ["3"]})
     body = (await client.post("/api/v1/me/alerts", json={

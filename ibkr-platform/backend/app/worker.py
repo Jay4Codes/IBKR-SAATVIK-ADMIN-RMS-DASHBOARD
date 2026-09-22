@@ -238,9 +238,24 @@ class AlertDispatcher:
         wanted = await self.wants(trigger)
         for chat_id in sorted(entitled & wanted):
             await telegram.send(client, chat_id, text)
-        if settings.telegram_team_chat_id and trigger != "gateway":
+        common = await self.common_prefs()
+        if (
+            common is not None
+            and trigger != "gateway"
+            and alerts.selected(common, trigger, alerts.COMMON_DEFAULT)
+        ):
             await telegram.send(client, settings.telegram_team_chat_id, text)
         await self.raise_alert(trigger, account_id, text, urgent)
+
+    async def common_prefs(self) -> dict | None:
+        if not settings.telegram_team_chat_id:
+            return None
+        if self.db is None:
+            return {}
+        found = await self.db.alert_preferences.find_one(
+            {"tenant_id": self.tenant_id, "user_id": alerts.COMMON_USER}, {"_id": 0}
+        )
+        return found or {}
 
     async def raise_alert(self, trigger: str, account_id: str | None, text: str, urgent: bool):
 \
@@ -484,25 +499,45 @@ class AlertDispatcher:
                 await telegram.send(client, chat, text)
                 await self.raise_alert("move", None, text, False)
 
-        if settings.telegram_team_chat_id and previous is not None:
-            await self.desk_move(client, key, symbol, previous, price)
+        common = await self.common_prefs()
+        if common is not None and previous is not None and alerts.selected(common, "move", alerts.COMMON_DEFAULT):
+            await self.desk_move(client, key, symbol, previous, price, common)
 
-    async def desk_move(self, client, key: str, symbol: str, previous, price):
+    async def desk_move(self, client, key: str, symbol: str, previous, price, prefs: dict):
 
-        step = Decimal(str(settings.alert_move_percent))
         anchor = self.state.anchors.get(key)
         if anchor is None:
             self.state.anchors[key] = price
             self.state.bands[key] = 0
             return
-        band = alerts.band_of(price, anchor, step)
-        if band == self.state.bands.get(key, 0):
-            return
-        self.state.bands[key] = band
-        if band != 0:
+        wanted = [alerts.decimal(level) for level in prefs.get("move_levels") or []]
+        wanted = [level for level in wanted if level and level > 0]
+        if wanted:
+            for level in wanted:
+                for target in (anchor * (1 + level / 100), anchor * (1 - level / 100)):
+                    if not alerts.crossed(previous, price, target):
+                        continue
+                    await telegram.send(
+                        client, settings.telegram_team_chat_id,
+                        alerts.move_message(symbol, price, anchor, 1 if target > anchor else -1, level),
+                    )
+        else:
+            step = alerts.threshold(prefs, "move_percent")
+            band = alerts.band_of(price, anchor, step)
+            if band != self.state.bands.get(key, 0):
+                self.state.bands[key] = band
+                if band != 0:
+                    await telegram.send(
+                        client, settings.telegram_team_chat_id,
+                        alerts.move_message(symbol, price, anchor, band, step),
+                    )
+        for raw in prefs.get("price_levels") or []:
+            level = alerts.decimal(raw)
+            if level is None or not alerts.crossed(previous, price, level):
+                continue
             await telegram.send(
                 client, settings.telegram_team_chat_id,
-                alerts.move_message(symbol, price, anchor, band, step),
+                alerts.price_message(symbol, price, level, price >= previous),
             )
 
     async def members(self, trigger: str):
@@ -546,10 +581,12 @@ class AlertDispatcher:
                 continue
             await telegram.send(client, member["chat_id"], text)
             told = True
-        desk = abs(before) * Decimal(str(settings.alert_risk_percent)) / 100
-        if settings.telegram_team_chat_id and moved >= max(desk, Decimal(1)):
-            await telegram.send(client, settings.telegram_team_chat_id, text)
-            told = True
+        common = await self.common_prefs()
+        if common is not None and alerts.selected(common, "risk", alerts.COMMON_DEFAULT):
+            desk = abs(before) * alerts.threshold(common, "risk_percent") / 100
+            if moved >= max(desk, Decimal(1)):
+                await telegram.send(client, settings.telegram_team_chat_id, text)
+                told = True
         if told:
             await self.raise_alert("risk", account_id, text, False)
 

@@ -101,6 +101,26 @@ describe("day P&L", () => {
     await waitFor(() => expect(apiMock.mock.calls.at(-1)?.[0]).toContain("accounts=U1&"));
   });
 
+  it("can clear every account and pick them all back in one tap", async () => {
+    apiMock.mockResolvedValue({ date: "2026-09-10", accounts: ["U1", "U2"], series: [], combined: [] });
+    panel();
+    await waitFor(() => expect(apiMock).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Select all accounts" })).toBeDisabled();
+
+    const calls = apiMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Clear accounts" }));
+    expect(screen.getByRole("checkbox", { name: "U1" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "U2" })).not.toBeChecked();
+    expect(screen.getByRole("status")).toHaveTextContent(/No accounts selected/);
+    expect(screen.getByRole("button", { name: "Clear accounts" })).toBeDisabled();
+    expect(apiMock.mock.calls.length).toBe(calls);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select all accounts" }));
+    expect(screen.getByRole("checkbox", { name: "U1" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "U2" })).toBeChecked();
+    await waitFor(() => expect(apiMock.mock.calls.at(-1)?.[0]).toContain("accounts=U1%2CU2&"));
+  });
+
   it("waits for a second point rather than drawing a single dot", async () => {
     apiMock.mockResolvedValue({
       date: "2026-09-10", accounts: ["U1"], series: [tick("U1", "13:35", "10")], combined: [],

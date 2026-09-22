@@ -1,19 +1,19 @@
 "use client";
 
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { api } from "@/lib/api";
 import { IntradayResponse } from "@/lib/types";
 import { formatDateTime, formatTime, todayIn, ZONES } from "@/lib/timezone";
 import { Chart } from "./chart";
+import { SelectionActions, useSelection } from "./selection";
 import { money } from "./tables";
 import { useZone } from "./timezone";
 
 export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accounts: string[] }) {
   const zone = useZone();
-  const [chosen, setChosen] = useState<string[]>([]);
-  const scope = accountId ? [accountId] : chosen.length ? chosen : accounts;
+  const choice = useSelection(accounts);
+  const scope = accountId ? [accountId] : choice.selected;
   const date = todayIn(zone);
 
   const intraday = useQuery({
@@ -67,25 +67,18 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
       {!accountId && accounts.length > 1 && (
         <fieldset className="account-picker">
           <legend>Accounts in this view</legend>
+          <SelectionActions selection={choice} noun="accounts" />
           {accounts.map((id) => (
             <label key={id}>
-              <input
-                type="checkbox"
-                checked={scope.includes(id)}
-                onChange={(event) =>
-                  setChosen((current) => {
-                    const base = current.length ? current : accounts;
-                    const next = event.target.checked ? [...base, id] : base.filter((a) => a !== id);
-                    return next.length ? [...new Set(next)] : accounts;
-                  })
-                }
-              />
+              <input type="checkbox" checked={choice.has(id)} onChange={() => choice.toggle(id)} />
               {id}
             </label>
           ))}
         </fieldset>
       )}
-      {intraday.isPending ? (
+      {!scope.length ? (
+        <p role="status" className="footnote">No accounts selected. Tick an account above to draw its day P&amp;L.</p>
+      ) : intraday.isPending ? (
         <p role="status">Loading today&apos;s P&amp;L…</p>
       ) : intraday.isError ? (
         <p role="alert">Day P&amp;L could not be loaded.</p>

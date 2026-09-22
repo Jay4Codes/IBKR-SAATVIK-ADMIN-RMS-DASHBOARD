@@ -341,6 +341,11 @@ export function AccountsTable({
           value: (r) => r.available_funds,
         },
         {
+          label: "Margin blocked",
+          render: (r) => money(r.initial_margin),
+          value: (r) => r.initial_margin,
+        },
+        {
           label: "Excess liquidity",
           render: (r) => money(r.excess_liquidity),
           value: (r) => r.excess_liquidity,

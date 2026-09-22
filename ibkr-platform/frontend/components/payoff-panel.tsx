@@ -8,6 +8,7 @@ import { ASSUMED_VOL, Assumption, brokerSpot, buildCurves, DEFAULT_DIV_YIELD, DE
 import { ChevronDown, ChevronUp, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dropdown } from "./dropdown";
+import { SelectionActions, useSelection } from "./selection";
 import { StrategyPayoff } from "./strategy-payoff";
 import { SearchableSelect } from "./searchable-select";
 import { Amount, money, positionLabel } from "./tables";
@@ -131,16 +132,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
   const currency = currencies.includes(currencyChoice) ? currencyChoice : currencies[0] ?? "";
   const scoped = rows.filter(p => (p.currency || "Unknown") === currency);
   const { legs: allLegs, excluded } = prepareLegs(scoped, now);
-  const [chosen, setChosen] = useState<string[]>([]);
   const expiries = [...new Set(allLegs.map(l => l.position.expiry).filter(Boolean))].sort();
-  const picked = chosen.filter(value => expiries.includes(value));
-  const shown = picked.length ? picked : expiries;
+  const cycleChoice = useSelection(expiries);
+  const shown = cycleChoice.selected;
+  // Only an explicit subset narrows the booked-P&L query; "all" asks by live cycle.
+  const picked = cycleChoice.isAll ? [] : shown;
   const legs = allLegs.filter(l => shown.includes(l.position.expiry));
-  const toggleExpiry = (value: string) =>
-    setChosen(current => {
-      const next = shown.includes(value) ? shown.filter(e => e !== value) : [...shown, value];
-      return next.length === expiries.length ? [] : next;
-    });
   const keys = [...new Set(legs.map(l => underlyingKey(l.position)))].sort();
   const assumptions: Record<string, Assumption> = {};
   const quoted: Record<string, number | undefined> = {};
@@ -233,16 +230,25 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
   const currentPoint = adjusted.find(point => point.shock === 0);
   const openPoint = points.find(point => point.shock === 0);
   const accountIds = points.length ? Object.keys(points[0].accounts).sort() : [];
-  const [shownAccounts, setShownAccounts] = useState<string[]>([]);
-  const pickedAccounts = shownAccounts.filter(id => accountIds.includes(id));
-  const accountRows = pickedAccounts.length ? pickedAccounts : accountIds;
-  const toggleAccount = (id: string) =>
-    setShownAccounts(current => {
-      const shown = current.filter(a => accountIds.includes(a));
-      const effective = shown.length ? shown : accountIds;
-      const next = effective.includes(id) ? effective.filter(a => a !== id) : [...effective, id];
-      return next.length === accountIds.length ? [] : next;
-    });
+  const accountChoice = useSelection(accountIds);
+  const accountRows = accountChoice.selected;
+  const expiryPicker = expiries.length > 0 && (
+    <Dropdown
+      className="expiry-picker"
+      label="Expiry"
+      value={cycleChoice.isAll && expiries.length === 1 ? (expiryDate(expiries[0]) || expiries[0]) : cycleChoice.summary}
+    >
+      <div className="dropdown-menu" role="group" aria-label="Expiry cycles to model">
+        <SelectionActions selection={cycleChoice} noun="cycles" />
+        {expiries.map(value => (
+          <label key={value}>
+            <input type="checkbox" checked={cycleChoice.has(value)} onChange={() => cycleChoice.toggle(value)} />
+            <span>{expiryDate(value) || value}</span>
+          </label>
+        ))}
+      </div>
+    </Dropdown>
+  );
   const scenarioLevel = (shock: number) => keys
     .map(key => `${key.split(":").at(-1)} ${money(String(assumptions[key].spot * (1 + shock / 100)))}`)
     .join(" · ");
@@ -335,17 +341,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
         </label>}
         <div className="bar-row">
         {!accountId && accountIds.length > 0 && (
-          <Dropdown
-            label="Accounts"
-            value={pickedAccounts.length ? `${pickedAccounts.length} of ${accountIds.length}` : `All ${accountIds.length}`}
-          >
+          <Dropdown label="Accounts" value={accountChoice.summary}>
             <div className="dropdown-menu" role="group" aria-label="Accounts to show as rows">
-              <button type="button" className="all" onClick={() => setShownAccounts([])} disabled={!pickedAccounts.length}>
-                Show all
-              </button>
+              <SelectionActions selection={accountChoice} noun="accounts" />
               {accountIds.map(id => (
                 <label key={id}>
-                  <input type="checkbox" checked={accountRows.includes(id)} onChange={() => toggleAccount(id)} />
+                  <input type="checkbox" checked={accountChoice.has(id)} onChange={() => accountChoice.toggle(id)} />
                   <span>{id}</span>
                 </label>
               ))}
@@ -373,6 +374,10 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
         </label>
         </div>
       </div>
+      {cycleChoice.isNone && <div className="empty-selection" role="status">
+        {expiryPicker}
+        <span>No expiry cycles selected — tick a cycle or select all to model the book.</span>
+      </div>}
       {missing.length > 0 && <p role="status">Enter valid assumptions for {missing.join(", ")} to calculate the curve.</p>}
       {excluded.length > 0 && <details><summary>Partial coverage: {excluded.length} excluded legs</summary><ul>{excluded.map(({ position: p, reason }) => <li key={`${p.account_id}:${p.con_id}`}>{p.account_id} · {positionLabel(p)}: {reason}</li>)}</ul></details>}
       {tails.length > 0 && <p className="risk-warning">Potential uncapped upside exposure: {tails.join(", ")}. Calls at different expiries are not treated as guaranteed hedges.</p>}
@@ -415,25 +420,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accountId, loading,
           legs={legs} assumptions={assumptions} keys={keys} currency={currency}
           rate={rate} offset={realized} light={light} range={range}
           horizon={horizon}
-          toolbar={<>{expiries.length > 0 && (
-          <Dropdown
-            className="expiry-picker"
-            label="Expiry"
-            value={picked.length ? `${picked.length} of ${expiries.length}` : (expiries.length === 1 ? (expiryDate(expiries[0]) || expiries[0]) : `All ${expiries.length}`)}
-          >
-            <div className="dropdown-menu" role="group" aria-label="Expiry cycles to model">
-              <button type="button" className="all" onClick={() => setChosen([])} disabled={!picked.length}>
-                Show all cycles
-              </button>
-              {expiries.map(value => (
-                <label key={value}>
-                  <input type="checkbox" checked={shown.includes(value)} onChange={() => toggleExpiry(value)} />
-                  <span>{expiryDate(value) || value}</span>
-                </label>
-              ))}
-            </div>
-          </Dropdown>
-        )}</>}
+          toolbar={expiryPicker}
         />
         <div className="payoff-sliders">
           <label>
