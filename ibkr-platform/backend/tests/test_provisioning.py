@@ -83,6 +83,13 @@ def test_the_launcher_points_at_this_instances_own_files(host):
     assert "TWS_MAJOR_VRSN=1045" in launcher
     assert stat.S_IMODE(os.stat(layout["launcher_path"]).st_mode) == 0o700
 
+def test_the_worker_is_master_client_of_its_own_gateway(host):
+    template_id = "OverrideTwsMasterClientID=17\n"
+    (host / "ibc" / "config.ini").write_text(CONFIG_TEMPLATE + template_id)
+    text = Path(provisioning.provision_files(connection(client_id=18))["ibc_config_path"]).read_text()
+    assert "OverrideTwsMasterClientID=18" in text
+    assert template_id not in text
+
 def test_two_connections_get_fully_separate_instances(host):
     first = provisioning.provision_files(connection(_id="a", api_port=4101))
     second = provisioning.provision_files(connection(_id="b", api_port=4102))

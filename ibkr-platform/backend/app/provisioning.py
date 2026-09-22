@@ -113,6 +113,7 @@ def build_config(
     *,
     port: int,
     trading_mode: str,
+    client_id: int | None = None,
     username: str | None = None,
     password: str | None = None,
     second_factor_device: str | None = None,
@@ -121,6 +122,8 @@ def build_config(
     values = dict(BASE_SETTINGS)
     values.update(restart_schedule())
     values["OverrideTwsApiPort"] = str(port)
+    if client_id:
+        values["OverrideTwsMasterClientID"] = str(client_id)
     values["TradingMode"] = trading_mode
     values["IbLoginId"] = username or ""
     values["IbPassword"] = password or ""
@@ -163,6 +166,7 @@ def provision_files(doc: dict[str, Any], *, password: str | None = None) -> dict
             template,
             port=int(doc["api_port"]),
             trading_mode=doc.get("trading_mode", "paper"),
+            client_id=doc.get("client_id"),
             username=doc.get("ibkr_username"),
             password=existing_password,
             second_factor_device=doc.get("second_factor_device"),
