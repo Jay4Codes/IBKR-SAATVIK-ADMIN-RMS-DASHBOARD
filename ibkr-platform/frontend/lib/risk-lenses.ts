@@ -175,6 +175,21 @@ function sortRows(lens: Lens, rows: LensRow[]): LensRow[] {
   return rows.sort((a, b) => a.worst - b.worst || a.label.localeCompare(b.label));
 }
 
+/** One row at a time: SPX first on the asset lens, A–Z on accounts, date order on expiries. */
+export function focusChoices(lens: Lens, rows: { id: string; label: string }[]): { id: string; label: string }[] {
+  if (lens === "asset") {
+    return [...rows].sort((a, b) =>
+      Number(b.label === "SPX") - Number(a.label === "SPX") || a.label.localeCompare(b.label),
+    );
+  }
+  if (lens === "account") return [...rows].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+  return rows;
+}
+
+export function preferredFocus(lens: Lens, rows: { id: string; label: string }[]): string | undefined {
+  return focusChoices(lens, rows)[0]?.id;
+}
+
 export function dominantKey(rows: LensRow[]): string | undefined {
   const byKey = new Map<string, number>();
   for (const row of rows) for (const key of row.keys) byKey.set(key, Math.min(byKey.get(key) ?? 0, row.worst));

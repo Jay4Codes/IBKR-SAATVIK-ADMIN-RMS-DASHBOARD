@@ -8,12 +8,14 @@ export function SearchableSelect({
   options,
   onChange,
   searchFrom = 7,
+  format = option => option,
 }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
   searchFrom?: number;
+  format?: (value: string) => string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -23,7 +25,10 @@ export function SearchableSelect({
 
   const searchable = options.length >= searchFrom;
   const shown = searchable
-    ? options.filter(option => option.toLowerCase().includes(query.toLowerCase()))
+    ? options.filter(option => {
+        const needle = query.toLowerCase();
+        return option.toLowerCase().includes(needle) || format(option).toLowerCase().includes(needle);
+      })
     : options;
 
   useEffect(() => {
@@ -78,7 +83,7 @@ export function SearchableSelect({
           setActive(Math.max(0, options.indexOf(value)));
         }}
       >
-        <span>{value || "—"}</span>
+        <span>{format(value) || value || "—"}</span>
         <span aria-hidden="true" className="ss-caret">
           ▾
         </span>
@@ -109,7 +114,7 @@ export function SearchableSelect({
                   onMouseEnter={() => setActive(index)}
                   onClick={() => choose(option)}
                 >
-                  {option}
+                  {format(option)}
                 </button>
               </li>
             ))}

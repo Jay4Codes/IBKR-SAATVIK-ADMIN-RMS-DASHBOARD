@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { prepareLegs } from "@/lib/payoff";
-import { breachClass, buildRows, expiryBucket, expiryLabel, groupKey, NO_EXPIRY, percentOf } from "@/lib/risk-lenses";
+import { breachClass, buildRows, expiryBucket, expiryLabel, groupKey, NO_EXPIRY, percentOf, preferredFocus } from "@/lib/risk-lenses";
 import { Position } from "@/lib/types";
 
 const today = Date.parse("2026-09-22T14:00:00Z");
@@ -45,6 +45,14 @@ describe("lens rows", () => {
     expect(byAccount.map(row => row.id).sort()).toEqual(["A", "B"]);
 
     expect(groupKey("expiry", legs[1])).toBe(NO_EXPIRY);
+  });
+});
+
+describe("focus", () => {
+  it("opens the asset lens on SPX when that name is in the book", () => {
+    const rows = [{ id: "USD:NVDA", label: "NVDA" }, { id: "USD:SPX", label: "SPX" }, { id: "USD:QQQ", label: "QQQ" }];
+    expect(preferredFocus("asset", rows)).toBe("USD:SPX");
+    expect(preferredFocus("account", [{ id: "B", label: "B" }, { id: "A", label: "A" }])).toBe("A");
   });
 });
 

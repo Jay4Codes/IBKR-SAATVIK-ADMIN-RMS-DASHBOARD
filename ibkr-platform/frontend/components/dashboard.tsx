@@ -471,7 +471,7 @@ function Terminal({
             <h1>{title}</h1>
           </div>
           <div className="heading-actions">
-            {activeCurrency && currencies.length > 1 && !PLATFORM_VIEWS.includes(view) && (
+            {activeCurrency && currencies.length > 1 && !PLATFORM_VIEWS.includes(view) && !shows("RMS") && (
               <SearchableSelect
                 label="Reporting currency"
                 value={activeCurrency}

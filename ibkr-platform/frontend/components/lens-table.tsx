@@ -116,7 +116,7 @@ export function LensTable({
             <th scope="col">Measure</th>
             {lens === "asset" && <th scope="col" className="ref">Reference</th>}
             <th scope="col" className="now">
-              <Term hint="Live marked P&L at the current reference (0% move), including any booked adjustments.">Now</Term>
+              <Term hint="Live mark-to-market at the current reference (0% move), including any booked adjustments.">MTM</Term>
             </th>
             {shownColumns.map((column, index) => (
               <th key={column.id} scope="col" className={cellClass(column)} aria-label={column.label}>
@@ -132,7 +132,7 @@ export function LensTable({
               </th>
             ))}
             <th scope="col" className="worst">
-              <Term hint="Lowest P&L at expiry anywhere in the plotted range. Widen the range to test further out.">Worst</Term>
+              <Term hint="Lowest settlement P&L anywhere in the plotted range. Widen the range to test a deeper move.">Worst</Term>
             </th>
             <th scope="col" className="shape"><span className="sr-only">Payoff shape</span></th>
           </tr>

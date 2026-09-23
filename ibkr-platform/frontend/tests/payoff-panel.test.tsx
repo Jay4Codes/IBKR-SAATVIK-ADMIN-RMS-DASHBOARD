@@ -33,7 +33,15 @@ afterEach(() => {
   localStorage.removeItem("rms.lens");
   localStorage.removeItem("rms.shock");
   localStorage.removeItem("rms.denomination");
+  localStorage.removeItem("rms.focus.asset");
+  localStorage.removeItem("rms.focus.expiry");
+  localStorage.removeItem("rms.focus.account");
 });
+
+function pickFocus(name: string, control: "Underlying" | "Expiry" | "Account" = "Underlying") {
+  fireEvent.click(screen.getByLabelText(control));
+  fireEvent.click(screen.getByRole("option", { name }));
+}
 
 function futureExpiry(days: number): string {
   const date = new Date(Date.now() + days * 86400000);
@@ -99,10 +107,9 @@ describe("payoff panel", () => {
     panel([position({ sec_type: "STK", average_cost: "80", market_price: "100" }), position({ sec_type: "STK", currency: "EUR", con_id: 2, average_cost: "90", market_price: "100" })], { accountId: "A" });
     expect(screen.getByRole("heading")).toHaveTextContent("Account payoff");
     expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(EUR\)/);
-    fireEvent.click(screen.getByLabelText("Risk currency"));
-    fireEvent.click(screen.getByRole("option", { name: "USD" }));
-    expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(USD\)/);
     expect(screen.getByText(/1 included legs/)).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "AED" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Risk currency")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
   it("opens on the currency that has reference prices", () => {
@@ -121,16 +128,20 @@ describe("payoff panel", () => {
       position({ symbol: "MCD", underlying_price: null, con_id: 2 }),
     ]);
     expect(screen.getByRole("table")).toHaveAccessibleName(/Scenario P&L \(USD\)/);
-    expect(screen.getByText(/No broker reference price for USD:MCD/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Underlying")).toHaveTextContent("SPX");
     expect(screen.getByLabelText("SPX reference price")).toHaveTextContent("7,650.00");
+    pickFocus("MCD");
+    expect(screen.getByText(/No broker reference price for USD:MCD/)).toBeInTheDocument();
   });
   it("includes stocks that carry no expiry when every cycle is selected", () => {
     panel([
       position({ sec_type: "STK", symbol: "NVDA", expiry: "", average_cost: "80", market_price: "100", con_id: 1 }),
       position({ symbol: "SPX", underlying_price: "7650", con_id: 2 }),
     ]);
-    expect(screen.getByText(/NVDA reference price/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Underlying")).toHaveTextContent("SPX");
     expect(screen.getByText(/SPX reference price/)).toBeInTheDocument();
+    pickFocus("NVDA");
+    expect(screen.getByText(/NVDA reference price/)).toBeInTheDocument();
   });
   it("reports unsupported positions without treating them as zero risk", () => {
     panel([position({ sec_type: "FOP" })]);
@@ -261,14 +272,17 @@ describe("payoff panel", () => {
     ]);
     fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
     const table = screen.getByRole("table", { name: /RMS by account ID/ });
+    expect(screen.getByLabelText("Account")).toHaveTextContent("A");
     expect(table).toHaveTextContent("A");
-    expect(table).toHaveTextContent("B");
+    expect(screen.queryByRole("row", { name: /^B terminal/ })).toBeNull();
     for (const level of ["-10%", "-5%", "-3%", "-1%", "+1%", "+3%", "+5%", "+10%"])
       expect(screen.getByRole("columnheader", { name: level })).toBeInTheDocument();
     for (const gone of ["-4%", "-2%", "+2%", "+4%"])
       expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
     expect(screen.getByRole("row", { name: /^A terminal/ })).toBeInTheDocument();
+    pickFocus("B", "Account");
     expect(screen.getByRole("row", { name: /^B terminal/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /^A terminal/ })).toBeNull();
   });
 
   it("does not put removable chips on the default 1/3/5/10 percent levels", () => {
@@ -314,7 +328,7 @@ describe("payoff panel", () => {
     const shockCell = (row: HTMLElement, index: number) =>
       Number([...row.querySelectorAll("td.col")][index].textContent!.replace(/,/g, ""));
     const open = shockCell(screen.getByRole("row", { name: /Open legs, as broker reports/ }), 3);
-    const total = shockCell(screen.getByRole("row", { name: /Desk total/ }), 3);
+    const total = shockCell(screen.getByRole("row", { name: /XYZ terminal/ }), 3);
     expect(open).toBeGreaterThan(0);
     expect(total).toBeCloseTo(open - 1265.36, 2);
   });
@@ -357,34 +371,15 @@ describe("payoff panel", () => {
     ]);
     fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
     await screen.findByRole("table", { name: /RMS by account ID/ });
-    const open = screen.queryByRole("button", { name: /^U[12] terminal/, expanded: true });
-    if (open) fireEvent.click(open);
     const rowFor = (id: string) => screen.queryByRole("row", { name: new RegExp(`^${id}\\b`) });
+    expect(screen.getByLabelText("Account")).toHaveTextContent("U1");
     expect(rowFor("U1")).toBeInTheDocument();
-    expect(rowFor("U2")).toBeInTheDocument();
-
-    expect(screen.getByText("All 2")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "U2" }));
     expect(rowFor("U2")).toBeNull();
-    expect(rowFor("U1")).toBeInTheDocument();
-    expect(screen.getByText("1 of 2")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Select all accounts" }));
+    pickFocus("U2", "Account");
     expect(rowFor("U2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select all accounts" })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Clear accounts" }));
     expect(rowFor("U1")).toBeNull();
-    expect(rowFor("U2")).toBeNull();
-    expect(screen.getByText("None")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear accounts" })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent(/accounts/);
-    expect(screen.queryByRole("table", { name: /RMS by/ })).toBeNull();
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "U1" }));
-    expect(rowFor("U1")).toBeInTheDocument();
-    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("Account")).toHaveTextContent("U2");
   });
 
   it("seeds implied volatility from the broker's own option marks", () => {
@@ -546,7 +541,7 @@ describe("payoff panel", () => {
     );
     const table = await screen.findByRole("table", { name: /RMS by/ });
     await waitFor(() => expect(table).toHaveTextContent("Booked P&L (closed legs)"));
-    const total = () => [...screen.getByRole("row", { name: /Desk total/ }).querySelectorAll("td.col")][3].textContent!;
+    const total = () => [...screen.getByRole("row", { name: /XYZ terminal/ }).querySelectorAll("td.col")][3].textContent!;
     const withClosed = Number(total().replace(/,/g, ""));
 
     fireEvent.click(screen.getByLabelText(/Include closed legs/));
@@ -648,7 +643,7 @@ describe("payoff panel", () => {
     );
     await screen.findByRole("table", { name: /RMS by/ });
     const total = () => Number(
-      [...screen.getByRole("row", { name: /Desk total/ }).querySelectorAll("td.col")][3].textContent!.replace(/,/g, ""),
+      [...screen.getByRole("row", { name: /XYZ terminal/ }).querySelectorAll("td.col")][3].textContent!.replace(/,/g, ""),
     );
     const says = (re: RegExp) => re.test(document.body.textContent ?? "");
 
@@ -706,17 +701,23 @@ describe("payoff panel", () => {
       position({ account_id: "B", symbol: "NVDA", sec_type: "STK", expiry: "", average_cost: "80", market_price: "100", con_id: 2 }),
     ]);
     expect(screen.getByRole("table")).toHaveAccessibleName(/RMS by underlying/);
+    expect(screen.getByLabelText("Underlying")).toHaveTextContent("SPX");
     expect(screen.getByRole("row", { name: /^SPX terminal/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /^NVDA terminal/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /^NVDA terminal/ })).toBeNull();
     expect(document.querySelector(".spark")).toBeTruthy();
+    pickFocus("NVDA");
+    expect(screen.getByRole("row", { name: /^NVDA terminal/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: /By expiry/ }));
     expect(screen.getByRole("table")).toHaveAccessibleName(/RMS by expiry/);
+    pickFocus("Stock, no expiry", "Expiry");
     expect(screen.getByRole("row", { name: /Stock, no expiry/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
     expect(screen.getByRole("table")).toHaveAccessibleName(/RMS by account ID/);
+    expect(screen.getByLabelText("Account")).toHaveTextContent("A");
     expect(screen.getByRole("row", { name: /^A terminal/ })).toBeInTheDocument();
+    pickFocus("B", "Account");
     expect(screen.getByRole("row", { name: /^B terminal/ })).toBeInTheDocument();
   });
 
@@ -725,9 +726,10 @@ describe("payoff panel", () => {
       position({ symbol: "SPX", underlying_price: "7650", con_id: 1 }),
       position({ symbol: "MCD", underlying_price: null, con_id: 2 }),
     ]);
+    expect(screen.getByRole("row", { name: /^SPX terminal/ })).toBeInTheDocument();
+    pickFocus("MCD");
     expect(screen.getByText("Unpriced — no broker reference, not modeled")).toBeInTheDocument();
     expect(screen.getByText(/No broker reference price for USD:MCD/)).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /^SPX terminal/ })).toBeInTheDocument();
   });
 
   it("offers a beta-weighted shock when more than one name is priced", () => {
@@ -735,6 +737,7 @@ describe("payoff panel", () => {
       position({ symbol: "SPX", underlying_price: "7650", con_id: 1 }),
       position({ symbol: "NVDA", sec_type: "STK", expiry: "", average_cost: "80", market_price: "100", con_id: 2 }),
     ]);
+    fireEvent.click(screen.getByRole("radio", { name: /By account/ }));
     fireEvent.click(screen.getByRole("radio", { name: /vs SPX/ }));
     expect(screen.getByLabelText("SPX beta")).toBeInTheDocument();
     expect(screen.getByLabelText("NVDA beta")).toBeInTheDocument();

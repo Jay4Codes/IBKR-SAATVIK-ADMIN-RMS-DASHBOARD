@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Account, Position, RealizedSummary } from "@/lib/types";
 import { ASSUMED_VOL, Assumption, brokerSpot, buildCurves, DEFAULT_DIV_YIELD, DEFAULT_RATE, impliedByUnderlying, numeric, prepareLegs, RMS_SHOCKS, spotLabel, underlyingKey, upsideRisks, validAssumption } from "@/lib/payoff";
-import { buildRows, dominantKey, expiryLabel, expiryOf, Lens, LENSES, LensRow, NO_EXPIRY, realizedByGroup, ShockMode, unpricedPositions } from "@/lib/risk-lenses";
+import { buildRows, expiryLabel, expiryOf, focusChoices, Lens, LENSES, LensRow, NO_EXPIRY, preferredFocus, realizedByGroup, realizedGroupKey, ShockMode, unpricedPositions } from "@/lib/risk-lenses";
 import { buildColumns, Column, COLUMN_ORDER_KEY, CUSTOM_LEVELS_KEY, DEFAULT_LEVELS, isDefaultPct, MAX_CUSTOM, orderColumns, PRICE_LEVELS_KEY } from "@/lib/scenario-columns";
 import { ChevronDown, ChevronUp, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ export { buildColumns, COLUMN_ORDER_KEY, levelLabel, orderColumns } from "@/lib/
 const LENS_KEY = "rms.lens";
 const SHOCK_KEY = "rms.shock";
 const DENOMINATION_KEY = "rms.denomination";
+const FOCUS_KEY: Record<Lens, string> = { asset: "rms.focus.asset", expiry: "rms.focus.expiry", account: "rms.focus.account" };
 
 const isLens = (value: string): value is Lens => LENSES.some(l => l.id === value);
 const symbolOf = (key: string) => key.split(":").at(-1) ?? key;
@@ -63,7 +64,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   error: boolean;
   light: boolean;
 }) {
-  const [currencyChoice, setCurrency] = useState("");
   const [overrides, setOverrides] = useState<Record<string, Partial<Assumption>>>({});
   const [range, setRange] = useState(10);
   const [withCommissions, setWithCommissions] = useState(false);
@@ -79,7 +79,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const prices = parsePrices(usePersisted(PRICE_LEVELS_KEY, ""));
   const [draft, setDraft] = useState("");
   const [priceDraft, setPriceDraft] = useState("");
-  const [expandedChoice, setExpanded] = useState<Record<Lens, string | null | undefined>>({ asset: undefined, expiry: undefined, account: undefined });
   const write = (key: string, values: number[]) =>
     writeStored(key, [...new Set(values)].sort((a, b) => a - b).join(","));
   const wanted = Math.round(Math.abs(Number(draft)) * 10) / 10;
@@ -115,7 +114,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   }, []);
   const today = todayIn(zone);
   const currencies = currencyRank(rows, now);
-  const currency = currencies.includes(currencyChoice) ? currencyChoice : currencies[0] ?? "";
+  const currency = currencies[0] ?? "";
   const scoped = rows.filter(p => (p.currency || "Unknown") === currency);
   const { legs: allLegs, excluded } = prepareLegs(scoped, now);
 
@@ -163,7 +162,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     ? new Date(now + horizon * 86400000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
     : `${horizon.toFixed(1)}d`;
   const ready = !loading && !error && modeled.length > 0;
-  const priceLevels = pricedKeys.length === 1 ? prices : [];
+  const priceLevels = lens === "asset" || pricedKeys.length === 1 ? prices : [];
   const naturalColumns = buildColumns(custom, priceLevels, assumptions[pricedKeys[0]]?.spot ?? 0);
   const columnOrder = usePersisted(COLUMN_ORDER_KEY, "").split(",").filter(Boolean);
   const columns = orderColumns(naturalColumns, columnOrder);
@@ -220,7 +219,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const [inputs, setInputs] = useState(false);
   const [sheet, setSheet] = useState(false);
   const currentPoint = adjusted.find(point => point.shock === 0);
-  const openPoint = points.find(point => point.shock === 0);
 
   const nlv: Record<string, number | null> = {};
   for (const account of accounts) {
@@ -233,8 +231,35 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         nlv,
       })
     : [];
-  const totalNlvs = accountChoice.selected.map(id => nlv[id] ?? null);
-  const total: LensRow = {
+  const unpriced = unpricedPositions(
+    scoped.filter(p => accountChoice.has(p.account_id) && cycleChoice.has(expiryOf(p)) && nameChoice.has(underlyingKey(p))),
+    currency,
+    assumptions,
+  );
+  const focusRows = focusChoices(lens, [
+    ...lensRows,
+    ...unpriced
+      .filter(group => lens === "asset" && !lensRows.some(row => row.id === group.key))
+      .map(group => ({ id: group.key, label: symbolOf(group.key) })),
+  ]);
+  const storedFocus = usePersisted(FOCUS_KEY[lens], "");
+  const focus = focusRows.some(row => row.id === storedFocus) ? storedFocus : preferredFocus(lens, focusRows) ?? "";
+  const setFocus = (id: string) => writeStored(FOCUS_KEY[lens], id);
+  const focused = lensRows.find(row => row.id === focus);
+  const focusedUnpriced = unpriced.filter(group => group.key === focus);
+  const viewCurves = focused
+    ? buildCurves(focused.legs, assumptions, range, horizon, rate / 100, levels).map(point => ({
+        ...point,
+        terminal: point.terminal + focused.adjustment,
+        modeled: point.modeled + focused.adjustment,
+      }))
+    : [];
+  const viewRealizedLegs = realizedLegs.filter(leg => realizedGroupKey(lens, leg) === focus);
+  const viewBooked = viewRealizedLegs.reduce((sum, leg) => sum + (withClosed ? numeric(leg.realized_pnl) ?? 0 : 0), 0);
+  const viewCharged = withCommissions ? 0 : viewRealizedLegs
+    .filter(leg => (numeric(leg.realized_pnl) ?? 0) === 0)
+    .reduce((sum, leg) => sum + (numeric(leg.commission) ?? 0), 0);
+  const total: LensRow = focused ?? {
     id: TOTAL_ROW,
     label: accountId ? accountId : "Desk total",
     legs: modeled,
@@ -248,21 +273,21 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     worst: adjusted.length ? Math.min(...adjusted.map(p => p.terminal)) : NaN,
     spark: adjusted.map(p => p.terminal),
     adjustment: realized,
-    nlv: totalNlvs.length && totalNlvs.every(v => v !== null && v > 0) ? totalNlvs.reduce<number>((s, v) => s + (v ?? 0), 0) : null,
+    nlv: null,
   };
-  const openByShock: Record<number, number> = Object.fromEntries(points.map(p => [p.shock, p.terminal]));
-  const dominant = dominantKey(lensRows);
-  const defaultExpanded = lens === "asset"
-    ? dominant ?? null
-    : lensRows[0]?.id ?? null;
-  const requested = expandedChoice[lens] === undefined ? defaultExpanded : expandedChoice[lens];
-  const expanded = requested && (requested === TOTAL_ROW || lensRows.some(row => row.id === requested))
-    ? requested
-    : null;
-  const setExpandedFor = (id: string | null) => setExpanded(prev => ({ ...prev, [lens]: id }));
+  const openByShock: Record<number, number> = Object.fromEntries(
+    (viewCurves.length ? viewCurves : points).map(p => [p.shock, p.terminal - (focused?.adjustment ?? 0)]),
+  );
+  const viewNow = focused?.now ?? currentPoint?.modeled;
+  const viewExpiry = focused ? focused.at[0] ?? NaN : currentPoint?.terminal;
+  const viewWorst = focused?.worst ?? total.worst;
+  const viewWorstMtm = viewCurves.length
+    ? Math.min(...viewCurves.map(p => p.modeled))
+    : (adjusted.length ? Math.min(...adjusted.map(p => p.modeled)) : NaN);
+  const viewKeys = focused?.keys ?? pricedKeys;
 
   const levelFor = (shock: number): ReactNode => {
-    const parts = pricedKeys.map(key => ({ symbol: symbolOf(key), price: money(String(assumptions[key].spot * (1 + shock * (assumptions[key].beta ?? 1) / 100))) }));
+    const parts = viewKeys.map(key => ({ symbol: symbolOf(key), price: money(String(assumptions[key].spot * (1 + shock * (assumptions[key].beta ?? 1) / 100))) }));
     if (parts.length <= 2) return parts.map(p => `${p.symbol} ${p.price}`).join(" · ");
     return (
       <Term hint={<span className="level-list">{parts.map(p => <span key={p.symbol}><span>{p.symbol}</span><b>{p.price}</b></span>)}</span>}>
@@ -272,9 +297,10 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   };
 
   const renderDetail = (row: LensRow | null): ReactNode => {
-    const rowLegs = row ? row.legs : modeled;
-    const rowKeys = (row ? row.keys : pricedKeys).filter(key => pricedKeys.includes(key));
-    const offset = row ? row.adjustment : realized;
+    const active = row ?? focused;
+    const rowLegs = active ? active.legs : modeled;
+    const rowKeys = (active ? active.keys : pricedKeys).filter(key => pricedKeys.includes(key));
+    const offset = active ? active.adjustment : realized;
     const chart = rowKeys.length === 1
       ? <StrategyPayoff legs={rowLegs} assumptions={assumptions} keys={rowKeys} currency={currency}
           rate={rate} offset={offset} light={light} range={range} horizon={horizon} />
@@ -327,15 +353,15 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
 
   const filters = (
     <div className="lens-filters" role="group" aria-label="Filters">
-      {!accountId && accountIds.length > 0 && (
+      {!accountId && accountIds.length > 0 && lens !== "account" && (
         <SearchableMultiSelect label="Accounts" selection={accountChoice} noun="accounts"
           describe={id => legCount(l => l.position.account_id === id)} />
       )}
-      {allKeys.length > 0 && (
+      {allKeys.length > 0 && lens !== "asset" && (
         <SearchableMultiSelect label="Underlyings" selection={nameChoice} noun="underlyings" searchFrom={2} format={symbolOf}
           describe={key => legCount(l => underlyingKey(l.position) === key)} />
       )}
-      {expiries.length > 0 && (
+      {expiries.length > 0 && lens !== "expiry" && (
         <SearchableMultiSelect label="Expiry" className="expiry-picker" selection={cycleChoice} noun="cycles" searchFrom={2} format={expiryLabel}
           describe={value => legCount(l => expiryOf(l.position) === value)} />
       )}
@@ -344,13 +370,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
 
   return <section className="panel payoff-panel">
     <h2>{accountId ? "Account payoff & risk" : "Desk payoff & risk"}
-      <span className="panel-actions"><Button type="button" variant="ghost" size="sm" aria-expanded={inputs} aria-controls="risk-inputs" title="Risk currency, shock range, horizon and per-underlying assumptions" onClick={() => setInputs(!inputs)}><SlidersHorizontal size={14} aria-hidden="true" />{inputs ? "Hide inputs" : "Model inputs"}{inputs ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}</Button></span>
+      <span className="panel-actions"><Button type="button" variant="ghost" size="sm" aria-expanded={inputs} aria-controls="risk-inputs" title="Shock range, horizon and per-underlying assumptions" onClick={() => setInputs(!inputs)}><SlidersHorizontal size={14} aria-hidden="true" />{inputs ? "Hide inputs" : "Model inputs"}{inputs ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}</Button></span>
     </h2>
     <p className="footnote">{accountId ? `Account ${accountId}` : "All accessible accounts"} · Open-position P&L relative to average cost · Currencies are calculated separately; no FX conversion.</p>
     {loading ? <p role="status">Loading all account positions…</p> : error ? <p role="alert">Position data could not be loaded for every account. Risk curves are unavailable until all accounts load.</p> : !currencies.length ? <p>No open positions to model.</p> : <>
       <div id="risk-inputs" hidden={!inputs}>
       <div className="risk-controls">
-        <label>Risk currency<SearchableSelect label="Risk currency" value={currency} options={currencies} onChange={setCurrency} /></label>
         <label>Shock range<select value={range} onChange={e => setRange(Number(e.target.value))}>{[5, 10, 25, 50, 100, 200].map(n => <option key={n} value={n}>−{Math.min(n, 100)}% to +{n}%</option>)}</select></label>
         <label>Days forward: {horizon}<input type="range" min={0} max={maxDays} step={1} value={horizon} onChange={e => setDays(Number(e.target.value))} /></label>
         <label>Annual interest: {rate}%<input type="range" min={-5} max={25} step={0.25} value={rate} onChange={e => setRate(Number(e.target.value))} /></label>
@@ -376,6 +401,18 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
             title: `Group the same legs by ${item.noun}`,
           }))}
         />
+        {focusRows.length > 0 && (
+          <label className="lens-focus">
+            <SearchableSelect
+              label={lens === "asset" ? "Underlying" : lens === "expiry" ? "Expiry" : "Account"}
+              value={focus}
+              options={focusRows.map(row => row.id)}
+              onChange={setFocus}
+              format={id => focusRows.find(row => row.id === id)?.label ?? symbolOf(id)}
+              searchFrom={2}
+            />
+          </label>
+        )}
         <Button type="button" variant="outline" size="sm" className="filter-sheet-open"
           aria-expanded={sheet} aria-controls="filter-sheet"
           onClick={() => setSheet(true)}>
@@ -383,11 +420,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         </Button>
         {filters}
         <div className="lens-modes">
-          {currencies.length > 1 && currencies.length <= 4 && (
-            <Segmented label="Currency" size="sm" value={currency} onChange={setCurrency}
-              options={currencies.map(code => ({ id: code, label: code }))} />
-          )}
-          {pricedKeys.length > 1 && (
+          {viewKeys.length > 1 && (
             <Segmented<ShockMode> label="Shock model" size="sm" value={shockMode} onChange={setShockMode}
               options={[
                 { id: "parallel", label: "Parallel", title: "Every underlying moves by the column's percentage" },
@@ -413,31 +446,31 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         </div>
       )}
 
-      {ready && <div className="risk-metrics" aria-label="Summary">
+      {ready && focused && <div className="risk-metrics" aria-label="Summary">
         <span>
-          <Term hint="What the selected legs mark at right now, at the broker reference, including any booked adjustments.">Marked now</Term>
-          <b><Amount value={String(currentPoint?.modeled)} /> <small>{currency}</small></b>
+          <Term hint="Mark-to-market on the selected legs at the live broker reference, including any booked adjustments.">Live MTM</Term>
+          <b><Amount value={String(viewNow)} /> <small>{currency}</small></b>
         </span>
         <span>
-          <Term hint={`Terminal P&L if every underlying expires exactly at its reference price${pricedKeys.length === 1 ? ` (${symbolOf(pricedKeys[0])} ${money(String(assumptions[pricedKeys[0]].spot))})` : ""}.`}>At expiry, unchanged</Term>
-          <b><Amount value={String(currentPoint?.terminal)} /> <small>{currency}</small></b>
+          <Term hint={`Settlement P&L if every underlying expires at today's reference — the book does not move${viewKeys.length === 1 ? ` (${symbolOf(viewKeys[0])} ${money(String(assumptions[viewKeys[0]].spot))})` : ""}.`}>Expiry at spot</Term>
+          <b><Amount value={String(viewExpiry)} /> <small>{currency}</small></b>
         </span>
         <span>
-          <Term hint="Lowest terminal P&L anywhere in the plotted range — what this book can finally settle at. Widening the range can make it worse.">Worst at expiry</Term>
-          <b><Amount value={String(total.worst)} /> <small>{currency}</small></b>
+          <Term hint="Lowest settlement P&L anywhere in the plotted range. Widen the range to test a deeper move.">Worst expiry</Term>
+          <b><Amount value={String(viewWorst)} /> <small>{currency}</small></b>
         </span>
         <span>
-          <Term hint="Lowest mark-to-market anywhere in the plotted range if the market gapped today, before time value decays. This is the figure a margin call follows.">Worst mark today</Term>
-          <b><Amount value={String(Math.min(...adjusted.map(p => p.modeled)))} /> <small>{currency}</small></b>
+          <Term hint="Lowest mark-to-market if spots gapped now, before time decay. Margin follows this figure, not expiry.">Worst MTM</Term>
+          <b><Amount value={String(viewWorstMtm)} /> <small>{currency}</small></b>
         </span>
-        {pricedKeys.map(key => <span key={key} className="ref-metric">{key} reference <b>{money(String(assumptions[key].spot))}</b></span>)}
-        {applied !== 0 && <span>Booked P&L from closed legs this cycle <b><Amount value={String(applied)} /> {currency}</b></span>}
-        {charged !== 0 && <span>Commissions added back (IBKR bakes them into average cost) <b><Amount value={String(charged)} /> {currency}</b></span>}
-        {realized !== 0 && <span>Open legs as the broker reports them, at current reference (0%) <b><Amount value={String(openPoint?.terminal)} /> {currency}</b></span>}
+        {viewKeys.map(key => <span key={key} className="ref-metric">{key} reference <b>{money(String(assumptions[key].spot))}</b></span>)}
+        {viewBooked !== 0 && <span>Booked P&L from closed legs this cycle <b><Amount value={String(viewBooked)} /> {currency}</b></span>}
+        {viewCharged !== 0 && <span>Commissions added back (IBKR bakes them into average cost) <b><Amount value={String(viewCharged)} /> {currency}</b></span>}
+        {focused.adjustment !== 0 && <span>Open legs as the broker reports them, at current reference (0%) <b><Amount value={String((viewCurves.find(p => p.shock === 0)?.terminal ?? 0) - focused.adjustment)} /> {currency}</b></span>}
       </div>}
 
       <div className="reference-bar">
-        {keys.map(key => {
+        {(viewKeys.length ? viewKeys : focus ? [focus] : []).map(key => {
           const symbol = symbolOf(key);
           const price = quoted[key];
           const priced = pricedKeys.includes(key);
@@ -494,12 +527,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
                 : `Adds a −x% and +x% column alongside ${RMS_SHOCKS.filter(s => s > 0).join(", ")}`}
           </small>
         </label>
-        {pricedKeys.length === 1 && <label className="custom-level">
-          <span>Add {symbolOf(pricedKeys[0])} price level</span>
+        {viewKeys.length === 1 && <label className="custom-level">
+          <span>Add {symbolOf(viewKeys[0])} price level</span>
           <span className="level-entry">
             <input
               type="number" min="0.01" step="any" inputMode="decimal"
-              placeholder={assumptions[pricedKeys[0]]?.spot > 0 ? money(String(assumptions[pricedKeys[0]].spot), 0) : "e.g. 7800"}
+              placeholder={assumptions[viewKeys[0]]?.spot > 0 ? money(String(assumptions[viewKeys[0]].spot), 0) : "e.g. 7800"}
               aria-label="Add a scenario level at an absolute price"
               value={priceDraft}
               onChange={e => setPriceDraft(e.target.value)}
@@ -548,7 +581,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
       {missing.length > 0 && lens === "asset" && !modeled.length && <p role="status">No broker reference price for {missing.join(", ")}, so nothing in this currency can be modeled.</p>}
       {excluded.length > 0 && <details><summary>Partial coverage: {excluded.length} excluded legs</summary><ul>{excluded.map(({ position: p, reason }) => <li key={`${p.account_id}:${p.con_id}`}>{p.account_id} · {positionLabel(p)}: {reason}</li>)}</ul></details>}
       {tails.length > 0 && <p className="risk-warning">Potential uncapped upside exposure: {tails.join(", ")}. Calls at different expiries are not treated as guaranteed hedges.</p>}
-      {ready && <>
+      {ready && focused && <>
         {columns.some(column => column.custom) && <div className="level-legend">
           <span><i />Default levels</span>
           <span className="is-custom"><i />Added by you</span>
@@ -558,17 +591,17 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           lens={lens}
           currency={currency}
           columns={columns}
-          rows={lensRows}
+          rows={[]}
           total={total}
           totalLabel={total.label}
-          realized={{ open: openByShock, booked: applied, charged }}
-          showLevelRow={lens !== "asset" || pricedKeys.length === 1}
+          realized={{ open: openByShock, booked: viewBooked, charged: viewCharged }}
+          showLevelRow={viewKeys.length === 1}
           levelFor={levelFor}
-          expanded={expanded}
-          onExpand={setExpandedFor}
+          expanded={TOTAL_ROW}
+          onExpand={() => undefined}
           moveColumn={moveColumn}
           denomination={lens === "account" ? denomination : "money"}
-          unpriced={unpricedPositions(scoped.filter(p => accountChoice.has(p.account_id) && cycleChoice.has(expiryOf(p)) && nameChoice.has(underlyingKey(p))), currency, assumptions)}
+          unpriced={[]}
           renderDetail={renderDetail}
           captionNotes={captionNotes}
         />
@@ -584,7 +617,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
               aria-label="Price range either side of spot" onChange={e => setRange(Number(e.target.value))} />
           </label>
         </div>
-        <p className="footnote">Rows open inline: one name shows its payoff against its own price with the strikes held; a group of names shows P&amp;L against the scenario move. Zoom a payoff graph by scrolling or pinching on the plot, or drag the bar below it. The shaded bell is the probability of each level at expiry under the IV above, not a forecast.</p>
+        <p className="footnote">The dropdown picks one {LENSES.find(item => item.id === lens)?.noun} at a time. One name shows its payoff against its own price with the strikes held; a group of names shows P&amp;L against the scenario move. Zoom a payoff graph by scrolling or pinching on the plot, or drag the bar below it. The shaded bell is the probability of each level at expiry under the IV above, not a forecast.</p>
         {booked !== 0 && !withClosed && <p className="footnote">Open legs only. <Amount value={String(booked)} /> {currency} of P&amp;L booked on closed legs this cycle is excluded — an adjustment that closed a strike at a loss and opened another leaves that loss out of the open positions entirely, so every figure here reads as though it never happened.</p>}
         {openCommission !== 0 && <p className="footnote">
           {withCommissions
@@ -596,6 +629,23 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
             : `Gross of commissions; ${money(String(realizedCommission))} ${currency} of commission was paid on those fills, and is excluded above.`} Every figure above and in the table includes it, attributed to the row it was booked on.</p>}
         <p className="footnote">The two worst-case figures answer different questions: the first is what this book can finally settle at, the second what it could mark at today before any time value has decayed — they peak at different prices, and the second is the one a margin call follows. Both are limited to the plotted range, so widening it can make either worse. Live marked values update with IBKR position marks over WebSocket. Expiry values change only when the scenario crosses a strike; a defined-risk strategy&rsquo;s worst terminal loss can remain fixed as the market moves.</p>
       </>}
+      {focusedUnpriced.map(group => (
+        <div key={group.key} className="risk-table lens-table">
+          <table className="scenario-grid lens-grid">
+            <caption>RMS by underlying · {symbolOf(group.key)}</caption>
+            <tbody>
+              <tr className="bucket unpriced"><th scope="colgroup">Unpriced — no broker reference, not modeled</th></tr>
+              <tr className="group unpriced">
+                <th scope="row">{symbolOf(group.key)}</th>
+                <td className="note" role="status">
+                  No broker reference price for {group.key}
+                  {group.marketValue !== 0 && <> · market value {money(String(group.marketValue))}</>}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ))}
       <p className="footnote">Terminal payoff applies the same percentage move to every underlying — or its beta multiple, when the beta-weighted shock is on — at each option’s own expiry; mixed expiries do not represent a single-date liquidation. Pre-expiry estimates use European Black–Scholes with constant assumed volatility and dividend yield. Early exercise, assignment, volatility skew, fees and cash flows are not modeled. Stocks and standard stock options only; adjusted contracts cannot be identified from this feed. Grouping assumes the same symbol and currency identify the same underlying. These are hypothetical scenarios, not broker marks or a maximum-loss guarantee.</p>
     </>}
   </section>;
