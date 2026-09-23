@@ -108,7 +108,7 @@ export function LensTable({
     <div className="risk-table lens-table">
       <table className="scenario-grid lens-grid">
         <caption>
-          RMS by {lens === "account" ? "account ID" : lens === "asset" ? "underlying" : "expiry"} · Scenario P&amp;L ({currency})
+          Scenario P&amp;L by {lens === "account" ? "account" : lens === "asset" ? "underlying" : "expiry"} ({currency})
           {captionNotes.map(note => ` · ${note}`).join("")}
         </caption>
         <thead>

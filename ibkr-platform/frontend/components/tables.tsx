@@ -1,10 +1,25 @@
 "use client";
-import { ReactNode, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import Decimal from "decimal.js";
 import { Account, Execution, Money, Order, Position } from "@/lib/types";
+import {
+  Fill,
+  cashFlow,
+  commission,
+  contract,
+  expired,
+  expiryShort,
+  groupFills,
+  instrument,
+  isBuy,
+  netRate,
+  quantity,
+  realized,
+} from "@/lib/executions";
 import { SearchableSelect } from "./searchable-select";
+import { TableRowsSkeleton } from "./skeleton";
 import { useZone } from "./timezone";
-import { formatDateTime, formatTime } from "@/lib/timezone";
+import { formatDay, formatTime } from "@/lib/timezone";
 
 export function money(value: Money | undefined, digits = 2) {
   if (value == null) return "—";
@@ -31,10 +46,12 @@ type Column<T> = {
   label: string;
   render: (row: T) => ReactNode;
   value?: (row: T) => string | number | null;
+  className?: string;
 };
 type Facet<T> = { label: string; value: (row: T) => string | null | undefined };
 
 const ANY = "All";
+const JSON_TEXT = (row: unknown) => JSON.stringify(row);
 const MIN_COLUMN = 64;
 
 export function DataTable<T>({
@@ -44,6 +61,13 @@ export function DataTable<T>({
   onRow,
   facets = [],
   toolbar,
+  initialSort = { index: 0, asc: true },
+  searchText = JSON_TEXT,
+  summary,
+  groupBy,
+  groupSummary,
+  rowClassName,
+  loading = false,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -52,13 +76,19 @@ export function DataTable<T>({
   facets?: Facet<T>[];
 
   toolbar?: ReactNode;
+  initialSort?: { index: number; asc: boolean };
+  searchText?: (row: T) => string;
+  summary?: (visible: T[]) => ReactNode;
+  // Group header rows only make sense while the rows are ordered by the
+  // column the groups come from, so they appear when sorting by column 0.
+  groupBy?: (row: T) => string;
+  groupSummary?: (rows: T[]) => ReactNode;
+  rowClassName?: (row: T) => string;
+  loading?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<string, string>>({});
-  const [sort, setSort] = useState<{ index: number; asc: boolean }>({
-    index: 0,
-    asc: true,
-  });
+  const [sort, setSort] = useState<{ index: number; asc: boolean }>(initialSort);
   const [widths, setWidths] = useState<Record<string, number>>({});
   const drag = useRef<{ label: string; startX: number; startWidth: number } | null>(null);
   const head = useRef<HTMLTableRowElement>(null);
@@ -84,7 +114,7 @@ export function DataTable<T>({
           }),
         )
         .filter((row) =>
-          JSON.stringify(row).toLowerCase().includes(search.toLowerCase()),
+          searchText(row).toLowerCase().includes(search.toLowerCase()),
         )
         .sort((a, b) => {
           const col = columns[sort.index];
@@ -97,8 +127,21 @@ export function DataTable<T>({
               : String(av).localeCompare(String(bv));
           return comparison * (sort.asc ? 1 : -1);
         }),
-    [rows, columns, search, sort, facets, picked],
+    [rows, columns, search, sort, facets, picked, searchText],
   );
+
+  const groups = useMemo(() => {
+    if (!groupBy || sort.index !== 0) return [{ label: "", rows: visible }];
+    const runs: { label: string; rows: T[] }[] = [];
+    for (const row of visible) {
+      const label = groupBy(row);
+      const last = runs[runs.length - 1];
+      if (last && last.label === label) last.rows.push(row);
+      else runs.push({ label, rows: [row] });
+    }
+    return runs;
+  }, [visible, groupBy, sort.index]);
+  const filtered = !!search || Object.values(picked).some((v) => v && v !== ANY);
 
   function seed() {
     if (Object.keys(widths).length || !head.current) return {} as Record<string, number>;
@@ -120,7 +163,13 @@ export function DataTable<T>({
         />
 
         {toolbar}
-        {facets.map((facet) => (
+        {facets
+          .filter(
+            (facet) =>
+              (choices[facet.label]?.length ?? 0) > 2 ||
+              (picked[facet.label] ?? ANY) !== ANY,
+          )
+          .map((facet) => (
           <label key={facet.label} className="table-facet">
             <span>{facet.label}</span>
             <SearchableSelect
@@ -156,9 +205,26 @@ export function DataTable<T>({
               {sort.asc ? "↑" : "↓"}
             </button>
           </span>
-          <span>{visible.length} records</span>
+          {filtered && (
+            <button
+              type="button"
+              className="table-clear"
+              onClick={() => {
+                setSearch("");
+                setPicked({});
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+          <span>
+            {loading && !rows.length
+              ? "Loading…"
+              : `${filtered ? `${visible.length} of ${rows.length}` : visible.length} records`}
+          </span>
         </div>
       </div>
+      {summary && rows.length > 0 && summary(visible)}
       <div className="table-scroll">
         <table
           className={`responsive-table ${Object.keys(widths).length ? "sized" : ""}`}
@@ -176,6 +242,7 @@ export function DataTable<T>({
               {columns.map((col, index) => (
                 <th
                   key={col.label}
+                  className={col.className}
                   aria-sort={
                     sort.index === index
                       ? sort.asc
@@ -261,24 +328,39 @@ export function DataTable<T>({
               ))}
             </tr>
           </thead>
-          <tbody>
-            {visible.map((row) => (
-              <tr
-                key={id(row)}
-                onClick={() => onRow?.(row)}
-                className={onRow ? "clickable" : ""}
-              >
-                {columns.map((col) => (
-                  <td key={col.label} data-label={col.label}>
-                    {col.render(row)}
-                  </td>
+          <tbody aria-busy={loading && !rows.length}>
+            {loading && !rows.length && <TableRowsSkeleton columns={columns.length} />}
+            {groups.map((group) => (
+              <Fragment key={group.label || "all"}>
+                {group.label && (
+                  <tr className="group-row">
+                    <th scope="colgroup" colSpan={columns.length}>
+                      <span>{group.label}</span>
+                      {groupSummary?.(group.rows)}
+                    </th>
+                  </tr>
+                )}
+                {group.rows.map((row) => (
+                  <tr
+                    key={id(row)}
+                    onClick={() => onRow?.(row)}
+                    className={[onRow ? "clickable" : "", rowClassName?.(row) ?? ""].join(" ").trim() || undefined}
+                  >
+                    {columns.map((col) => (
+                      <td key={col.label} data-label={col.label} className={col.className}>
+                        {col.render(row)}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>
-        {!visible.length && (
-          <div className="empty">No records in this view</div>
+        {!visible.length && !(loading && !rows.length) && (
+          <div className="empty">
+            {rows.length ? "No records match these filters" : "No records in this view"}
+          </div>
         )}
       </div>
     </>
@@ -292,12 +374,15 @@ export function accountLabel(row: { account_id: string; label?: string }) {
 export function AccountsTable({
   rows,
   onRow,
+  loading,
 }: {
   rows: Account[];
   onRow: (row: Account) => void;
+  loading?: boolean;
 }) {
   return (
     <DataTable
+      loading={loading}
       rows={rows}
       id={(r) => r.account_id}
       onRow={onRow}
@@ -386,9 +471,10 @@ export function positionLabel(r: Position) {
 const expiryLabel = (value: string) =>
   /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}` : value;
 
-export function PositionsTable({ rows }: { rows: Position[] }) {
+export function PositionsTable({ rows, loading }: { rows: Position[]; loading?: boolean }) {
   return (
     <DataTable
+      loading={loading}
       rows={rows}
       id={(r) => `${r.account_id}:${r.con_id}`}
       facets={[
@@ -456,10 +542,11 @@ export function PositionsTable({ rows }: { rows: Position[] }) {
     />
   );
 }
-export function OrdersTable({ rows }: { rows: Order[] }) {
+export function OrdersTable({ rows, loading }: { rows: Order[]; loading?: boolean }) {
   const zone = useZone();
   return (
     <DataTable
+      loading={loading}
       rows={rows}
       id={(r) =>
         `${r.account_id}:${r.perm_id > 0 ? `perm:${r.perm_id}` : `${r.client_id}:${r.order_id}`}`
@@ -526,18 +613,149 @@ export function OrdersTable({ rows }: { rows: Order[] }) {
     />
   );
 }
-export function netRate(row: Execution): string | null {
-  const price = Number(row.price);
-  const commission = row.commission == null ? null : Number(row.commission);
-  const units = Number(row.quantity) * Number(row.multiplier ?? 1);
-  if (commission === null || !Number.isFinite(price) || !Number.isFinite(units) || units === 0) return null;
-  const perUnit = Math.abs(commission) / Math.abs(units);
-  return String(price + (row.side === "BOT" ? perUnit : -perUnit));
+
+const signed = (value: number | null) =>
+  value === null ? "—" : `${value > 0 ? "+" : ""}${money(String(value))}`;
+const fillDay = (zone: ReturnType<typeof useZone>) => (fill: Fill) =>
+  formatDay(fill.lead.executed_at, zone);
+
+function Side({ fill }: { fill: Fill }) {
+  if (expired(fill)) return <span className="side expired">Expired</span>;
+  if (fill.combo) {
+    const credit = (cashFlow(fill) ?? 0) > 0;
+    return (
+      <span
+        className={`side ${credit ? "sell" : "buy"}`}
+        title={`Combo ${isBuy(fill.lead) ? "bought" : "sold"} at ${fill.lead.price}`}
+      >
+        {credit ? "Credit" : "Debit"}
+      </span>
+    );
+  }
+  const buy = isBuy(fill.lead);
+  return <span className={`side ${buy ? "buy" : "sell"}`}>{buy ? "Buy" : "Sell"}</span>;
 }
 
-export function ExecutionsTable({ rows }: { rows: Execution[] }) {
+function Leg({ row }: { row: Execution }) {
+  const { name, detail } = contract(row);
+  return (
+    <li>
+      <span className={isBuy(row) ? "buy" : "sell"}>
+        {isBuy(row) ? "+" : "−"}
+        {quantity(row.quantity)}
+      </span>{" "}
+      {name}
+      {detail && <em>{detail}</em>}
+      <b>@ {money(row.price)}</b>
+    </li>
+  );
+}
+
+function Totals({ fills }: { fills: Fill[] }) {
+  let bought = 0,
+    sold = 0,
+    net = 0,
+    fees = 0,
+    pnl = 0,
+    pending = 0,
+    lapsed = 0;
+  for (const fill of fills) {
+    const qty = Number(fill.lead.quantity) || 0;
+    if (expired(fill)) lapsed += qty;
+    else if (isBuy(fill.lead)) bought += qty;
+    else sold += qty;
+    net += cashFlow(fill) ?? 0;
+    const paid = commission(fill);
+    if (paid === null) pending += 1;
+    else fees += paid;
+    pnl += realized(fill) ?? 0;
+  }
+  const combos = fills.filter((f) => f.combo).length;
+  return (
+    <div className="exec-totals" aria-label="Totals for the executions shown">
+      <div>
+        <label>Fills</label>
+        <strong>{fills.length.toLocaleString()}</strong>
+        <small>{combos ? `${combos} combo${combos === 1 ? "" : "s"}` : "no combos"}</small>
+      </div>
+      <div>
+        <label>Bought / sold</label>
+        <strong>
+          <span className="buy">{quantity(String(bought))}</span>
+          <span className="muted"> / </span>
+          <span className="sell">{quantity(String(sold))}</span>
+        </strong>
+        <small>{lapsed ? `${quantity(String(lapsed))} expired · combos count once` : "a combo counts once"}</small>
+      </div>
+      <div>
+        <label>Net premium</label>
+        <strong className={net > 0 ? "positive" : net < 0 ? "negative" : ""}>{signed(net)}</strong>
+        <small>{net >= 0 ? "net credit" : "net debit"}</small>
+      </div>
+      <div>
+        <label>Commission</label>
+        <strong>{money(String(fees))}</strong>
+        <small className={pending ? "warn" : ""}>
+          {pending ? `${pending} fill${pending === 1 ? "" : "s"} awaiting report` : "all reported"}
+        </small>
+      </div>
+      <div>
+        <label>Realized P&amp;L</label>
+        <strong className={pnl > 0 ? "positive" : pnl < 0 ? "negative" : ""}>{signed(pnl)}</strong>
+        <small>on closing fills</small>
+      </div>
+    </div>
+  );
+}
+
+function DayTotals({ fills }: { fills: Fill[] }) {
+  const fees = fills.reduce((a, f) => a + (commission(f) ?? 0), 0);
+  const pnl = fills.reduce((a, f) => a + (realized(f) ?? 0), 0);
+  return (
+    <span className="group-meta">
+      <span>
+        {fills.length} fill{fills.length === 1 ? "" : "s"}
+      </span>
+      <span>comm {money(String(fees))}</span>
+      {pnl !== 0 && (
+        <span className={pnl > 0 ? "positive" : "negative"}>realized {signed(pnl)}</span>
+      )}
+    </span>
+  );
+}
+
+export function ExecutionsTable({
+  rows,
+  accounts = [],
+  loading = false,
+}: {
+  rows: Execution[];
+  accounts?: Account[];
+  loading?: boolean;
+}) {
   const zone = useZone();
   const [withCommissions, setWithCommissions] = useState(false);
+  const fills = useMemo(() => groupFills(rows), [rows]);
+  const labels = useMemo(
+    () => Object.fromEntries(accounts.map((a) => [a.account_id, accountLabel(a)])),
+    [accounts],
+  );
+  const account = useCallback((id: string) => labels[id] ?? id, [labels]);
+  const rate = (fill: Fill) =>
+    withCommissions ? netRate(fill) ?? Number(fill.lead.price) : Number(fill.lead.price);
+  const day = useMemo(() => fillDay(zone), [zone]);
+  const searchText = useCallback(
+    (fill: Fill) =>
+      [fill.lead, ...fill.legs]
+        .map((row) => {
+          const c = contract(row);
+          return `${c.name} ${c.detail} ${row.symbol} ${row.underlying ?? ""} ${row.exchange} ${row.execution_id}`;
+        })
+        .concat(account(fill.lead.account_id), fill.lead.account_id, isBuy(fill.lead) ? "buy" : "sell", instrument(fill))
+        .join(" "),
+    [account],
+  );
+
   return (
     <DataTable
       toolbar={
@@ -546,49 +764,127 @@ export function ExecutionsTable({ rows }: { rows: Execution[] }) {
           <span>Include commissions in traded rate</span>
         </label>
       }
-      rows={rows}
-      id={(r) => r.execution_id}
+      loading={loading}
+      rows={fills}
+      id={(f) => f.key}
+      initialSort={{ index: 0, asc: false }}
+      searchText={searchText}
+      groupBy={day}
+      groupSummary={(group) => <DayTotals fills={group} />}
+      summary={(visible) => <Totals fills={visible} />}
+      rowClassName={(f) => (f.combo ? "combo-row" : "")}
+      facets={[
+        { label: "Account", value: (f) => account(f.lead.account_id) },
+        {
+          label: "Side",
+          value: (f) =>
+            expired(f)
+              ? "Expired"
+              : f.combo
+                ? (cashFlow(f) ?? 0) > 0
+                  ? "Credit"
+                  : "Debit"
+                : isBuy(f.lead)
+                  ? "Buy"
+                  : "Sell",
+        },
+        { label: "Underlying", value: (f) => f.lead.underlying || f.lead.symbol.split(" ")[0] },
+        {
+          label: "Expiry",
+          value: (f) => expiryShort(f.lead.expiry ?? f.legs[0]?.expiry ?? ""),
+        },
+        { label: "Instrument", value: instrument },
+        { label: "Exchange", value: (f) => f.lead.exchange },
+      ]}
       columns={[
         {
           label: "Time",
-          render: (r) => formatDateTime(r.executed_at, zone),
-          value: (r) => r.executed_at,
-        },
-        {
-          label: "Symbol",
-          render: (r) => (
-            <>
-              {r.symbol}
-              <small>{r.account_id}</small>
-            </>
+          className: "col-time",
+          render: (f) => (
+            <span title={`${formatDay(f.lead.executed_at, zone)} ${formatTime(f.lead.executed_at, zone)} · ${f.lead.execution_id}`}>
+              {formatTime(f.lead.executed_at, zone)}
+            </span>
           ),
-          value: (r) => r.symbol,
-        },
-        { label: "Side", render: (r) => r.side, value: (r) => r.side },
-        {
-          label: "Quantity",
-          render: (r) => r.quantity,
-          value: (r) => r.quantity,
+          value: (f) => f.lead.executed_at,
         },
         {
-          label: withCommissions ? "Traded rate (net)" : "Traded rate (gross)",
-          render: (r) => money(withCommissions ? netRate(r) ?? r.price : r.price),
-          value: (r) => (withCommissions ? netRate(r) ?? r.price : r.price),
+          label: "Contract",
+          className: "col-contract",
+          render: (f) => {
+            const { name, detail } = contract(f.lead);
+            return (
+              <div className="exec-contract">
+                <span className="exec-name">
+                  {name}
+                  {detail && <em>{detail}</em>}
+                  {f.combo && <span className="badge">{f.legs.length} legs</span>}
+                </span>
+                <small>
+                  {account(f.lead.account_id)} · {f.lead.exchange}
+                </small>
+                {f.combo && f.legs.length > 0 && (
+                  <ul className="exec-legs">
+                    {f.legs.map((leg) => (
+                      <Leg key={leg.execution_id} row={leg} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          },
+          value: (f) => `${contract(f.lead).name} ${f.lead.executed_at}`,
+        },
+        {
+          label: "Side",
+          className: "col-side",
+          render: (f) => <Side fill={f} />,
+          value: (f) => (expired(f) ? "EXP" : f.lead.side),
+        },
+        {
+          label: "Qty",
+          render: (f) => quantity(f.lead.quantity),
+          value: (f) => Number(f.lead.quantity),
+        },
+        {
+          label: withCommissions ? "Rate (net)" : "Rate (gross)",
+          render: (f) => money(String(rate(f))),
+          value: (f) => rate(f),
+        },
+        {
+          label: "Premium",
+          render: (f) => {
+            const value = cashFlow(f);
+            return <span className={value === null ? "" : "muted-sign"}>{signed(value)}</span>;
+          },
+          value: (f) => cashFlow(f),
         },
         {
           label: "Commission",
-          render: (r) => money(r.commission),
-          value: (r) => r.commission ?? null,
+          render: (f) => {
+            const value = commission(f);
+            return expired(f) ? (
+              <span className="muted">—</span>
+            ) : value === null ? (
+              <span className="pending" title="IBKR has not reported the commission for this fill yet">
+                pending
+              </span>
+            ) : (
+              money(String(value))
+            );
+          },
+          value: (f) => commission(f),
         },
         {
-          label: "Exchange",
-          render: (r) => r.exchange,
-          value: (r) => r.exchange,
-        },
-        {
-          label: "Order ID",
-          render: (r) => r.order_id,
-          value: (r) => r.order_id,
+          label: "Realized P&L",
+          render: (f) => {
+            const value = realized(f);
+            return value === null || value === 0 ? (
+              <span className="muted">—</span>
+            ) : (
+              <Amount value={String(value)} />
+            );
+          },
+          value: (f) => realized(f),
         },
       ]}
     />

@@ -25,10 +25,10 @@ export function previousClose(legs: RiskLeg[], key: string): number | undefined 
 }
 
 export function spotLabel(source: string): string {
-  if (source.endsWith("_cached")) return "Stored last underlying price — not live";
-  if (source === "aggs_prev" || source === "stocks_snapshot_prev") return "Massive — previous session close, not a live mark";
+  if (source.endsWith("_cached")) return "Last stored price · not live";
+  if (source === "aggs_prev" || source === "stocks_snapshot_prev") return "Previous close · not live";
   if (source.startsWith("massive_") || ["indices_snapshot", "options_snapshot", "stocks_snapshot"].includes(source)) return "Massive live snapshot";
-  if (source === "ib_stock_mark") return "Live broker mark — held stock";
+  if (source === "ib_stock_mark") return "Live · held stock mark";
   return "Live broker mark";
 }
 
@@ -121,10 +121,10 @@ export function impliedVolatility(price: number, spot: number, strike: number, r
   return (lo + hi) / 2;
 }
 
-export type SkewPoint = { strike: number; iv: number; right: string };
+export type SkewPoint = { strike: number; iv: number; right: string; spot: number; positions: number };
 
 export function skewByExpiry(positions: Position[], at: number, rate: number, dividend: number): Map<string, SkewPoint[]> {
-  const groups = new Map<string, SkewPoint[]>();
+  const groups = new Map<string, Map<string, SkewPoint>>();
   for (const p of positions) {
     if (p.sec_type !== "OPT" || !["C", "P"].includes(p.right) || numeric(p.quantity) === 0) continue;
     const date = expiryDate(p.expiry);
@@ -137,12 +137,48 @@ export function skewByExpiry(positions: Position[], at: number, rate: number, di
     if (strike === null || strike <= 0 || price === null || spot === null || spot <= 0) continue;
     const iv = impliedVolatility(price, spot, strike, p.right, days / 365, rate, dividend);
     if (iv === null) continue;
-    const points = groups.get(date) ?? [];
-    points.push({ strike, iv, right: p.right });
+    const points = groups.get(date) ?? new Map<string, SkewPoint>();
+    const key = `${strike}:${p.right}`;
+    const seen = points.get(key);
+    if (seen) {
+      const n = seen.positions + 1;
+      points.set(key, { ...seen, iv: (seen.iv * seen.positions + iv) / n, spot: (seen.spot * seen.positions + spot) / n, positions: n });
+    } else points.set(key, { strike, iv, right: p.right, spot, positions: 1 });
     groups.set(date, points);
   }
-  for (const points of groups.values()) points.sort((a, b) => a.strike - b.strike);
-  return groups;
+  const out = new Map<string, SkewPoint[]>();
+  for (const [date, points] of groups) out.set(date, [...points.values()].sort((a, b) => a.strike - b.strike || a.right.localeCompare(b.right)));
+  return out;
+}
+
+export function skewSpot(points: SkewPoint[]): number | null {
+  if (!points.length) return null;
+  const sorted = points.map(p => p.spot).sort((a, b) => a - b), mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+export function skewCurve(points: SkewPoint[], spot: number): { curve: SkewPoint[]; itm: SkewPoint[] } {
+  const byStrike = new Map<number, SkewPoint[]>();
+  for (const p of points) byStrike.set(p.strike, [...(byStrike.get(p.strike) ?? []), p]);
+  const curve: SkewPoint[] = [], itm: SkewPoint[] = [];
+  for (const [strike, pair] of byStrike) {
+    const wing = strike < spot ? "P" : "C";
+    const chosen = pair.find(p => p.right === wing) ?? pair[0];
+    curve.push(chosen);
+    for (const p of pair) if (p !== chosen) itm.push(p);
+  }
+  curve.sort((a, b) => a.strike - b.strike);
+  return { curve, itm };
+}
+
+export function interpolateIv(curve: SkewPoint[], strike: number): number | null {
+  if (!curve.length) return null;
+  if (strike <= curve[0].strike) return curve[0].iv;
+  const last = curve[curve.length - 1];
+  if (strike >= last.strike) return last.iv;
+  const i = curve.findIndex(p => p.strike >= strike);
+  const a = curve[i - 1], b = curve[i];
+  return a.iv + ((strike - a.strike) / (b.strike - a.strike)) * (b.iv - a.iv);
 }
 
 export const DEFAULT_RATE = 0.04;

@@ -53,8 +53,8 @@ cp -a .next/static "$dest/.next/static"
 for required in server.js .next/static node_modules; do
     [ -e "$dest/$required" ] || { echo "release is missing $required" >&2; exit 1; }
 done
-find "$dest/.next/static/css" -name '*.css' -print -quit | grep -q . \
-    || { echo "release has no compiled CSS" >&2; exit 1; }
+css="$(find "$dest/.next/static" -name '*.css' -print -quit)"
+[ -n "$css" ] || { echo "release has no compiled CSS" >&2; exit 1; }
 echo "  $dest  ($(cat "$dest/.next/BUILD_ID"))"
 
 # Flip in one rename so no request ever sees a half-written bundle.
@@ -68,7 +68,7 @@ systemctl is-active ibkr-api ibkr-worker ibkr-web
 curl -fsS http://127.0.0.1:8120/health && echo
 
 echo "── Verify web assets ────────────────────────────────────────────"
-css="$(cd "$dest/.next/static" && find css -name '*.css' | head -1)"
+css="${css#"$dest/.next/static/"}"
 curl -fsS -o /dev/null "http://127.0.0.1:3020/_next/static/$css"
 curl -fsS -o /dev/null http://127.0.0.1:3020/login
 echo "  /login and /_next/static/$css both served"

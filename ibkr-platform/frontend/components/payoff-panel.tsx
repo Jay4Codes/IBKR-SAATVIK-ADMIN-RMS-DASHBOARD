@@ -21,6 +21,7 @@ import { Term } from "./term";
 import { useZone } from "./timezone";
 import { todayIn } from "@/lib/timezone";
 import { parseLevels, parsePrices, usePersisted, writeStored } from "@/lib/persisted";
+import { ChartSkeleton } from "./skeleton";
 
 export { buildColumns, COLUMN_ORDER_KEY, levelLabel, orderColumns } from "@/lib/scenario-columns";
 
@@ -224,29 +225,41 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   for (const account of accounts) {
     nlv[account.account_id] = account.currency === currency ? numeric(account.net_liquidation) : null;
   }
-  const lensRows = ready
-    ? buildRows(lens, modeled, assumptions, {
-        range, horizon, rate: rate / 100, levels, now,
-        adjustments: realizedByGroup(lens, realizedLegs, withClosed, withCommissions),
-        nlv,
-      })
-    : [];
   const unpriced = unpricedPositions(
     scoped.filter(p => accountChoice.has(p.account_id) && cycleChoice.has(expiryOf(p)) && nameChoice.has(underlyingKey(p))),
     currency,
     assumptions,
   );
-  const focusRows = focusChoices(lens, [
-    ...lensRows,
+  const assetOptions = focusChoices("asset", [
+    ...pricedKeys.map(id => ({ id, label: symbolOf(id) })),
     ...unpriced
-      .filter(group => lens === "asset" && !lensRows.some(row => row.id === group.key))
+      .filter(group => !pricedKeys.includes(group.key))
       .map(group => ({ id: group.key, label: symbolOf(group.key) })),
   ]);
+  const storedAsset = usePersisted(FOCUS_KEY.asset, "");
+  const assetFocus = assetOptions.some(row => row.id === storedAsset)
+    ? storedAsset
+    : preferredFocus("asset", assetOptions) ?? "";
+  const setAssetFocus = (id: string) => writeStored(FOCUS_KEY.asset, id);
+  const viewed = lens === "asset" ? modeled : modeled.filter(leg => underlyingKey(leg.position) === assetFocus);
+  const viewedRealized = lens === "asset"
+    ? realizedLegs
+    : realizedLegs.filter(leg => realizedGroupKey("asset", leg) === assetFocus);
+  const lensRows = ready
+    ? buildRows(lens, viewed, assumptions, {
+        range, horizon, rate: rate / 100, levels, now,
+        adjustments: realizedByGroup(lens, viewedRealized, withClosed, withCommissions),
+        nlv,
+      })
+    : [];
+  const focusRows = focusChoices(lens, lensRows);
   const storedFocus = usePersisted(FOCUS_KEY[lens], "");
-  const focus = focusRows.some(row => row.id === storedFocus) ? storedFocus : preferredFocus(lens, focusRows) ?? "";
+  const focus = lens === "asset"
+    ? assetFocus
+    : focusRows.some(row => row.id === storedFocus) ? storedFocus : preferredFocus(lens, focusRows) ?? "";
   const setFocus = (id: string) => writeStored(FOCUS_KEY[lens], id);
   const focused = lensRows.find(row => row.id === focus);
-  const focusedUnpriced = unpriced.filter(group => group.key === focus);
+  const focusedUnpriced = unpriced.filter(group => group.key === assetFocus);
   const viewCurves = focused
     ? buildCurves(focused.legs, assumptions, range, horizon, rate / 100, levels).map(point => ({
         ...point,
@@ -345,11 +358,11 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   };
 
   const captionNotes = [
-    ...(applied !== 0 ? ["includes booked P&L from closed legs"] : []),
-    ...(charged !== 0 ? ["gross of commissions"] : []),
-    ...(withCommissions ? ["net of commissions"] : []),
-    ...(shockMode === "beta" && benchmark ? [`moves scaled by β to ${symbolOf(benchmark)}`] : []),
-    ...(denomination === "pct" ? ["as % of net liquidation"] : []),
+    ...(applied !== 0 ? ["incl. closed legs"] : []),
+    ...(charged !== 0 ? ["excl. commissions"] : []),
+    ...(withCommissions ? ["incl. commissions"] : []),
+    ...(shockMode === "beta" && benchmark ? [`β-scaled to ${symbolOf(benchmark)}`] : []),
+    ...(denomination === "pct" ? ["% of NLV"] : []),
   ];
 
   const filters = (
@@ -370,7 +383,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
       <span className="panel-actions"><Button type="button" variant="ghost" size="sm" aria-expanded={inputs} aria-controls="risk-inputs" title="Shock range, horizon and per-underlying assumptions" onClick={() => setInputs(!inputs)}><SlidersHorizontal size={14} aria-hidden="true" />{inputs ? "Hide inputs" : "Model inputs"}{inputs ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}</Button></span>
     </h2>
     <p className="footnote">{accountId ? `Account ${accountId}` : "All accessible accounts"} · Open-position P&L relative to average cost · Currencies are calculated separately; no FX conversion.</p>
-    {loading ? <p role="status">Loading all account positions…</p> : error ? <p role="alert">Position data could not be loaded for every account. Risk curves are unavailable until all accounts load.</p> : !currencies.length ? <p>No open positions to model.</p> : <>
+    {loading ? <ChartSkeleton label="Loading all account positions" height={320} /> : error ? <p role="alert">Position data could not be loaded for every account. Risk curves are unavailable until all accounts load.</p> : !currencies.length ? <p>No open positions to model.</p> : <>
       <div id="risk-inputs" hidden={!inputs}>
       <div className="risk-controls">
         <label>Shock range<select value={range} onChange={e => setRange(Number(e.target.value))}>{[5, 10, 25, 50, 100, 200].map(n => <option key={n} value={n}>−{Math.min(n, 100)}% to +{n}%</option>)}</select></label>
@@ -394,10 +407,22 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         </Button>
         {filters}
         <div className="lens-toggles">
-          {focusRows.length > 0 && (
+          {assetOptions.length > 0 && (
             <label className="lens-focus">
               <SearchableSelect
-                label={lens === "asset" ? "Underlying" : lens === "expiry" ? "Expiry" : "Account"}
+                label="Underlying"
+                value={assetFocus}
+                options={assetOptions.map(row => row.id)}
+                onChange={setAssetFocus}
+                format={id => assetOptions.find(row => row.id === id)?.label ?? symbolOf(id)}
+                searchFrom={2}
+              />
+            </label>
+          )}
+          {lens !== "asset" && focusRows.length > 0 && (
+            <label className="lens-focus">
+              <SearchableSelect
+                label={lens === "expiry" ? "This expiry" : "Account"}
                 value={focus}
                 options={focusRows.map(row => row.id)}
                 onChange={setFocus}
@@ -462,10 +487,18 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           <Term hint="Lowest mark-to-market if spots gapped now, before time decay. Margin follows this figure, not expiry.">Worst MTM</Term>
           <b><Amount value={String(viewWorstMtm)} /> <small>{currency}</small></b>
         </span>
-        {viewKeys.map(key => <span key={key} className="ref-metric">{key} reference <b>{money(String(assumptions[key].spot))}</b></span>)}
-        {viewBooked !== 0 && <span>Booked P&L from closed legs this cycle <b><Amount value={String(viewBooked)} /> {currency}</b></span>}
-        {viewCharged !== 0 && <span>Commissions <b><Amount value={String(viewCharged)} /> {currency}</b></span>}
-        {focused.adjustment !== 0 && <span>Open legs as the broker reports them, at current reference (0%) <b><Amount value={String((viewCurves.find(p => p.shock === 0)?.terminal ?? 0) - focused.adjustment)} /> {currency}</b></span>}
+        {focused.adjustment !== 0 && <span>
+          <Term hint="Open legs only, as the broker reports them, at the current reference (0% move) — before booked P&L from closed legs.">Open legs</Term>
+          <b><Amount value={String((viewCurves.find(p => p.shock === 0)?.terminal ?? 0) - focused.adjustment)} /> <small>{currency}</small></b>
+        </span>}
+        {viewBooked !== 0 && <span>
+          <Term hint="P&L already realised on legs closed this cycle. It is added to every figure as a constant.">Booked</Term>
+          <b><Amount value={String(viewBooked)} /> <small>{currency}</small></b>
+        </span>}
+        {viewCharged !== 0 && <span>
+          <Term hint="Commissions paid on this cycle's fills.">Commissions</Term>
+          <b><Amount value={String(viewCharged)} /> <small>{currency}</small></b>
+        </span>}
       </div>}
 
       <div className="reference-bar">
@@ -475,21 +508,21 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           const priced = pricedKeys.includes(key);
           return <div key={key} className={`reference-card${priced ? "" : " unpriced"}`}>
             <div className="reference-readout">
-              <span id={`ref-${key.replace(/:/g, "-")}`}>{symbol} reference price</span>
+              <span id={`ref-${key.replace(/:/g, "-")}`}>{symbol} reference</span>
               <output className="reference-value" aria-labelledby={`ref-${key.replace(/:/g, "-")}`}>
                 {price === undefined ? "—" : money(String(price))}
               </output>
               <small>{price === undefined ? "No broker mark" : spotLabel(marks[key]?.source ?? "")}</small>
             </div>
             {priced && <label className="iv-control">
-              <span>{symbol} IV {(assumptions[key].volatility * 100).toFixed(1)}%</span>
+              <span>IV <b>{(assumptions[key].volatility * 100).toFixed(1)}%</b></span>
               <input type="range" min={1} max={150} step={0.5}
                 aria-label={`${symbol} implied volatility`}
                 value={Number.isFinite(assumptions[key].volatility) ? assumptions[key].volatility * 100 : ASSUMED_VOL * 100}
                 onChange={e => change(key, "volatility", e.target.value)} />
               <small>{overrides[key]?.volatility !== undefined
                 ? `Manual · market ${((marketVol[key] ?? ASSUMED_VOL) * 100).toFixed(1)}%`
-                : marketVol[key] === undefined ? "No invertible marks — assumed" : "From broker option marks"}</small>
+                : marketVol[key] === undefined ? "Assumed — no usable option marks" : "From option marks"}</small>
             </label>}
             {priced && shockMode === "beta" && <label className="beta-control">
               <span>β to {symbolOf(benchmark ?? "")}</span>
@@ -503,36 +536,29 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
       </div>
 
       <div className="scenario-bar">
-        <label className="custom-level">
-          <span>Add scenario level (%)</span>
-          <span className="level-entry">
+        <div className="scenario-group" role="group" aria-label="Add a scenario column">
+          <span className="group-label">Add column</span>
+          <span className="level-entry" title={`Adds a −x% and +x% column next to ${RMS_SHOCKS.filter(s => s > 0).join(", ")}%`}>
+            <span className="affix" aria-hidden="true">±</span>
             <input
               type="number" min="0.1" max="99" step="any" inputMode="decimal"
-              placeholder="e.g. 7"
-              aria-label="Add a custom scenario level, in percent"
+              placeholder="7"
+              aria-label="Add a custom scenario move, in percent"
               value={draft}
               onChange={e => setDraft(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLevel(); } }}
             />
+            <span className="affix" aria-hidden="true">%</span>
             <Button type="button" variant="outline" size="sm" onClick={addLevel} disabled={!canAdd}>
               <Plus size={14} aria-hidden="true" />Add
             </Button>
           </span>
-          <small>
-            {custom.length >= MAX_CUSTOM
-              ? `At ${MAX_CUSTOM} custom levels — remove one to add another`
-              : columns.some(column => column.custom)
-                ? "Tap a level to remove it"
-                : `Adds a −x% and +x% column alongside ${RMS_SHOCKS.filter(s => s > 0).join(", ")}`}
-          </small>
-        </label>
-        {viewKeys.length === 1 && <label className="custom-level">
-          <span>Add {symbolOf(viewKeys[0])} price level</span>
-          <span className="level-entry">
+          {viewKeys.length === 1 && <span className="level-entry" title="P&L at this exact price, whatever the reference moves to">
+            <span className="affix" aria-hidden="true">{symbolOf(viewKeys[0])} @</span>
             <input
               type="number" min="0.01" step="any" inputMode="decimal"
-              placeholder={assumptions[viewKeys[0]]?.spot > 0 ? money(String(assumptions[viewKeys[0]].spot), 0) : "e.g. 7800"}
-              aria-label="Add a scenario level at an absolute price"
+              placeholder={assumptions[viewKeys[0]]?.spot > 0 ? money(String(assumptions[viewKeys[0]].spot), 0) : "7800"}
+              aria-label={`Add a scenario column at an exact ${symbolOf(viewKeys[0])} price`}
               value={priceDraft}
               onChange={e => setPriceDraft(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addPrice(); } }}
@@ -540,24 +566,21 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
             <Button type="button" variant="outline" size="sm" onClick={addPrice} disabled={!canAddPrice}>
               <Plus size={14} aria-hidden="true" />Add
             </Button>
-          </span>
-          <small>P&amp;L at that exact level, whatever the reference moves to</small>
-        </label>}
-        <label className="commission-toggle">
-          <span className="toggle-caption" aria-hidden="true">&nbsp;</span>
-          <span className="toggle-row">
+          </span>}
+          {custom.length >= MAX_CUSTOM && <small role="status">{MAX_CUSTOM} custom levels max — remove one to add another</small>}
+        </div>
+        <div className="scenario-group" role="group" aria-label="Include in P&L">
+          <span className="group-label">Include</span>
+          <label className="toggle-chip" title="Commissions paid on this cycle's fills">
             <input type="checkbox" checked={withCommissions} onChange={e => setWithCommissions(e.target.checked)} />
-            <span>Include commissions</span>
-          </span>
-        </label>
-        {booked !== 0 && <label className="commission-toggle">
-          <span className="toggle-caption" aria-hidden="true">&nbsp;</span>
-          <span className="toggle-row">
+            <span>Commissions</span>
+          </label>
+          {booked !== 0 && <label className="toggle-chip" title="P&L already booked on legs closed this cycle">
             <input type="checkbox" checked={withClosed} onChange={e => setWithClosed(e.target.checked)} />
-            <span>Include closed legs</span>
-          </span>
-          <small><Amount value={String(booked)} /> {currency} booked</small>
-        </label>}
+            <span>Closed legs</span>
+            <small><Amount value={String(booked)} /></small>
+          </label>}
+        </div>
         {chipColumns.length > 0 && <div className="bar-row">
           <span className="level-chips" role="group" aria-label="Scenario columns">
             {chipColumns.map(column => (

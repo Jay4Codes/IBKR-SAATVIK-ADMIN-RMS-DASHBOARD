@@ -9,6 +9,7 @@ import { Chart } from "./chart";
 import { SelectionActions, useSelection } from "./selection";
 import { money } from "./tables";
 import { useZone } from "./timezone";
+import { ChartSkeleton } from "./skeleton";
 
 export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accounts: string[] }) {
   const zone = useZone();
@@ -79,7 +80,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
       {!scope.length ? (
         <p role="status" className="footnote">No accounts selected. Tick an account above to draw its day P&amp;L.</p>
       ) : intraday.isPending ? (
-        <p role="status">Loading today&apos;s P&amp;L…</p>
+        <ChartSkeleton label="Loading today's P&L" height={200} />
       ) : intraday.isError ? (
         <p role="alert">Day P&amp;L could not be loaded.</p>
       ) : stamps.length < 2 ? (

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { CommissionSummary } from "@/lib/types";
 import { money } from "./tables";
+import { LinesSkeleton } from "./skeleton";
 
 export function CommissionsPanel({ accountId }: { accountId?: string }) {
   const path = accountId ? `/accounts/${accountId}/commissions` : "/commissions";
@@ -18,7 +19,7 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
     <section className="panel">
       <h2>Commissions</h2>
       {commissions.isPending ? (
-        <p role="status">Loading commission spend…</p>
+        <LinesSkeleton label="Loading commission spend" lines={3} />
       ) : commissions.isError ? (
         <p role="alert">Commission totals could not be loaded.</p>
       ) : (

@@ -101,6 +101,12 @@ export type Execution = {
   exchange: string;
   order_id: number;
   executed_at: string;
+  perm_id?: number;
+  con_id?: number;
+  sec_type?: string | null;
+  underlying?: string | null;
+  expiry?: string | null;
+  currency?: string | null;
 };
 export type User = {
   id: string;

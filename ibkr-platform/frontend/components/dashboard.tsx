@@ -6,7 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Decimal from "decimal.js";
@@ -50,6 +50,7 @@ import {
   OrdersTable,
   PositionsTable,
 } from "./tables";
+import { ChartSkeleton, LinesSkeleton, Shimmer, TilesSkeleton } from "./skeleton";
 import { GatewayStatus } from "./gateway-status";
 import { Diagnostics } from "./diagnostics";
 import { AllocationChart } from "./allocation-chart";
@@ -224,6 +225,9 @@ function Terminal({
     accounts.data?.filter((a) => !accountId || a.account_id === accountId) ??
     [];
   const ids = selected.map((a) => a.account_id);
+  const loadingAccounts = !!user.data && accounts.isPending;
+  const kpi = (value: ReactNode) =>
+    loadingAccounts ? <Shimmer width="70%" height="1em" /> : value;
   const positions = useQueries({
     queries: ids.map((id) => ({
       queryKey: ["positions", id],
@@ -481,7 +485,7 @@ function Terminal({
             )}
             {!PLATFORM_VIEWS.includes(view) && (
               <span className="badge">
-                {selected.length} {selected.length === 1 ? "ACCOUNT" : "ACCOUNTS"}
+                {loadingAccounts ? "LOADING" : `${selected.length} ${selected.length === 1 ? "ACCOUNT" : "ACCOUNTS"}`}
               </span>
             )}
           </div>
@@ -491,7 +495,14 @@ function Terminal({
             {errors[0]?.message}
           </div>
         )}
-        {!user.data && !errors.length && <p>Loading session…</p>}
+        {!user.data && !errors.length && (
+          <>
+            <TilesSkeleton label="Loading session" tiles={7} />
+            <section className="panel">
+              <LinesSkeleton label="Loading dashboard" lines={4} />
+            </section>
+          </>
+        )}
         {user.data &&
           diagnostics &&
           (isAdmin ? (
@@ -533,51 +544,47 @@ function Terminal({
             )}
             {(view === "Overview" || !!accountId) && (
               <>
-                <div className="kpis">
+                <div className="kpis" aria-busy={loadingAccounts}>
                   <div>
-                    <label>Total net liquidation · {currencyLabel}</label>
-                    <strong>{money(sum("net_liquidation"))}</strong>
-                    <small>Accessible accounts, selected currency</small>
+                    <label>Total net liquidation{currencyLabel && ` · ${currencyLabel}`}</label>
+                    <strong>{kpi(money(sum("net_liquidation")))}</strong>
+                    <small>Accessible accounts</small>
                   </div>
                   <div>
                     <label>Day P&L</label>
-                    <strong>
-                      <Amount value={sum("day_pnl")} />
-                    </strong>
+                    <strong>{kpi(<Amount value={sum("day_pnl")} />)}</strong>
                     <small>Broker daily P&L</small>
                   </div>
                   <div>
                     <label>Open positions</label>
-                    <strong>
-                      {selected.reduce((n, a) => n + a.open_positions, 0)}
-                    </strong>
+                    <strong>{kpi(selected.reduce((n, a) => n + a.open_positions, 0))}</strong>
                     <small>Across accessible accounts</small>
                   </div>
                   <div>
                     <label>Open orders</label>
-                    <strong>
-                      {selected.reduce((n, a) => n + a.open_orders, 0)}
-                    </strong>
+                    <strong>{kpi(selected.reduce((n, a) => n + a.open_orders, 0))}</strong>
                     <small>Visible to API session</small>
                   </div>
                   <div>
-                    <label>Available funds · {currencyLabel}</label>
-                    <strong>{money(sum("available_funds"))}</strong>
+                    <label>Available funds{currencyLabel && ` · ${currencyLabel}`}</label>
+                    <strong>{kpi(money(sum("available_funds")))}</strong>
                     <small>Broker reported</small>
                   </div>
                   <div>
-                    <label>Margin blocked · {currencyLabel}</label>
-                    <strong>{money(sum("initial_margin"))}</strong>
+                    <label>Margin blocked{currencyLabel && ` · ${currencyLabel}`}</label>
+                    <strong>{kpi(money(sum("initial_margin")))}</strong>
                     <small>Initial margin requirement</small>
                   </div>
                   <div>
                     <label>Lowest margin cushion</label>
                     <strong>
-                      {cushions.length === monetary.length && cushions.length
-                        ? `${Decimal.min(...cushions).toFixed(2)}%`
-                        : "—"}
+                      {kpi(
+                        cushions.length === monetary.length && cushions.length
+                          ? `${Decimal.min(...cushions).toFixed(2)}%`
+                          : "—",
+                      )}
                     </strong>
-                    <small>Excess liquidity / net liquidation</small>
+                    <small>Excess liquidity ÷ NLV</small>
                   </div>
                 </div>
                 {mixed && (
@@ -588,8 +595,20 @@ function Terminal({
                     you can bank on.
                   </p>
                 )}
-                {!accountId && <DayPnlPanel accounts={ids} />}
-                {!accountId && (
+                {!accountId && loadingAccounts && (
+                  <>
+                    <section className="panel">
+                      <h2>Day P&L</h2>
+                      <ChartSkeleton label="Loading day P&L" height={200} />
+                    </section>
+                    <section className="panel">
+                      <h2>Capital allocation</h2>
+                      <ChartSkeleton label="Loading capital allocation" height={160} />
+                    </section>
+                  </>
+                )}
+                {!accountId && !loadingAccounts && <DayPnlPanel accounts={ids} />}
+                {!accountId && !loadingAccounts && (
                   <section className="panel">
                     <h2>
                       Capital allocation{" "}
@@ -610,6 +629,12 @@ function Terminal({
                   await client.invalidateQueries({ queryKey: ["accounts"] });
                 }}
               />
+            )}
+            {!accountId && (view === "Overview" || view === "Accounts") && loadingAccounts && (
+              <section className="panel">
+                <h2>Accounts</h2>
+                <AccountsTable rows={[]} onRow={() => {}} loading />
+              </section>
             )}
             {!accountId && (view === "Overview" || view === "Accounts") && selected.length > 1 && (
               <section className="panel">
@@ -681,7 +706,10 @@ function Terminal({
             {shows("Positions") && (
               <section className="panel">
                 <h2>Positions</h2>
-                <PositionsTable rows={positions.flatMap((p) => p.data ?? [])} />
+                <PositionsTable
+                  rows={positions.flatMap((p) => p.data ?? [])}
+                  loading={loadingAccounts || positions.some((p) => p.isPending)}
+                />
                 <p className="footnote">
                   ¹ Average cost is the broker value; derivative costs include
                   the contract multiplier. Missing marks indicate unavailable
@@ -720,7 +748,10 @@ function Terminal({
             {shows("Orders") && (
               <section className="panel">
                 <h2>Open orders</h2>
-                <OrdersTable rows={orders.flatMap((p) => p.data ?? [])} />
+                <OrdersTable
+                  rows={orders.flatMap((p) => p.data ?? [])}
+                  loading={loadingAccounts || orders.some((p) => p.isPending)}
+                />
               </section>
             )}
             {shows("Executions") && (
@@ -728,10 +759,14 @@ function Terminal({
                 <h2>Recent executions</h2>
                 <ExecutionsTable
                   rows={executions.flatMap((p) => p.data ?? [])}
+                  accounts={selected}
+                  loading={loadingAccounts || executions.some((p) => p.isPending)}
                 />
                 <p className="footnote">
-                  Gross rate is the broker execution price before commission.
-                  Commission is reported separately when available.
+                  Newest first, grouped by trading day. Combo orders show once
+                  with their legs underneath; premium is negative for a debit.
+                  Gross rate is the broker execution price; tick the box to
+                  fold commission in. Shows the latest 100 fills per account.
                 </p>
               </section>
             )}

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Chart } from "./chart";
 import { SelectionActions, useSelection } from "./selection";
 import { money } from "./tables";
+import { ChartSkeleton } from "./skeleton";
 
 const RANGES = [
   { label: "1M", days: 30 },
@@ -161,7 +162,7 @@ export function PerformancePanel({
       {!scope.length ? (
         <p role="status" className="footnote">No accounts selected. Tick an account above to draw its history.</p>
       ) : history.isPending ? (
-        <p role="status">Loading history…</p>
+        <ChartSkeleton label="Loading history" height={260} />
       ) : history.isError ? (
         <p role="alert">History could not be loaded.</p>
       ) : !dates.length ? (

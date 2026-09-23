@@ -13,7 +13,6 @@ import {
 } from "@/lib/two-factor";
 
 const LIVE_STATES = new Set(["CONNECTED", "DEGRADED"]);
-const POSITION_NOTICE = /^(2150):/;
 type Interrupt = "stop" | "restart";
 
 type Action = {
@@ -60,11 +59,7 @@ export function GatewayStatus({
   const processRunning = gateway?.process === "active";
   const portOpen = gateway?.api_port_open === true;
   const linked = LIVE_STATES.has(status);
-  const noticeOnly = POSITION_NOTICE.test(gateway?.last_error ?? "");
-
-  const fullyOnline =
-    (status === "CONNECTED" || (status === "DEGRADED" && noticeOnly && phase === "logged_in")) &&
-    (portOpen || !canControl);
+  const fullyOnline = linked && phase === "logged_in" && (portOpen || !canControl);
 
   async function run(action: () => Promise<unknown>, done: string) {
     setBusy(true);
@@ -332,7 +327,7 @@ export function GatewayStatus({
       {canControl && !awaitingTwoFactor && !expired && gateway?.login_message && (
         <p className="muted">{gateway.login_message}</p>
       )}
-      {gateway?.last_error && !noticeOnly && <p className="negative">{gateway.last_error}</p>}
+      {gateway?.last_error && !fullyOnline && <p className="negative">{gateway.last_error}</p>}
       {notice && (
         <p role="status" className="muted">
           {notice}

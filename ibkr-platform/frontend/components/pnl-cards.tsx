@@ -6,6 +6,7 @@ import { CommissionSummary, RealizedSummary } from "@/lib/types";
 import { Amount, money } from "./tables";
 import { SearchableMultiSelect } from "./searchable-multi-select";
 import { Selection, useSelection } from "./selection";
+import { LinesSkeleton } from "./skeleton";
 
 export function chosen(choice: Selection, fallback: string): boolean {
   if (choice.isAll) return true;
@@ -77,7 +78,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     <section className="panel">
       <h2>P&amp;L<span>Booked, and what it cost</span></h2>
       {pending ? (
-        <p role="status">Loading P&amp;L…</p>
+        <LinesSkeleton label="Loading P&L" lines={4} />
       ) : (
         <>
           {(accountOptions.length > 1 || idOptions.length > 1) && (

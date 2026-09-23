@@ -91,9 +91,20 @@ function StrikeTick({ pin, x, nudge }: { pin: Marker; x: number; nudge: number }
   );
 }
 
-function StrikeRuler({ legs, lo, hi, spot, symbol }: { legs: RiskLeg[]; lo: number; hi: number; spot: number; symbol: string }) {
+export function rulerDomain(strikes: number[], spot: number, fallback: [number, number]): [number, number] {
+  const prices = [...strikes, spot].filter(p => p > 0);
+  if (!strikes.length || !prices.length) return fallback;
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const pad = Math.max((high - low) * 0.08, spot * 0.005);
+  return [Math.max(0, low - pad), high + pad];
+}
+
+function StrikeRuler({ legs, spot, symbol, fallback }: { legs: RiskLeg[]; spot: number; symbol: string; fallback: [number, number] }) {
+  const pins = markers(legs);
+  const [lo, hi] = rulerDomain(pins.map(m => m.strike), spot, fallback);
   const place = (price: number) => ((price - lo) / (hi - lo)) * 100;
-  const placed = tickPlacement(markers(legs).filter(m => m.strike >= lo && m.strike <= hi), lo, hi);
+  const placed = tickPlacement(pins, lo, hi);
   const calls = placed.filter(p => p.pin.right === "C");
   const puts = placed.filter(p => p.pin.right !== "C");
   return (
@@ -325,7 +336,7 @@ export const StrategyPayoff = memo(function StrategyPayoff({
         {toolbar}
       </div>
 
-      <StrikeRuler legs={scoped} lo={points[0].price} hi={points[points.length - 1].price} spot={spot} symbol={symbol} />
+      <StrikeRuler legs={scoped} spot={spot} symbol={symbol} fallback={[points[0].price, points[points.length - 1].price]} />
 
       <div className="strategy-stats">
         <div>
@@ -346,7 +357,7 @@ export const StrategyPayoff = memo(function StrategyPayoff({
         </div>
         <div className="wide">
           <label>Breakevens</label>
-          <strong>{stats.breakevens.length ? stats.breakevens.map(b => money(String(b))).join(" – ") : "None in range"}</strong>
+          <strong className="breakevens">{stats.breakevens.length ? stats.breakevens.map(b => <span key={b}>{money(String(b))}</span>) : "None in range"}</strong>
         </div>
         <div>
           <label>P&amp;L at {money(String(spot))}</label>

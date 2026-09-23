@@ -35,6 +35,19 @@ export function formatTime(iso: string | number | null | undefined, id: ZoneId):
   return date ? date.toLocaleTimeString(undefined, { timeZone: zoneOf(id) }) : "—";
 }
 
+export function formatDay(iso: string | number | null | undefined, id: ZoneId): string {
+  const date = parsed(iso);
+  return date
+    ? date.toLocaleDateString(undefined, {
+        timeZone: zoneOf(id),
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
+}
+
 export function formatClock(ms: number, id: ZoneId): string {
   const date = parsed(ms);
   if (!date) return "--:--:--";

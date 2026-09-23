@@ -115,9 +115,15 @@ export function applyEvent(client: QueryClient, event: LiveEvent) {
           row.order_id === data.order_id
         ),
     );
-    return removed
-      ? others
-      : [data, ...others].slice(0, kind === "executions" ? 100 : undefined);
+    if (removed) return others;
+    // A fill is announced before IBKR's commission report and re-sent on
+    // reconnect without one; like the server, only ever add fields to it.
+    const known =
+      kind === "executions" ? rows.find((row) => identity(row) === identity(data)) : undefined;
+    const next = known
+      ? { ...known, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v != null)) }
+      : data;
+    return [next, ...others].slice(0, kind === "executions" ? 100 : undefined);
   });
   const current = client.getQueryData<Record<string, unknown>[]>(key);
   if (
