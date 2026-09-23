@@ -13,6 +13,7 @@ import {
 } from "@/lib/two-factor";
 
 const LIVE_STATES = new Set(["CONNECTED", "DEGRADED"]);
+const ATTACHING = new Set(["CONNECTING", "RECONNECTING"]);
 type Interrupt = "stop" | "restart";
 
 type Action = {
@@ -59,7 +60,7 @@ export function GatewayStatus({
   const processRunning = gateway?.process === "active";
   const portOpen = gateway?.api_port_open === true;
   const linked = LIVE_STATES.has(status);
-  const fullyOnline = linked && phase === "logged_in" && (portOpen || !canControl);
+  const fullyOnline = phase === "logged_in" && (portOpen || !canControl);
 
   async function run(action: () => Promise<unknown>, done: string) {
     setBusy(true);
@@ -122,7 +123,13 @@ export function GatewayStatus({
         tone: "danger",
         run: () => interrupt("restart"),
       };
-    if (portOpen)
+    if (ATTACHING.has(status))
+      return {
+        label: "Connecting…",
+        title: "Worker is attaching to the gateway API",
+        tone: "idle",
+      };
+    if (portOpen && (status === "FAILED" || status === "DISCONNECTED"))
       return {
         label: "Reconnect",
         title: "Reconnect the worker to the gateway API",
