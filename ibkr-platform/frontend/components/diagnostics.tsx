@@ -6,6 +6,7 @@ import { useZone } from "./timezone";
 import { formatDateTime } from "@/lib/timezone";
 import { Gateway, LiveEvent } from "@/lib/types";
 import { GatewayStatus } from "./gateway-status";
+import { TablePager, usePagedRows } from "./table-pager";
 
 const EVENT_KINDS = [
   { key: "account", label: "Last account event" },
@@ -28,6 +29,8 @@ export function Diagnostics({ clock }: { clock: number }) {
   });
   const [result, setResult] = useState("");
   const [start, setStart] = useState("");
+  const accounts = Object.entries(query.data?.last_events ?? {});
+  const paged = usePagedRows(accounts);
   if (query.error) return <p role="alert">{query.error.message}</p>;
   if (!query.data) return <p>Loading diagnostics…</p>;
   const data = query.data;
@@ -61,7 +64,7 @@ export function Diagnostics({ clock }: { clock: number }) {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(data.last_events).map(([account, events]) => (
+              {paged.rows.map(([account, events]) => (
                 <tr key={account}>
                   <td data-label="Account">{account}</td>
                   {EVENT_KINDS.map((kind) => (
@@ -77,6 +80,7 @@ export function Diagnostics({ clock }: { clock: number }) {
             <div className="empty">No accounts reporting events</div>
           )}
         </div>
+        <TablePager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
       </section>
       <section className="panel">
         <h2>External username visibility</h2>

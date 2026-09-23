@@ -207,7 +207,8 @@ export type IntradayResponse = {
   date: string;
   accounts: string[];
   series: (HistoryPoint & { day_pnl: string | null })[];
-  combined: { taken_at: string; accounts: number; day_pnl: string }[];
+  combined: { taken_at: string; accounts: number; carried?: number; day_pnl: string }[];
+  unreported?: string[];
 };
 
 export type RealizedSummary = {

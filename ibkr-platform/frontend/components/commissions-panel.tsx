@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { CommissionSummary } from "@/lib/types";
 import { money } from "./tables";
+import { TablePager, usePagedRows } from "./table-pager";
 import { LinesSkeleton } from "./skeleton";
 
 export function CommissionsPanel({ accountId }: { accountId?: string }) {
@@ -13,7 +14,8 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
     queryFn: () => api<CommissionSummary>(path),
   });
   const data = commissions.data;
-  const recentDays = [...(data?.by_day ?? [])].reverse().slice(0, 10);
+  const recentDays = [...(data?.by_day ?? [])].reverse();
+  const paged = usePagedRows(recentDays);
 
   return (
     <section className="panel">
@@ -49,7 +51,7 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
                 </tr>
               </thead>
               <tbody>
-                {recentDays.map((row) => (
+                {paged.rows.map((row) => (
                   <tr key={row.date}>
                     <th>{row.date}</th>
                     <td>{money(row.commission)}</td>
@@ -58,6 +60,7 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
               </tbody>
             </table>
           )}
+          <TablePager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
           <p className="footnote">
             Commission only appears once IBKR reports it against an execution; a fill without a
             commission report yet is not counted.

@@ -932,17 +932,34 @@ async def intraday(
     at: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         at.setdefault(row["taken_at"], []).append(row)
-    expected = len({row["account_id"] for row in rows})
-    combined = [
-        {
-            "taken_at": stamp,
-            "accounts": len(group),
-            "day_pnl": str(sum(Decimal(r["day_pnl"]) for r in group)),
-        }
-        for stamp, group in sorted(at.items())
-        if len(group) == expected and all(r.get("day_pnl") is not None for r in group)
-    ]
-    return ok({"date": day, "accounts": wanted, "series": rows, "combined": combined})
+    present = {row["account_id"] for row in rows}
+    reporting = {row["account_id"] for row in rows if row.get("day_pnl") is not None}
+    last: dict[str, Decimal] = {}
+    combined = []
+    for stamp, group in sorted(at.items()):
+        carried = 0
+        for r in group:
+            if r.get("day_pnl") is not None:
+                last[r["account_id"]] = Decimal(r["day_pnl"])
+            elif r["account_id"] in reporting:
+                carried += 1
+        counted = [r for r in group if r["account_id"] in reporting]
+        if len(group) != len(present) or not counted:
+            continue
+        if any(r["account_id"] not in last for r in counted):
+            continue
+        combined.append(
+            {
+                "taken_at": stamp,
+                "accounts": len(counted),
+                "carried": carried,
+                "day_pnl": str(sum(last[r["account_id"]] for r in counted)),
+            }
+        )
+    unreported = sorted(present - reporting)
+    return ok(
+        {"date": day, "accounts": wanted, "series": rows, "combined": combined, "unreported": unreported}
+    )
 
 async def commission_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
     query = user.scope({"account_id": {"$in": accounts}, "commission": {"$ne": None}})

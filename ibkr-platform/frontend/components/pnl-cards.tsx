@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { CommissionSummary, RealizedSummary } from "@/lib/types";
 import { Amount, money } from "./tables";
+import { TablePager, usePagedRows } from "./table-pager";
 import { SearchableMultiSelect } from "./searchable-multi-select";
 import { Selection, useSelection } from "./selection";
 import { LinesSkeleton } from "./skeleton";
@@ -56,6 +57,8 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     ...shownLegs.map(leg => leg.execution_id),
     ...shownFills.map(fill => fill.execution_id),
   ].filter(Boolean))].sort();
+  const accountPage = usePagedRows(accountsInView, accountsInView.join("\0"));
+  const idPage = usePagedRows(idsInView, idsInView.join("\0"));
   const idHint = (id: string) => {
     const leg = legs.find(row => row.execution_id === id);
     const fill = fills.find(row => row.execution_id === id);
@@ -133,7 +136,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {accountsInView.map(account => {
+                  {accountPage.rows.map(account => {
                     const bookedAccount = bookedFor(account);
                     const spentAccount = spentFor(account);
                     return (
@@ -148,6 +151,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                   })}
                 </tbody>
               </table>
+              <TablePager page={accountPage.page} pages={accountPage.pages} total={accountPage.total} onPage={accountPage.setPage} />
             </div>
           )}
           {idsInView.length > 0 && (
@@ -164,7 +168,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {idsInView.map(id => {
+                  {idPage.rows.map(id => {
                     const bookedFill = bookedId(id);
                     const spentFill = spentId(id);
                     const account = shownLegs.find(leg => leg.execution_id === id)?.account_id
@@ -182,6 +186,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                   })}
                 </tbody>
               </table>
+              <TablePager page={idPage.page} pages={idPage.pages} total={idPage.total} onPage={idPage.setPage} />
             </div>
           )}
           <p className="footnote">

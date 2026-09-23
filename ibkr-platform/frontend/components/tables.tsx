@@ -18,6 +18,7 @@ import {
 } from "@/lib/executions";
 import { SearchableSelect } from "./searchable-select";
 import { TableRowsSkeleton } from "./skeleton";
+import { PAGE_SIZE, TablePager, usePagedRows } from "./table-pager";
 import { useZone } from "./timezone";
 import { formatDay, formatTime } from "@/lib/timezone";
 
@@ -53,6 +54,20 @@ type Facet<T> = { label: string; value: (row: T) => string | null | undefined };
 const ANY = "All";
 const JSON_TEXT = (row: unknown) => JSON.stringify(row);
 const MIN_COLUMN = 64;
+
+function pageOfGroups<T>(groups: { label: string; rows: T[] }[], page: number) {
+  const start = page * PAGE_SIZE;
+  const end = start + PAGE_SIZE;
+  let seen = 0;
+  const out: { label: string; rows: T[]; all: T[] }[] = [];
+  for (const group of groups) {
+    const from = Math.max(0, start - seen);
+    const to = Math.min(group.rows.length, end - seen);
+    if (from < to) out.push({ label: group.label, rows: group.rows.slice(from, to), all: group.rows });
+    seen += group.rows.length;
+  }
+  return out;
+}
 
 export function DataTable<T>({
   rows,
@@ -142,6 +157,9 @@ export function DataTable<T>({
     return runs;
   }, [visible, groupBy, sort.index]);
   const filtered = !!search || Object.values(picked).some((v) => v && v !== ANY);
+  const filterKey = `${search}\0${sort.index}\0${sort.asc}\0${JSON.stringify(picked)}`;
+  const paged = usePagedRows(visible, filterKey);
+  const shown = pageOfGroups(groups, paged.page);
 
   function seed() {
     if (Object.keys(widths).length || !head.current) return {} as Record<string, number>;
@@ -330,13 +348,13 @@ export function DataTable<T>({
           </thead>
           <tbody aria-busy={loading && !rows.length}>
             {loading && !rows.length && <TableRowsSkeleton columns={columns.length} />}
-            {groups.map((group) => (
+            {shown.map((group) => (
               <Fragment key={group.label || "all"}>
                 {group.label && (
                   <tr className="group-row">
                     <th scope="colgroup" colSpan={columns.length}>
                       <span>{group.label}</span>
-                      {groupSummary?.(group.rows)}
+                      {groupSummary?.(group.all)}
                     </th>
                   </tr>
                 )}
@@ -363,6 +381,7 @@ export function DataTable<T>({
           </div>
         )}
       </div>
+      <TablePager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
     </>
   );
 }

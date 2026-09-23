@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { TenantSummary } from "@/lib/types";
+import { TablePager, usePagedRows } from "./table-pager";
 import { Button } from "./ui/button";
 
 export function TenantsAdmin() {
@@ -40,8 +41,9 @@ export function TenantsAdmin() {
     onError: (problem: Error) => setError(problem.message),
   });
 
-  if (tenants.error) return <p role="alert">{tenants.error.message}</p>;
   const rows = tenants.data ?? [];
+  const paged = usePagedRows(rows);
+  if (tenants.error) return <p role="alert">{tenants.error.message}</p>;
 
   return (
     <>
@@ -64,7 +66,7 @@ export function TenantsAdmin() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((tenant) => (
+              {paged.rows.map((tenant) => (
                 <tr key={tenant.tenant_id}>
                   <td data-label="Name">{tenant.name}</td>
                   <td data-label="Slug">{tenant.slug}</td>
@@ -108,6 +110,7 @@ export function TenantsAdmin() {
             <div className="empty">No tenants yet</div>
           )}
         </div>
+        <TablePager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
       </section>
 
       <section className="panel">

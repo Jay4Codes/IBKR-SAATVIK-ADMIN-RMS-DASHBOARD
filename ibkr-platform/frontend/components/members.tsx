@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMinus } from "lucide-react";
 import { api, apiDelete } from "@/lib/api";
 import { Member, TenantRole, User } from "@/lib/types";
+import { TablePager, usePagedRows } from "./table-pager";
 import { Button } from "./ui/button";
 
 const SCOPED: TenantRole[] = ["TRADER", "VIEWER"];
@@ -33,8 +34,9 @@ export function Members({ user }: { user?: User }) {
     },
   });
 
-  if (members.error) return <p role="alert">{members.error.message}</p>;
   const rows = members.data ?? [];
+  const paged = usePagedRows(rows);
+  if (members.error) return <p role="alert">{members.error.message}</p>;
 
   return (
     <>
@@ -66,7 +68,7 @@ export function Members({ user }: { user?: User }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((member) => (
+              {paged.rows.map((member) => (
                 <tr key={member.user_id}>
                   <td data-label="Email">
                     {member.email}
@@ -107,6 +109,7 @@ export function Members({ user }: { user?: User }) {
             <div className="empty">No members yet</div>
           )}
         </div>
+        <TablePager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
       </section>
 
       {removing && (

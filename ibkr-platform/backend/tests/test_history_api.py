@@ -211,3 +211,20 @@ async def test_intraday_respects_account_grants(client, stores):
     assert (
         await client.get("/api/v1/history/intraday?accounts=DU2", cookies=as_user("TRADER"))
     ).status_code == 403
+
+async def test_an_account_the_broker_never_values_is_left_out_of_the_total(client, stores):
+    _, db = stores
+    for stamp, pnl in [("09:35", "10"), ("09:40", "-5")]:
+        await intraday_point(db, TENANT, "DU1", stamp, pnl)
+        await intraday_point(db, TENANT, "DU2", stamp, None)
+    body = (await client.get("/api/v1/history/intraday?date=2026-09-10")).json()["data"]
+    assert [c["day_pnl"] for c in body["combined"]] == ["10", "-5"]
+    assert body["unreported"] == ["DU2"]
+
+async def test_a_figure_that_drops_out_carries_its_last_value(client, stores):
+    _, db = stores
+    for stamp, a, b in [("09:35", "10", "4"), ("09:40", "12", None)]:
+        await intraday_point(db, TENANT, "DU1", stamp, a)
+        await intraday_point(db, TENANT, "DU2", stamp, b)
+    body = (await client.get("/api/v1/history/intraday?date=2026-09-10")).json()["data"]
+    assert [(c["day_pnl"], c["carried"]) for c in body["combined"]] == [("14", 0), ("16", 1)]
