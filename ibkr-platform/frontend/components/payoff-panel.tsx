@@ -382,7 +382,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     <h2>{accountId ? "Account payoff & risk" : "Desk payoff & risk"}
       <span className="panel-actions"><Button type="button" variant="ghost" size="sm" aria-expanded={inputs} aria-controls="risk-inputs" title="Shock range, horizon and per-underlying assumptions" onClick={() => setInputs(!inputs)}><SlidersHorizontal size={14} aria-hidden="true" />{inputs ? "Hide inputs" : "Model inputs"}{inputs ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}</Button></span>
     </h2>
-    <p className="footnote">{accountId ? `Account ${accountId}` : "All accessible accounts"} · Open-position P&L relative to average cost · Currencies are calculated separately; no FX conversion.</p>
     {loading ? <ChartSkeleton label="Loading all account positions" height={320} /> : error ? <p role="alert">Position data could not be loaded for every account. Risk curves are unavailable until all accounts load.</p> : !currencies.length ? <p>No open positions to model.</p> : <>
       <div id="risk-inputs" hidden={!inputs}>
       <div className="risk-controls">
@@ -501,103 +500,106 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         </span>}
       </div>}
 
-      <div className="reference-bar">
-        {(viewKeys.length ? viewKeys : focus ? [focus] : []).map(key => {
-          const symbol = symbolOf(key);
-          const price = quoted[key];
-          const priced = pricedKeys.includes(key);
-          return <div key={key} className={`reference-card${priced ? "" : " unpriced"}`}>
-            <div className="reference-readout">
-              <span id={`ref-${key.replace(/:/g, "-")}`}>{symbol} reference</span>
-              <output className="reference-value" aria-labelledby={`ref-${key.replace(/:/g, "-")}`}>
-                {price === undefined ? "—" : money(String(price))}
-              </output>
-              <small>{price === undefined ? "No broker mark" : spotLabel(marks[key]?.source ?? "")}</small>
-            </div>
-            {priced && <label className="iv-control">
-              <span>IV <b>{(assumptions[key].volatility * 100).toFixed(1)}%</b></span>
-              <input type="range" min={1} max={150} step={0.5}
-                aria-label={`${symbol} implied volatility`}
-                value={Number.isFinite(assumptions[key].volatility) ? assumptions[key].volatility * 100 : ASSUMED_VOL * 100}
-                onChange={e => change(key, "volatility", e.target.value)} />
-              <small>{overrides[key]?.volatility !== undefined
-                ? `Manual · market ${((marketVol[key] ?? ASSUMED_VOL) * 100).toFixed(1)}%`
-                : marketVol[key] === undefined ? "Assumed — no usable option marks" : "From option marks"}</small>
-            </label>}
-            {priced && shockMode === "beta" && <label className="beta-control">
-              <span>β to {symbolOf(benchmark ?? "")}</span>
-              <input type="number" min="-5" max="5" step="0.05" inputMode="decimal" placeholder="1"
-                aria-label={`${symbol} beta`}
-                value={overrides[key]?.beta ?? ""}
-                onChange={e => change(key, "beta", e.target.value)} />
-            </label>}
-          </div>;
-        })}
-      </div>
-
-      <div className="scenario-bar">
-        <div className="scenario-group" role="group" aria-label="Add a scenario column">
-          <span className="group-label">Add column</span>
-          <span className="level-entry" title={`Adds a −x% and +x% column next to ${RMS_SHOCKS.filter(s => s > 0).join(", ")}%`}>
-            <span className="affix" aria-hidden="true">±</span>
-            <input
-              type="number" min="0.1" max="99" step="any" inputMode="decimal"
-              placeholder="7"
-              aria-label="Add a custom scenario move, in percent"
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLevel(); } }}
-            />
-            <span className="affix" aria-hidden="true">%</span>
-            <Button type="button" variant="outline" size="sm" onClick={addLevel} disabled={!canAdd}>
-              <Plus size={14} aria-hidden="true" />Add
-            </Button>
-          </span>
-          {viewKeys.length === 1 && <span className="level-entry" title="P&L at this exact price, whatever the reference moves to">
-            <span className="affix" aria-hidden="true">{symbolOf(viewKeys[0])} @</span>
-            <input
-              type="number" min="0.01" step="any" inputMode="decimal"
-              placeholder={assumptions[viewKeys[0]]?.spot > 0 ? money(String(assumptions[viewKeys[0]].spot), 0) : "7800"}
-              aria-label={`Add a scenario column at an exact ${symbolOf(viewKeys[0])} price`}
-              value={priceDraft}
-              onChange={e => setPriceDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addPrice(); } }}
-            />
-            <Button type="button" variant="outline" size="sm" onClick={addPrice} disabled={!canAddPrice}>
-              <Plus size={14} aria-hidden="true" />Add
-            </Button>
-          </span>}
-          {custom.length >= MAX_CUSTOM && <small role="status">{MAX_CUSTOM} custom levels max — remove one to add another</small>}
+      <div className="model-bar">
+        <div className="reference-bar">
+          {(viewKeys.length ? viewKeys : focus ? [focus] : []).map(key => {
+            const symbol = symbolOf(key);
+            const price = quoted[key];
+            const priced = pricedKeys.includes(key);
+            const volNote = overrides[key]?.volatility !== undefined
+              ? `Manual · market ${((marketVol[key] ?? ASSUMED_VOL) * 100).toFixed(1)}%`
+              : marketVol[key] === undefined ? "Assumed — no usable option marks" : "From option marks";
+            return <div key={key} className={`reference-card${priced ? "" : " unpriced"}`}>
+              <div className="reference-readout">
+                <span id={`ref-${key.replace(/:/g, "-")}`}>{symbol} reference</span>
+                <output className="reference-value" aria-labelledby={`ref-${key.replace(/:/g, "-")}`}>
+                  {price === undefined ? "—" : money(String(price))}
+                </output>
+                <small>{price === undefined ? "No broker mark" : spotLabel(marks[key]?.source ?? "")}</small>
+              </div>
+              {priced && <label className="iv-control" title={volNote}>
+                <span>IV <b>{(assumptions[key].volatility * 100).toFixed(1)}%</b></span>
+                <input type="range" min={1} max={150} step={0.5}
+                  aria-label={`${symbol} implied volatility`}
+                  aria-describedby={`iv-note-${key.replace(/:/g, "-")}`}
+                  value={Number.isFinite(assumptions[key].volatility) ? assumptions[key].volatility * 100 : ASSUMED_VOL * 100}
+                  onChange={e => change(key, "volatility", e.target.value)} />
+                <small id={`iv-note-${key.replace(/:/g, "-")}`}>{volNote}</small>
+              </label>}
+              {priced && shockMode === "beta" && <label className="beta-control">
+                <span>β to {symbolOf(benchmark ?? "")}</span>
+                <input type="number" min="-5" max="5" step="0.05" inputMode="decimal" placeholder="1"
+                  aria-label={`${symbol} beta`}
+                  value={overrides[key]?.beta ?? ""}
+                  onChange={e => change(key, "beta", e.target.value)} />
+              </label>}
+            </div>;
+          })}
         </div>
-        <div className="scenario-group" role="group" aria-label="Include in P&L">
-          <span className="group-label">Include</span>
-          <label className="toggle-chip" title="Commissions paid on this cycle's fills">
-            <input type="checkbox" checked={withCommissions} onChange={e => setWithCommissions(e.target.checked)} />
-            <span>Commissions</span>
-          </label>
-          {booked !== 0 && <label className="toggle-chip" title="P&L already booked on legs closed this cycle">
-            <input type="checkbox" checked={withClosed} onChange={e => setWithClosed(e.target.checked)} />
-            <span>Closed legs</span>
-            <small><Amount value={String(booked)} /></small>
-          </label>}
+        <div className="scenario-bar">
+          <div className="scenario-group" role="group" aria-label="Add a scenario column">
+            <span className="group-label">Add column</span>
+            <span className="level-entry" title={`Adds a −x% and +x% column next to ${RMS_SHOCKS.filter(s => s > 0).join(", ")}%`}>
+              <span className="affix" aria-hidden="true">±</span>
+              <input
+                type="number" min="0.1" max="99" step="any" inputMode="decimal"
+                placeholder="7"
+                aria-label="Add a custom scenario move, in percent"
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLevel(); } }}
+              />
+              <span className="affix" aria-hidden="true">%</span>
+              <Button type="button" variant="outline" size="sm" onClick={addLevel} disabled={!canAdd}>
+                <Plus size={14} aria-hidden="true" />Add
+              </Button>
+            </span>
+            {viewKeys.length === 1 && <span className="level-entry" title="P&L at this exact price, whatever the reference moves to">
+              <span className="affix" aria-hidden="true">{symbolOf(viewKeys[0])} @</span>
+              <input
+                type="number" min="0.01" step="any" inputMode="decimal"
+                placeholder={assumptions[viewKeys[0]]?.spot > 0 ? money(String(assumptions[viewKeys[0]].spot), 0) : "7800"}
+                aria-label={`Add a scenario column at an exact ${symbolOf(viewKeys[0])} price`}
+                value={priceDraft}
+                onChange={e => setPriceDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addPrice(); } }}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={addPrice} disabled={!canAddPrice}>
+                <Plus size={14} aria-hidden="true" />Add
+              </Button>
+            </span>}
+            {custom.length >= MAX_CUSTOM && <small role="status">{MAX_CUSTOM} custom levels max — remove one to add another</small>}
+          </div>
+          <div className="scenario-group" role="group" aria-label="Include in P&L">
+            <span className="group-label">Include</span>
+            <label className="toggle-chip" title="Commissions paid on this cycle's fills">
+              <input type="checkbox" checked={withCommissions} onChange={e => setWithCommissions(e.target.checked)} />
+              <span>Commissions</span>
+            </label>
+            {booked !== 0 && <label className="toggle-chip" title="P&L already booked on legs closed this cycle">
+              <input type="checkbox" checked={withClosed} onChange={e => setWithClosed(e.target.checked)} />
+              <span>Closed legs</span>
+              <small><Amount value={String(booked)} /></small>
+            </label>}
+          </div>
+          {chipColumns.length > 0 && <div className="bar-row">
+            <span className="level-chips" role="group" aria-label="Scenario columns">
+              {chipColumns.map(column => (
+                <button
+                  key={column.id}
+                  type="button"
+                  className={`${column.kind}${column.custom ? " custom" : ""}`}
+                  onClick={() => dropColumn(column)}
+                  aria-label={`Remove the ${column.kind === "price" ? column.label : `±${Math.abs(column.shock)}%`} scenario column`}
+                  title={`Remove ${column.kind === "price" ? column.label : `±${Math.abs(column.shock)}%`}`}
+                >
+                  {column.kind === "price" ? column.label : `±${Math.abs(column.shock)}%`}
+                  <b aria-hidden="true">×</b>
+                </button>
+              ))}
+            </span>
+          </div>}
         </div>
-        {chipColumns.length > 0 && <div className="bar-row">
-          <span className="level-chips" role="group" aria-label="Scenario columns">
-            {chipColumns.map(column => (
-              <button
-                key={column.id}
-                type="button"
-                className={`${column.kind}${column.custom ? " custom" : ""}`}
-                onClick={() => dropColumn(column)}
-                aria-label={`Remove the ${column.kind === "price" ? column.label : `±${Math.abs(column.shock)}%`} scenario column`}
-                title={`Remove ${column.kind === "price" ? column.label : `±${Math.abs(column.shock)}%`}`}
-              >
-                {column.kind === "price" ? column.label : `±${Math.abs(column.shock)}%`}
-                <b aria-hidden="true">×</b>
-              </button>
-            ))}
-          </span>
-        </div>}
       </div>
 
       {(cycleChoice.isNone || accountChoice.isNone || nameChoice.isNone) && <div className="empty-selection" role="status">
@@ -610,11 +612,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
       {excluded.length > 0 && <details><summary>Partial coverage: {excluded.length} excluded legs</summary><ul>{excluded.map(({ position: p, reason }) => <li key={`${p.account_id}:${p.con_id}`}>{p.account_id} · {positionLabel(p)}: {reason}</li>)}</ul></details>}
       {tails.length > 0 && <p className="risk-warning">Potential uncapped upside exposure: {tails.join(", ")}. Calls at different expiries are not treated as guaranteed hedges.</p>}
       {ready && focused && <>
-        {columns.some(column => column.custom) && <div className="level-legend">
-          <span><i />Default levels</span>
-          <span className="is-custom"><i />Added by you</span>
-          {columns.some(column => column.kind === "price") && <span className="is-price"><i />Price level</span>}
-        </div>}
         <LensTable
           lens={lens}
           currency={currency}
@@ -632,6 +629,11 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           unpriced={[]}
           renderDetail={renderDetail}
           captionNotes={captionNotes}
+          legend={<span className="level-legend">
+            <span><i />Default levels</span>
+            <span className="is-custom"><i />Added by you</span>
+            {columns.some(column => column.kind === "price") && <span className="is-price"><i />Price level</span>}
+          </span>}
         />
         <div className="payoff-sliders">
           <label>

@@ -54,7 +54,7 @@ export function rowMeta(lens: Lens, row: LensRow): string {
 
 export function LensTable({
   lens, currency, columns, rows, total, totalLabel, realized, showLevelRow, levelFor, expanded, onExpand, moveColumn,
-  denomination, unpriced, renderDetail, captionNotes,
+  denomination, unpriced, renderDetail, captionNotes, legend,
 }: {
   lens: Lens;
   currency: string;
@@ -72,6 +72,7 @@ export function LensTable({
   unpriced: UnpricedGroup[];
   renderDetail: (row: LensRow | null) => ReactNode;
   captionNotes: string[];
+  legend?: ReactNode;
 }) {
   const shownColumns = columns.filter(column => column.shock in total.at);
   const span = shownColumns.length + (lens === "asset" ? 5 : 4);
@@ -104,13 +105,16 @@ export function LensTable({
     </>
   );
 
+  const caption = `Scenario P&L by ${lens === "account" ? "account" : lens === "asset" ? "underlying" : "expiry"} (${currency})${captionNotes.map(note => ` · ${note}`).join("")}`;
+
   return (
     <div className="risk-table lens-table">
+      <div className="table-caption-row">
+        <p>{caption}</p>
+        {legend}
+      </div>
       <table className="scenario-grid lens-grid">
-        <caption>
-          Scenario P&amp;L by {lens === "account" ? "account" : lens === "asset" ? "underlying" : "expiry"} ({currency})
-          {captionNotes.map(note => ` · ${note}`).join("")}
-        </caption>
+        <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
             <th scope="col">Measure</th>

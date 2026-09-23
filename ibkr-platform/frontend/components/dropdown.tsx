@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
 import { ReactNode, useEffect, useRef } from "react";
 
 export function Dropdown({
@@ -31,6 +32,7 @@ export function Dropdown({
       <summary>
         {label}
         <b>{value}</b>
+        <ChevronDown size={16} strokeWidth={2.25} aria-hidden="true" className="ss-caret" />
       </summary>
       {children}
     </details>

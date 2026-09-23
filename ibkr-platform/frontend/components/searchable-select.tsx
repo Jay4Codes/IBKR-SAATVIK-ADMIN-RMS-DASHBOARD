@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 export function SearchableSelect({
@@ -84,9 +85,7 @@ export function SearchableSelect({
         }}
       >
         <span>{format(value) || value || "—"}</span>
-        <span aria-hidden="true" className="ss-caret">
-          ▾
-        </span>
+        <ChevronDown size={16} strokeWidth={2.25} aria-hidden="true" className="ss-caret" />
       </button>
       {open && (
         <div className="ss-pop">

@@ -30,12 +30,17 @@ function markers(legs: RiskLeg[]): Marker[] {
   return [...merged.values()].filter(m => m.quantity !== 0).sort((a, b) => a.strike - b.strike);
 }
 
-export function scaleTicks(lo: number, hi: number, target = 9): number[] {
+const STRIKE_STEPS = [1, 2, 5, 10, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000];
+
+export function scaleStep(lo: number, hi: number, target = 20): number {
   const span = hi - lo;
-  if (!(span > 0)) return [];
+  if (!(span > 0)) return 25;
   const rough = span / target;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
-  const step = [1, 2, 2.5, 5, 10].map(m => m * magnitude).find(s => s >= rough) ?? 10 * magnitude;
+  return STRIKE_STEPS.find(step => step >= rough) ?? STRIKE_STEPS[STRIKE_STEPS.length - 1];
+}
+
+export function scaleTicks(lo: number, hi: number, target = 20): number[] {
+  const step = scaleStep(lo, hi, target);
   const out: number[] = [];
   for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) {
     out.push(Number(v.toPrecision(12)));
@@ -222,8 +227,11 @@ function PayoffGraph({
               },
             },
           },
-          axisLine: { lineStyle: { color: t.line } }, axisTick: { show: false },
-          axisLabel: { color: t.muted, formatter: (v: number) => money(String(v), 0) },
+          axisLine: { lineStyle: { color: t.line } },
+          axisTick: { show: true, length: 4, lineStyle: { color: t.line } },
+          splitNumber: 16,
+          minInterval: 5,
+          axisLabel: { color: t.muted, hideOverlap: true, formatter: (v: number) => money(String(v), 0) },
           splitLine: { lineStyle: { color: t.grid } },
         },
         yAxis: [
