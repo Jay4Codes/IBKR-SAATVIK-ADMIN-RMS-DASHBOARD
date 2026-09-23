@@ -279,7 +279,8 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     (viewCurves.length ? viewCurves : points).map(p => [p.shock, p.terminal - (focused?.adjustment ?? 0)]),
   );
   const viewNow = focused?.now ?? currentPoint?.modeled;
-  const viewExpiry = focused ? focused.at[0] ?? NaN : currentPoint?.terminal;
+  const atSpot = viewCurves.find(p => p.shock === 0)?.terminal ?? focused?.at[0] ?? currentPoint?.terminal;
+  const viewExpiry = Number.isFinite(atSpot) ? atSpot : undefined;
   const viewWorst = focused?.worst ?? total.worst;
   const viewWorstMtm = viewCurves.length
     ? Math.min(...viewCurves.map(p => p.modeled))
@@ -353,15 +354,11 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
 
   const filters = (
     <div className="lens-filters" role="group" aria-label="Filters">
-      {!accountId && accountIds.length > 0 && lens !== "account" && (
+      {!accountId && accountIds.length > 0 && (
         <SearchableMultiSelect label="Accounts" selection={accountChoice} noun="accounts"
           describe={id => legCount(l => l.position.account_id === id)} />
       )}
-      {allKeys.length > 0 && lens !== "asset" && (
-        <SearchableMultiSelect label="Underlyings" selection={nameChoice} noun="underlyings" searchFrom={2} format={symbolOf}
-          describe={key => legCount(l => underlyingKey(l.position) === key)} />
-      )}
-      {expiries.length > 0 && lens !== "expiry" && (
+      {expiries.length > 0 && (
         <SearchableMultiSelect label="Expiry" className="expiry-picker" selection={cycleChoice} noun="cycles" searchFrom={2} format={expiryLabel}
           describe={value => legCount(l => expiryOf(l.position) === value)} />
       )}
@@ -390,50 +387,52 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
       </div>
 
       <div className="lens-bar">
-        <Segmented<Lens>
-          label="Lens"
-          value={lens}
-          onChange={setLens}
-          options={LENSES.map(item => ({
-            id: item.id,
-            label: item.label,
-            count: item.id === "asset" ? pricedKeys.length : item.id === "expiry" ? new Set(modeled.map(l => expiryOf(l.position))).size : new Set(modeled.map(l => l.position.account_id)).size,
-            title: `Group the same legs by ${item.noun}`,
-          }))}
-        />
-        {focusRows.length > 0 && (
-          <label className="lens-focus">
-            <SearchableSelect
-              label={lens === "asset" ? "Underlying" : lens === "expiry" ? "Expiry" : "Account"}
-              value={focus}
-              options={focusRows.map(row => row.id)}
-              onChange={setFocus}
-              format={id => focusRows.find(row => row.id === id)?.label ?? symbolOf(id)}
-              searchFrom={2}
-            />
-          </label>
-        )}
         <Button type="button" variant="outline" size="sm" className="filter-sheet-open"
           aria-expanded={sheet} aria-controls="filter-sheet"
           onClick={() => setSheet(true)}>
           Filters
         </Button>
         {filters}
-        <div className="lens-modes">
-          {viewKeys.length > 1 && (
-            <Segmented<ShockMode> label="Shock model" size="sm" value={shockMode} onChange={setShockMode}
-              options={[
-                { id: "parallel", label: "Parallel", title: "Every underlying moves by the column's percentage" },
-                { id: "beta", label: `vs ${symbolOf(benchmark ?? "")} β`, title: `The column is a move in ${symbolOf(benchmark ?? "")}; each name moves by its beta times that` },
-              ]} />
+        <div className="lens-toggles">
+          {focusRows.length > 0 && (
+            <label className="lens-focus">
+              <SearchableSelect
+                label={lens === "asset" ? "Underlying" : lens === "expiry" ? "Expiry" : "Account"}
+                value={focus}
+                options={focusRows.map(row => row.id)}
+                onChange={setFocus}
+                format={id => focusRows.find(row => row.id === id)?.label ?? symbolOf(id)}
+                searchFrom={2}
+              />
+            </label>
           )}
-          {lens === "account" && (
-            <Segmented<Denomination> label="Denomination" size="sm" value={denomination} onChange={setDenomination}
-              options={[
-                { id: "money", label: currency },
-                { id: "pct", label: "% of NLV", title: "Each figure as a share of the account's net liquidation" },
-              ]} />
-          )}
+          <Segmented<Lens>
+            label="Lens"
+            value={lens}
+            onChange={setLens}
+            options={LENSES.map(item => ({
+              id: item.id,
+              label: item.label,
+              count: item.id === "asset" ? pricedKeys.length : item.id === "expiry" ? new Set(modeled.map(l => expiryOf(l.position))).size : new Set(modeled.map(l => l.position.account_id)).size,
+              title: `Group the same legs by ${item.noun}`,
+            }))}
+          />
+          <div className="lens-modes">
+            {viewKeys.length > 1 && (
+              <Segmented<ShockMode> label="Shock model" size="sm" value={shockMode} onChange={setShockMode}
+                options={[
+                  { id: "parallel", label: "Parallel", title: "Every underlying moves by the column's percentage" },
+                  { id: "beta", label: `vs ${symbolOf(benchmark ?? "")} β`, title: `The column is a move in ${symbolOf(benchmark ?? "")}; each name moves by its beta times that` },
+                ]} />
+            )}
+            {lens === "account" && (
+              <Segmented<Denomination> label="Denomination" size="sm" value={denomination} onChange={setDenomination}
+                options={[
+                  { id: "money", label: currency },
+                  { id: "pct", label: "% of NLV", title: "Each figure as a share of the account's net liquidation" },
+                ]} />
+            )}
+          </div>
         </div>
       </div>
       {sheet && (
@@ -453,7 +452,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         </span>
         <span>
           <Term hint={`Settlement P&L if every underlying expires at today's reference — the book does not move${viewKeys.length === 1 ? ` (${symbolOf(viewKeys[0])} ${money(String(assumptions[viewKeys[0]].spot))})` : ""}.`}>Expiry at spot</Term>
-          <b><Amount value={String(viewExpiry)} /> <small>{currency}</small></b>
+          <b><Amount value={viewExpiry == null ? undefined : String(viewExpiry)} /> <small>{currency}</small></b>
         </span>
         <span>
           <Term hint="Lowest settlement P&L anywhere in the plotted range. Widen the range to test a deeper move.">Worst expiry</Term>
@@ -465,7 +464,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         </span>
         {viewKeys.map(key => <span key={key} className="ref-metric">{key} reference <b>{money(String(assumptions[key].spot))}</b></span>)}
         {viewBooked !== 0 && <span>Booked P&L from closed legs this cycle <b><Amount value={String(viewBooked)} /> {currency}</b></span>}
-        {viewCharged !== 0 && <span>Commissions added back (IBKR bakes them into average cost) <b><Amount value={String(viewCharged)} /> {currency}</b></span>}
+        {viewCharged !== 0 && <span>Commissions <b><Amount value={String(viewCharged)} /> {currency}</b></span>}
         {focused.adjustment !== 0 && <span>Open legs as the broker reports them, at current reference (0%) <b><Amount value={String((viewCurves.find(p => p.shock === 0)?.terminal ?? 0) - focused.adjustment)} /> {currency}</b></span>}
       </div>}
 
@@ -544,8 +543,23 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           </span>
           <small>P&amp;L at that exact level, whatever the reference moves to</small>
         </label>}
-        <div className="bar-row">
-          {chipColumns.length > 0 && <span className="level-chips" role="group" aria-label="Scenario columns">
+        <label className="commission-toggle">
+          <span className="toggle-caption" aria-hidden="true">&nbsp;</span>
+          <span className="toggle-row">
+            <input type="checkbox" checked={withCommissions} onChange={e => setWithCommissions(e.target.checked)} />
+            <span>Include commissions</span>
+          </span>
+        </label>
+        {booked !== 0 && <label className="commission-toggle">
+          <span className="toggle-caption" aria-hidden="true">&nbsp;</span>
+          <span className="toggle-row">
+            <input type="checkbox" checked={withClosed} onChange={e => setWithClosed(e.target.checked)} />
+            <span>Include closed legs</span>
+          </span>
+          <small><Amount value={String(booked)} /> {currency} booked</small>
+        </label>}
+        {chipColumns.length > 0 && <div className="bar-row">
+          <span className="level-chips" role="group" aria-label="Scenario columns">
             {chipColumns.map(column => (
               <button
                 key={column.id}
@@ -559,17 +573,8 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
                 <b aria-hidden="true">×</b>
               </button>
             ))}
-          </span>}
-          <label className="commission-toggle">
-            <input type="checkbox" checked={withCommissions} onChange={e => setWithCommissions(e.target.checked)} />
-            <span>Include commissions</span>
-          </label>
-          {booked !== 0 && <label className="commission-toggle">
-            <input type="checkbox" checked={withClosed} onChange={e => setWithClosed(e.target.checked)} />
-            <span>Include closed legs</span>
-            <small><Amount value={String(booked)} /> {currency} booked</small>
-          </label>}
-        </div>
+          </span>
+        </div>}
       </div>
 
       {(cycleChoice.isNone || accountChoice.isNone || nameChoice.isNone) && <div className="empty-selection" role="status">

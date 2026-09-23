@@ -164,7 +164,7 @@ export function LensTable({
                 <td className="worst" /><td className="shape" />
               </tr>}
               {realized.charged !== 0 && <tr className="booked">
-                <th scope="row">Commissions added back</th>
+                <th scope="row">Commissions</th>
                 {lens === "asset" && <td className="ref" />}
                 <td className="now"><Cell value={realized.charged} nlv={total.nlv} denomination={denomination} /></td>
                 {shownColumns.map(column => <td key={column.id} className={cellClass(column)}><Cell value={realized.charged} nlv={total.nlv} denomination={denomination} /></td>)}

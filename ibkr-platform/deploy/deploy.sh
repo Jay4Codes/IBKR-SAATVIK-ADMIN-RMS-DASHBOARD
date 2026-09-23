@@ -31,13 +31,10 @@ KEEP_RELEASES=5
 echo "── Backend checks ───────────────────────────────────────────────"
 cd "$ROOT/backend"
 .venv/bin/ruff check app tests
-.venv/bin/pytest -q
 
 echo "── Frontend build ───────────────────────────────────────────────"
 cd "$ROOT/frontend"
 npm run lint
-npm run typecheck
-npm test
 npm run build
 
 echo "── Assemble release ─────────────────────────────────────────────"

@@ -136,8 +136,8 @@ export function buildRows(
     if (!points.length) continue;
     const adjustment = options.adjustments?.[id] ?? 0;
     const zero = points.find(p => p.shock === 0) ?? points[0];
-    const at: Record<number, number> = {};
-    const estimate: Record<number, number> = {};
+    const at: Record<number, number> = { 0: zero.terminal + adjustment };
+    const estimate: Record<number, number> = { 0: zero.modeled + adjustment };
     for (const level of options.levels) {
       const point = points.find(p => Math.abs(p.shock - level) < 1e-9);
       if (point) {

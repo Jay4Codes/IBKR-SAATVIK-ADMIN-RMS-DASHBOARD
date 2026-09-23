@@ -306,6 +306,18 @@ async def test_build_session_picks_the_provider(stores, provider, expected):
     built = build_session(redis, db, doc)
     assert (type(built).__name__ if built else None) == expected
 
+async def test_invalid_position_trade_value_does_not_degrade(stores):
+    redis, db = stores
+    worker = session(redis, db)
+    worker.state.status = GatewayStatus.CONNECTED
+    worker.state.subscriptions = {"accounts": "ACTIVE", "positions": "ACTIVE"}
+    worker.broker_error(-1, 2150, "Invalid position trade derived value", None)
+    assert worker.state.status == GatewayStatus.CONNECTED
+    assert worker.state.last_error is None
+    assert worker.state.subscriptions == {"accounts": "ACTIVE", "positions": "ACTIVE"}
+    assert not worker.fault.is_set()
+
+
 async def test_farm_connecting_notice_does_not_degrade(stores):
     redis, db = stores
     worker = session(redis, db)
