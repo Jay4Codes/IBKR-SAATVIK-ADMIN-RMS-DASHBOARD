@@ -16,6 +16,9 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
   const data = commissions.data;
   const recentDays = [...(data?.by_day ?? [])].reverse();
   const paged = usePagedRows(recentDays);
+  const byAccount = [...(data?.by_account ?? [])].sort((a, b) => Number(b.commission) - Number(a.commission));
+  const accountPage = usePagedRows(byAccount, byAccount.map((r) => r.account_id).join("\0"));
+  const total = Number(data?.total ?? 0);
 
   return (
     <section className="panel">
@@ -32,15 +35,45 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
               <strong>{money(data!.total)}</strong>
               <small>{data!.count} execution{data!.count === 1 ? "" : "s"} with a reported commission</small>
             </div>
-            {!accountId &&
-              data!.by_account.map((row) => (
-                <div key={row.account_id}>
-                  <label>{row.account_id}</label>
-                  <strong>{money(row.commission)}</strong>
-                  <small>Commission spend</small>
-                </div>
-              ))}
+            {!accountId && byAccount.length > 0 && (
+              <div>
+                <label>Accounts charged</label>
+                <strong>{byAccount.length}</strong>
+                <small>Largest: {byAccount[0].account_id} at {money(byAccount[0].commission)}</small>
+              </div>
+            )}
+            {recentDays.length > 0 && (
+              <div>
+                <label>Latest day</label>
+                <strong>{money(recentDays[0].commission)}</strong>
+                <small>{recentDays[0].date}</small>
+              </div>
+            )}
           </div>
+          {!accountId && byAccount.length > 0 && (
+            <div className="pnl-breakdown">
+              <table>
+                <caption>Commission spend by account, largest first</caption>
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Commission</th>
+                    <th>Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountPage.rows.map((row) => (
+                    <tr key={row.account_id}>
+                      <th>{row.account_id}</th>
+                      <td>{money(row.commission)}</td>
+                      <td>{total ? `${((Number(row.commission) / total) * 100).toFixed(1)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <TablePager page={accountPage.page} pages={accountPage.pages} total={accountPage.total} onPage={accountPage.setPage} />
+            </div>
+          )}
           {recentDays.length > 0 && (
             <table>
               <caption>Commission spend by day, most recent first</caption>

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { api } from "@/lib/api";
-import { IntradayResponse } from "@/lib/types";
+import { DailyPnlResponse, IntradayResponse } from "@/lib/types";
+import { HISTORY_START, PERIODS, Period, sinceDays } from "@/lib/history";
 import { formatDateTime, todayIn, ZONES, ZoneId, zoneOf } from "@/lib/timezone";
 import { Chart } from "./chart";
 import { SelectionActions, useSelection } from "./selection";
@@ -36,6 +37,10 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
   const desk = !accountId && accounts.length > 1;
   const [mode, setMode] = useState<Mode>("combined");
   const [focus, setFocus] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>("day");
+  const daily = period !== "day";
+  const periodDays = PERIODS.find((p) => p.id === period)?.days ?? 0;
+  const from = daily ? sinceDays(periodDays) : date;
 
   const intraday = useQuery({
     queryKey: ["intraday", scope.join(","), date],
@@ -43,25 +48,54 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
       api<IntradayResponse>(
         `/history/intraday?accounts=${encodeURIComponent(scope.join(","))}&date=${date}`,
       ),
-    enabled: scope.length > 0,
+    enabled: scope.length > 0 && !daily,
+  });
+  const history = useQuery({
+    queryKey: ["daily-pnl", scope.join(","), from],
+    queryFn: () =>
+      api<DailyPnlResponse>(
+        `/history/pnl?accounts=${encodeURIComponent(scope.join(","))}&since=${from}`,
+      ),
+    enabled: scope.length > 0 && daily,
   });
 
   const series = intraday.data?.series ?? [];
   const combined = intraday.data?.combined ?? [];
   const unreported = new Set(intraday.data?.unreported ?? []);
-  const perAccount = [...new Set(series.map((r) => r.account_id))].sort();
+  const dailySeries = history.data?.series ?? [];
+  const dailyCombined = history.data?.combined ?? [];
+  const perAccount = [...new Set((daily ? dailySeries : series).map((r) => r.account_id))].sort();
   const stamps = [...new Set(series.map((r) => r.taken_at))].sort();
+  const days = [...new Set(dailySeries.map((r) => r.report_date))].sort();
   const zoneLabel = ZONES.find((z) => z.id === zone)?.id ?? zone;
-  const currency = series[0]?.currency || "";
+  const currency = (daily ? dailySeries : series)[0]?.currency || "";
   const lastStamp = stamps[stamps.length - 1] ?? null;
+  const periodLabel = PERIODS.find((p) => p.id === period)?.label ?? "Day";
 
   const pointsFor = (id: string) =>
     series
       .filter((r) => r.account_id === id && r.day_pnl != null)
       .map((r) => [Date.parse(r.taken_at), Number(r.day_pnl)] as [number, number]);
+  const cumulativeFor = (id: string) => {
+    let running = 0;
+    const byDate = new Map(dailySeries.filter((r) => r.account_id === id).map((r) => [r.report_date, Number(r.day_pnl)]));
+    return days.map((d) => {
+      running += byDate.get(d) ?? 0;
+      return [d, running] as [string, number];
+    });
+  };
 
   const standings: Standing[] = perAccount
     .map((id) => {
+      if (daily) {
+        const rows = dailySeries.filter((r) => r.account_id === id);
+        return {
+          id,
+          value: rows.length ? rows.reduce((sum, r) => sum + Number(r.day_pnl), 0) : null,
+          at: rows[rows.length - 1]?.taken_at ?? null,
+          stale: rows.length > 0 && rows[rows.length - 1].report_date !== days[days.length - 1],
+        };
+      }
       const rows = series.filter((r) => r.account_id === id);
       const valued = [...rows].reverse().find((r) => r.day_pnl != null);
       return {
@@ -80,7 +114,9 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
   };
 
   const latestCombined = combined[combined.length - 1];
+  const latestDaily = dailyCombined[dailyCombined.length - 1];
   const latest = (() => {
+    if (daily) return latestDaily ? new Decimal(latestDaily.cumulative) : null;
     if (desk || (!accountId && combined.length)) return latestCombined ? new Decimal(latestCombined.day_pnl) : null;
     const v = valued[0]?.value;
     return v == null ? null : new Decimal(v);
@@ -91,9 +127,9 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
   return (
     <section className="panel day-pnl">
       <h2>
-        Day P&amp;L
+        {daily ? `${periodLabel} P&L` : "Day P&L"}
         <span>
-          {date} · {zoneLabel}
+          {daily ? `${from} → ${date}` : `${date} · ${zoneLabel}`}
           {latest && (
             <>
               {" · "}
@@ -106,8 +142,21 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
         </span>
       </h2>
 
-      {!accountId && accounts.length > 1 && (
-        <div className="day-pnl-toolbar">
+      <div className="day-pnl-toolbar">
+        <div className="segmented sm" role="group" aria-label="Period">
+          {PERIODS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={period === p.id ? "on" : ""}
+              aria-pressed={period === p.id}
+              onClick={() => setPeriod(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {!accountId && accounts.length > 1 && !daily && (
           <div className="segmented sm" role="group" aria-label="Chart view">
             <button type="button" className={mode === "combined" ? "on" : ""} aria-pressed={mode === "combined"} onClick={() => setMode("combined")}>
               Combined
@@ -116,6 +165,8 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
               By account <small>{perAccount.length}</small>
             </button>
           </div>
+        )}
+        {!accountId && accounts.length > 1 && (
           <details className="day-pnl-accounts">
             <summary>Accounts · {choice.summary}</summary>
             <fieldset className="account-picker">
@@ -129,11 +180,151 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
               ))}
             </fieldset>
           </details>
-        </div>
-      )}
+        )}
+      </div>
 
       {!scope.length ? (
-        <p role="status" className="footnote">No accounts selected. Open Accounts above and tick one to draw its day P&amp;L.</p>
+        <p role="status" className="footnote">No accounts selected. Open Accounts above and tick one to draw its P&amp;L.</p>
+      ) : daily && history.isPending ? (
+        <ChartSkeleton label={`Loading ${periodLabel.toLowerCase()} P&L`} height={300} />
+      ) : daily && history.isError ? (
+        <p role="alert" className="footnote">{periodLabel} P&amp;L could not be loaded.</p>
+      ) : daily && !days.length ? (
+        <p className="footnote">No trading days recorded since {from} for these accounts.</p>
+      ) : daily ? (
+        <div className={desk ? "day-pnl-body" : undefined}>
+          <Chart
+            height={320}
+            ariaLabel={`${periodLabel} profit and loss from ${from} to ${date} for ${scope.join(", ")}`}
+            unavailable="Chart unavailable."
+            deps={[days.join(","), perAccount.join(","), dailyCombined.length, mode, focus, desk, period]}
+            option={(t, zoom) => {
+              const showAccounts = desk && mode === "accounts";
+              const byDay = new Map(dailyCombined.map((r) => [r.report_date, r]));
+              const bars = days.map((d) => {
+                const v = Number(byDay.get(d)?.day_pnl ?? 0);
+                return { value: v, itemStyle: { color: v < 0 ? t.red : t.green, opacity: 0.55 } };
+              });
+              const cumulative = days.map((d) => Number(byDay.get(d)?.cumulative ?? 0));
+              const lines = showAccounts
+                ? perAccount.map((id, i) => {
+                    const color = id === focus ? t.text : colorOf(id);
+                    const dim = focus !== null && id !== focus;
+                    return {
+                      name: id,
+                      type: "line",
+                      showSymbol: days.length < 40,
+                      z: id === focus ? 5 : color ? 3 : 2,
+                      emphasis: { focus: "series" },
+                      lineStyle: { width: id === focus ? 2.5 : color ? 1.75 : 1, color: color ?? t.lineStrong, opacity: dim ? 0.25 : color ? 1 : 0.6 },
+                      itemStyle: { color: color ?? t.lineStrong },
+                      data: cumulativeFor(id).map((p) => p[1]),
+                      ...(i === 0 ? { markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: t.lineStrong, type: "dashed" as const, width: 1 }, data: [{ yAxis: 0 }] } } : {}),
+                    };
+                  })
+                : [
+                    { name: "Day", type: "bar", data: bars, barMaxWidth: 28 },
+                    {
+                      name: "Cumulative",
+                      type: "line",
+                      showSymbol: days.length < 40,
+                      lineStyle: { width: 2.5, color: t.text },
+                      itemStyle: { color: t.text },
+                      data: cumulative,
+                      markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: t.lineStrong, type: "dashed" as const, width: 1 }, data: [{ yAxis: 0 }] },
+                    },
+                  ];
+              return {
+                animation: false,
+                tooltip: {
+                  trigger: "axis",
+                  confine: true,
+                  backgroundColor: t.raised,
+                  borderColor: t.line,
+                  textStyle: { color: t.text },
+                  formatter: (params: { seriesName: string; value: number; color: string; axisValue: string }[]) => {
+                    if (!params.length) return "";
+                    const head = params[0].axisValue;
+                    if (!showAccounts) {
+                      const at = byDay.get(head);
+                      return `${head}<br/>Day <b>${money(String(at?.day_pnl ?? 0))} ${currency}</b><br/>Since ${from} <b>${money(String(at?.cumulative ?? 0))}</b><br/><span style="opacity:.7">${at?.accounts ?? 0} accounts reported</span>`;
+                    }
+                    const rows = [...params].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+                    const shown = rows.slice(0, 8).map((p) => `<span style="color:${p.color}">●</span> ${p.seriesName} <b>${money(String(p.value))}</b>`);
+                    const more = rows.length > 8 ? [`<span style="opacity:.7">+${rows.length - 8} more</span>`] : [];
+                    return [`${head} · cumulative`, ...shown, ...more].join("<br/>");
+                  },
+                },
+                grid: { left: 8, right: 16, top: 16, bottom: 56, containLabel: true },
+                dataZoom: [
+                  { type: "inside", filterMode: "none", start: zoom.start, end: zoom.end },
+                  { type: "slider", filterMode: "none", start: zoom.start, end: zoom.end, height: 18, bottom: 6, borderColor: t.line, fillerColor: "rgba(128,128,128,0.15)", textStyle: { color: t.muted }, showDataShadow: false },
+                ],
+                xAxis: {
+                  type: "category",
+                  data: days,
+                  axisLine: { lineStyle: { color: t.line } },
+                  axisTick: { show: false },
+                  axisLabel: { color: t.muted, hideOverlap: true, formatter: (v: string) => v.slice(5) },
+                  splitLine: { show: false },
+                },
+                yAxis: {
+                  type: "value",
+                  scale: true,
+                  axisLine: { show: false },
+                  axisTick: { show: false },
+                  axisLabel: { color: t.muted, formatter: (v: number) => compact(v) },
+                  splitLine: { lineStyle: { color: t.grid } },
+                },
+                series: lines,
+              };
+            }}
+          />
+          {desk && (
+            <div className="day-pnl-standings" aria-label={`${periodLabel} P&L by account`}>
+              <div className="day-pnl-standings-head">
+                <span>{periodLabel} by account</span>
+                {focus && (
+                  <button type="button" onClick={() => setFocus(null)}>
+                    Clear highlight
+                  </button>
+                )}
+              </div>
+              <ol>
+                {standings
+                  .filter((s) => s.value !== null)
+                  .map((s) => {
+                    const color = colorOf(s.id);
+                    const width = `${(Math.abs(s.value!) / scale) * 100}%`;
+                    return (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          className={focus === s.id ? "on" : ""}
+                          aria-pressed={focus === s.id}
+                          title={s.stale && s.at ? `Last figure ${formatDateTime(s.at, zone)}` : undefined}
+                          onClick={() => {
+                            setFocus(focus === s.id ? null : s.id);
+                            setMode("accounts");
+                          }}
+                        >
+                          <i style={{ background: color ?? "transparent", borderColor: color ?? "var(--line-strong)" }} />
+                          <span className="id">{s.id}</span>
+                          <span className={`bar ${s.value! < 0 ? "neg" : "pos"}`}>
+                            <span style={{ width }} />
+                          </span>
+                          <span className={`amt ${s.value! < 0 ? "negative" : "positive"}`}>
+                            {compact(s.value!)}
+                            {s.stale && <small> stale</small>}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ol>
+            </div>
+          )}
+        </div>
       ) : intraday.isPending ? (
         <ChartSkeleton label="Loading today's P&L" height={300} />
       ) : intraday.isError ? (
@@ -328,13 +519,22 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
           )}
         </div>
       )}
-      <p className="footnote">
-        The broker&apos;s own daily P&amp;L, sampled as the session runs — it resets at IBKR&apos;s
-        session boundary, not at midnight in the timezone shown. The combined line adds every
-        account that reports a figure; if one drops out mid-session its last known figure is carried
-        forward{lastStamp ? `, last sample ${formatDateTime(lastStamp, zone)}` : ""}. Scroll or drag
-        the chart to zoom.
-      </p>
+      {daily ? (
+        <p className="footnote">
+          Each bar is the broker&apos;s own day P&amp;L as it stood at that day&apos;s last sample,
+          summed across the accounts in view; the line runs those days up from {from}. Records
+          start on {HISTORY_START}, when the desk went live on this platform, so longer periods
+          are capped there. Scroll or drag the chart to zoom.
+        </p>
+      ) : (
+        <p className="footnote">
+          The broker&apos;s own daily P&amp;L, sampled as the session runs — it resets at IBKR&apos;s
+          session boundary, not at midnight in the timezone shown. The combined line adds every
+          account that reports a figure; if one drops out mid-session its last known figure is carried
+          forward{lastStamp ? `, last sample ${formatDateTime(lastStamp, zone)}` : ""}. Scroll or drag
+          the chart to zoom.
+        </p>
+      )}
     </section>
   );
 }

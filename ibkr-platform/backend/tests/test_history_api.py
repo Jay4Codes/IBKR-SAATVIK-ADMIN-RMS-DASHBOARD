@@ -23,6 +23,12 @@ STATEMENT = """<?xml version="1.0" encoding="UTF-8"?>
 def as_user(role):
     return {COOKIE: role}
 
+@pytest.fixture(autouse=True)
+def unbounded_history(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "history_start_date", "")
+
 async def snapshot(db, tenant, account, date, value, *, bucket="", source="snapshot", taken=None):
     await db.account_snapshots.update_one(
         {"_id": snapshot_id(tenant, account, date, bucket)},
@@ -228,3 +234,54 @@ async def test_a_figure_that_drops_out_carries_its_last_value(client, stores):
         await intraday_point(db, TENANT, "DU2", stamp, b)
     body = (await client.get("/api/v1/history/intraday?date=2026-09-10")).json()["data"]
     assert [(c["day_pnl"], c["carried"]) for c in body["combined"]] == [("14", 0), ("16", 1)]
+
+async def test_history_never_reaches_back_before_the_desk_went_live(client, stores, monkeypatch):
+    from app.config import settings
+
+    _, db = stores
+    monkeypatch.setattr(settings, "history_start_date", "2026-09-02")
+    for date in ("2026-09-01", "2026-09-02", "2026-09-03"):
+        await snapshot(db, TENANT, "DU1", date, "100")
+    body = (await client.get("/api/v1/history?accounts=DU1")).json()["data"]
+    assert body["since"] == "2026-09-02"
+    assert [r["report_date"] for r in body["series"]] == ["2026-09-02", "2026-09-03"]
+    narrowed = (await client.get("/api/v1/history?accounts=DU1&since=2026-08-01")).json()["data"]
+    assert [r["report_date"] for r in narrowed["series"]] == ["2026-09-02", "2026-09-03"]
+    later = (await client.get("/api/v1/history?accounts=DU1&since=2026-09-03")).json()["data"]
+    assert [r["report_date"] for r in later["series"]] == ["2026-09-03"]
+
+async def pnl_point(db, account, date, bucket, value):
+    await db.account_snapshots.update_one(
+        {"_id": snapshot_id(TENANT, account, date, bucket)},
+        {"$set": {
+            "tenant_id": TENANT, "account_id": account, "report_date": date,
+            "taken_at": f"{date}T{bucket[:2]}:{bucket[2:]}:00+00:00", "currency": "USD",
+            "net_liquidation": "100", "day_pnl": value, "source": "snapshot",
+        }},
+        upsert=True,
+    )
+
+async def test_daily_pnl_takes_each_days_last_figure_and_runs_a_total(client, stores, monkeypatch):
+    from app.config import settings
+
+    _, db = stores
+    monkeypatch.setattr(settings, "history_start_date", "2026-09-02")
+    await pnl_point(db, "DU1", "2026-09-01", "1500", "999")
+    await pnl_point(db, "DU1", "2026-09-02", "1000", "10")
+    await pnl_point(db, "DU1", "2026-09-02", "1500", "25")
+    await pnl_point(db, "DU2", "2026-09-02", "1500", "-5")
+    await pnl_point(db, "DU1", "2026-09-03", "1500", "-40")
+    await pnl_point(db, "DU2", "2026-09-03", "1500", None)
+    body = (await client.get("/api/v1/history/pnl?accounts=DU1,DU2")).json()["data"]
+    assert body["since"] == "2026-09-02"
+    assert [(r["account_id"], r["report_date"], r["day_pnl"]) for r in body["series"]] == [
+        ("DU1", "2026-09-02", "25"), ("DU1", "2026-09-03", "-40"), ("DU2", "2026-09-02", "-5"),
+    ]
+    assert [(r["report_date"], r["accounts"], r["day_pnl"], r["cumulative"]) for r in body["combined"]] == [
+        ("2026-09-02", 2, "20", "20"), ("2026-09-03", 1, "-40", "-20"),
+    ]
+
+async def test_daily_pnl_respects_account_grants(client, stores):
+    _, db = stores
+    await pnl_point(db, "DU2", "2026-09-23", "1500", "5")
+    assert (await client.get("/api/v1/history/pnl?accounts=DU2", cookies=as_user("TRADER"))).status_code == 403

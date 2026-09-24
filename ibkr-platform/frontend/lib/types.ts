@@ -211,6 +211,13 @@ export type IntradayResponse = {
   unreported?: string[];
 };
 
+export type DailyPnlResponse = {
+  accounts: string[];
+  since: string | null;
+  series: { account_id: string; report_date: string; taken_at: string; currency: string; day_pnl: string }[];
+  combined: { report_date: string; accounts: number; day_pnl: string; cumulative: string }[];
+};
+
 export type RealizedSummary = {
   total: string;
   commission: string;

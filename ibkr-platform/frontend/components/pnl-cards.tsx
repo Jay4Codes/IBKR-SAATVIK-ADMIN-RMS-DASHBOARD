@@ -53,12 +53,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     ...shownLegs.map(leg => leg.account_id),
     ...shownFills.map(fill => fill.account_id),
   ].filter(Boolean))].sort();
-  const idsInView = [...new Set([
-    ...shownLegs.map(leg => leg.execution_id),
-    ...shownFills.map(fill => fill.execution_id),
-  ].filter(Boolean))].sort();
   const accountPage = usePagedRows(accountsInView, accountsInView.join("\0"));
-  const idPage = usePagedRows(idsInView, idsInView.join("\0"));
   const idHint = (id: string) => {
     const leg = legs.find(row => row.execution_id === id);
     const fill = fills.find(row => row.execution_id === id);
@@ -72,10 +67,6 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     shownFills.filter(fill => fill.account_id === account).reduce((sum, fill) => sum + Number(fill.commission || 0), 0);
   const closingsFor = (account: string) =>
     shownLegs.filter(leg => leg.account_id === account && Number(leg.realized_pnl || 0) !== 0).length;
-  const bookedId = (id: string) =>
-    shownLegs.filter(leg => leg.execution_id === id).reduce((sum, leg) => sum + Number(leg.realized_pnl || 0), 0);
-  const spentId = (id: string) =>
-    shownFills.filter(fill => fill.execution_id === id).reduce((sum, fill) => sum + Number(fill.commission || 0), 0);
 
   return (
     <section className="panel">
@@ -152,41 +143,6 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                 </tbody>
               </table>
               <TablePager page={accountPage.page} pages={accountPage.pages} total={accountPage.total} onPage={accountPage.setPage} />
-            </div>
-          )}
-          {idsInView.length > 0 && (
-            <div className="pnl-breakdown">
-              <table>
-                <caption>By execution ID</caption>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Account</th>
-                    <th>Booked P&amp;L</th>
-                    <th>Commissions</th>
-                    <th>Net of commission</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {idPage.rows.map(id => {
-                    const bookedFill = bookedId(id);
-                    const spentFill = spentId(id);
-                    const account = shownLegs.find(leg => leg.execution_id === id)?.account_id
-                      ?? shownFills.find(fill => fill.execution_id === id)?.account_id
-                      ?? "";
-                    return (
-                      <tr key={id}>
-                        <th>{id}</th>
-                        <td>{account}</td>
-                        <td><Amount value={String(bookedFill)} /></td>
-                        <td><Amount value={String(-spentFill)} /></td>
-                        <td><Amount value={String(bookedFill - spentFill)} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <TablePager page={idPage.page} pages={idPage.pages} total={idPage.total} onPage={idPage.setPage} />
             </div>
           )}
           <p className="footnote">

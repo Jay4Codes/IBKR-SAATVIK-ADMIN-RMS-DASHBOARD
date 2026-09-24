@@ -846,8 +846,15 @@ async def rows(account_id: str, request: Request, limit: int = 100, user: Princi
         return ok(await cursor.sort("executed_at", -1).limit(max(1, min(limit, 500))).to_list())
     return ok(await repo.rows(account_id, kind))
 
+def history_since(since: str | None) -> str | None:
+    start = settings.history_start_date
+    if not start:
+        return since
+    return max(since, start) if since else start
+
 async def history_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):
     window: dict[str, Any] = {}
+    since = history_since(since)
     if since:
         window["$gte"] = since
     if until:
@@ -909,7 +916,63 @@ async def portfolio_history(
     for account in wanted:
         user.require_account(account)
     rows = await history_rows(request.app.state.db, user, wanted, since, until)
-    return ok({"accounts": wanted, "series": rows, "combined": combine(rows)})
+    return ok({
+        "accounts": wanted, "since": history_since(since), "series": rows, "combined": combine(rows),
+    })
+
+@app.get("/api/v1/history/pnl")
+async def daily_pnl(
+    request: Request,
+    accounts: str = "",
+    since: str | None = None,
+    until: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    repo = repository(request, user)
+    visible = sorted(a for a in await repo.accounts() if user.sees(a))
+    wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
+    for account in wanted:
+        user.require_account(account)
+    window: dict[str, Any] = {}
+    since = history_since(since)
+    if since:
+        window["$gte"] = since
+    if until:
+        window["$lte"] = until
+    query = user.scope({"account_id": {"$in": wanted}, "source": "snapshot", "day_pnl": {"$ne": None}})
+    if window:
+        query["report_date"] = window
+    cursor = request.app.state.db.account_snapshots.find(
+        query, {"_id": 0, "account_id": 1, "report_date": 1, "taken_at": 1, "day_pnl": 1, "currency": 1}
+    )
+    last: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in await cursor.sort("taken_at", 1).to_list(200_000):
+        last[(row["account_id"], row["report_date"])] = row
+    series = [
+        {
+            "account_id": row["account_id"],
+            "report_date": row["report_date"],
+            "taken_at": row["taken_at"],
+            "currency": row.get("currency") or "",
+            "day_pnl": str(row["day_pnl"]),
+        }
+        for key, row in sorted(last.items())
+    ]
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in series:
+        by_date.setdefault(row["report_date"], []).append(row)
+    running = Decimal(0)
+    combined = []
+    for date in sorted(by_date):
+        total = sum(Decimal(r["day_pnl"]) for r in by_date[date])
+        running += total
+        combined.append({
+            "report_date": date,
+            "accounts": len(by_date[date]),
+            "day_pnl": str(total),
+            "cumulative": str(running),
+        })
+    return ok({"accounts": wanted, "since": since, "series": series, "combined": combined})
 
 @app.get("/api/v1/history/intraday")
 async def intraday(

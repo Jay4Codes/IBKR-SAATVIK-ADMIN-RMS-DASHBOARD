@@ -80,7 +80,7 @@ def test_a_fill_reads_as_a_contract_rather_than_an_occ_code():
                  "sec_type": "OPT", "price": "0.0"},
     })
     assert "Sold 1 × SPXW 21 Sep 26 7800 Call" in expired
-    assert "at 0.00 · U21854485" in expired
+    assert "U21854485 filled at 0.00" in expired
     put = fill_message({
         "account_id": "U21854485",
         "data": {"side": "BOT", "quantity": "2.0", "symbol": "SPXW  260921P07590000",
@@ -93,14 +93,14 @@ def test_a_fill_reads_as_a_contract_rather_than_an_occ_code():
                  "sec_type": "OPT", "price": "0.32", "realized_pnl": "-48.08"},
     })
     assert "Sold 1 × SPXW 22 Sep 26 7845 Call" in booked
-    assert "at 0.32 · U21854485" in booked
+    assert "U21854485 filled at 0.32" in booked
     assert "Booked <b>-48.08</b>" in booked
     stock = fill_message({
         "account_id": "U21854485",
         "data": {"side": "BOT", "quantity": "1.0", "symbol": "SPX", "sec_type": "STK", "price": "0.2"},
     })
     assert "Bought 1 × SPX" in stock
-    assert "at 0.20 · U21854485" in stock
+    assert "U21854485 filled at 0.20" in stock
 
 def test_messages_escape_what_the_broker_sends():
     message = fill_message({"account_id": "<b>x</b>", "data": {"side": "BOT", "symbol": "A&B<c>", "quantity": "1", "price": "1"}})

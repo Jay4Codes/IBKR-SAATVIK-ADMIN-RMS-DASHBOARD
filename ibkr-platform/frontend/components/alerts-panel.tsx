@@ -8,11 +8,11 @@ import { Plus, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const TRIGGERS: Record<string, { title: string; detail: string }> = {
-  fills: { title: "Entries and exits", detail: "Every fill, with what it booked" },
-  move: { title: "Underlying moves", detail: "Each 2% band the underlying crosses" },
-  risk: { title: "Risk changes", detail: "Worst-case terminal P&L moving 10%" },
-  gateway: { title: "Gateway notices", detail: "Disconnects, failures and 2FA prompts" },
-  events: { title: "Event days", detail: "FOMC decisions, holidays and half-days" },
+  fills: { title: "Entries and exits", detail: "Every fill: side, contract, price, premium and any realised P&L" },
+  move: { title: "Underlying moves", detail: "Each band the underlying crosses from where it was when armed, and the next one to watch" },
+  risk: { title: "Risk changes", detail: "An account's worst expiry loss moving by your threshold, with the trade or move that caused it" },
+  gateway: { title: "Gateway notices", detail: "Disconnects, failures and 2FA prompts, with what to do about them" },
+  events: { title: "Event days", detail: "FOMC decisions, holidays and half-days, and what they mean for the session" },
 };
 
 type Limits = AlertSettings["limits"];

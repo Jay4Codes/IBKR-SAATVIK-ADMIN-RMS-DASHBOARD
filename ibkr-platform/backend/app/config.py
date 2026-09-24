@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     alert_risk_percent: float = 10
 
     alert_gateway_grace_seconds: float = 60
+    alert_risk_settle_seconds: float = 2
+    history_start_date: str = "2026-09-22"
 
     finnhub_api_key: str = ""
     finnhub_rest_url: str = "https://finnhub.io/api/v1"

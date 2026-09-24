@@ -538,6 +538,51 @@ async def test_a_denied_market_data_feed_does_not_degrade_the_gateway(stores):
     await worker.subscribe_underlyings()
     ib.reqMktData.assert_not_called()
 
+async def test_a_denied_equity_line_does_not_take_the_spx_index_line_with_it(stores):
+    redis, db = stores
+    ib = qualifying(MagicMock())
+    worker = session(redis, db, ib)
+    worker.state.status = GatewayStatus.CONNECTED
+    worker.position_value(held(con_id=1))
+    worker.position_value(held(con_id=2, symbol="TSLA"))
+    await worker.subscribe_underlyings()
+    assert set(worker.market_subscriptions) == {"USD:SPX", "USD:TSLA"}
+    worker.ticker_value([tick(1, 7612.5)])
+    assert "USD:SPX" in worker.underlying_prices
+    worker.live_underlyings.add("USD:SPX")
+    ib.cancelMktData.reset_mock()
+    worker.broker_error(
+        9, 10091,
+        "Part of requested market data requires additional subscription for API.TSLA NASDAQ.NMS/TOP/ALL",
+        worker.market_subscriptions["USD:TSLA"],
+    )
+    assert worker.state.status == GatewayStatus.CONNECTED
+    assert not worker.market_data_denied, "one refused line must not switch off market data"
+    assert list(worker.market_subscriptions) == ["USD:SPX"], "SPX keeps ticking"
+    assert ib.cancelMktData.call_count == 1
+    assert ib.cancelMktData.call_args.args[0].symbol == "TSLA"
+    assert "USD:SPX" in worker.live_underlyings, "the SPX line was never touched"
+    ib.reqMktData.reset_mock()
+    worker.position_value(held(con_id=3, symbol="TSLA"))
+    worker.position_value(held(con_id=4, symbol="NVDA"))
+    await worker.subscribe_underlyings()
+    requested = {c.args[0].symbol for c in ib.reqMktData.call_args_list}
+    assert requested == {"NVDA"}, "a refused symbol is not retried, other symbols still subscribe"
+
+async def test_a_denied_line_is_attributed_through_the_ticker_registry(stores):
+    redis, db = stores
+    ib = qualifying(MagicMock())
+    worker = session(redis, db, ib)
+    worker.position_value(held(con_id=1))
+    worker.position_value(held(con_id=2, symbol="SPY"))
+    await worker.subscribe_underlyings()
+    line = MagicMock()
+    line.contract = worker.market_subscriptions["USD:SPY"]
+    ib.wrapper.reqId2Ticker = {11: line}
+    worker.broker_error(11, 354, "Requested market data is not subscribed.", None)
+    assert list(worker.market_subscriptions) == ["USD:SPX"]
+    assert worker.market_denied == {"USD:SPY"}
+
 async def test_a_request_error_on_our_own_market_data_line_spares_the_gateway(stores):
     redis, db = stores
     ib = qualifying(MagicMock())

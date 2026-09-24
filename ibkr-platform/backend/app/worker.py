@@ -127,8 +127,12 @@ async def telegram_linker(redis, db, stop: asyncio.Event):
                 log.info("telegram.linked user=%s chat=%s", user_id, chat_id)
                 await telegram.send(
                     client, chat_id,
-                    "<b>Alerts connected.</b>\nYou will receive underlying moves, "
-                    "risk changes and gateway notices for the accounts you can see.",
+                    "<b>Alerts connected.</b>\n"
+                    "You will hear about underlying moves (each band SPX crosses from where it "
+                    "was when this was armed), worst-case risk changes (the biggest expiry loss "
+                    "of an account moving by your threshold, with what caused it), gateway "
+                    "problems and event days, for the accounts you can see. "
+                    "Tune thresholds under Alerts in the dashboard.",
                 )
 
 async def refresh_events(db, stop: asyncio.Event):
@@ -322,7 +326,9 @@ class AlertDispatcher:
 
         if kind in ("position.updated", "position.closed") and account:
             await self.underlying_moved(client, data)
-            await self.risk_changed(client, account)
+            self.state.dirty.setdefault(account, time.time())
+            if settings.alert_risk_settle_seconds <= 0:
+                await self.settle_risk(client)
 
     async def gateway_changed(self, client, key: str, label: str, status: str, error, login_phase: str = ""):
 \
@@ -461,7 +467,12 @@ class AlertDispatcher:
             anchor = alerts.decimal(await self.redis.get(f"{self.keys.prefix}:anchor:{chat}:{key}"))
             if anchor is None or anchor <= 0:
                 await self.redis.set(f"{self.keys.prefix}:anchor:{chat}:{key}", str(price))
+                await self.redis.set(
+                    f"{self.keys.prefix}:anchor_at:{chat}:{key}", now().strftime("%-d %b")
+                )
                 continue
+            since = await self.redis.get(f"{self.keys.prefix}:anchor_at:{chat}:{key}")
+            since = since.decode() if isinstance(since, bytes) else (since or "")
             wanted = [alerts.decimal(level) for level in prefs.get("move_levels") or []]
             wanted = [level for level in wanted if level and level > 0]
             if wanted:
@@ -474,7 +485,7 @@ class AlertDispatcher:
                             continue
                         text = alerts.move_message(
                             symbol, price, anchor,
-                            1 if target > anchor else -1, level,
+                            1 if target > anchor else -1, level, since=since, kind="level",
                         )
                         await telegram.send(client, chat, text)
                         await self.raise_alert("move", None, text, False)
@@ -485,10 +496,9 @@ class AlertDispatcher:
             if band != seen:
                 await self.redis.set(f"{self.keys.prefix}:band:{chat}:{key}", str(band))
                 if band != 0:
-                    await telegram.send(
-                        client, chat, alerts.move_message(symbol, price, anchor, band, step)
-                    )
-                    await self.raise_alert("move", None, alerts.move_message(symbol, price, anchor, band, step), False)
+                    text = alerts.move_message(symbol, price, anchor, band, step, since=since)
+                    await telegram.send(client, chat, text)
+                    await self.raise_alert("move", None, text, False)
 
             if previous is None:
                 continue
@@ -496,7 +506,7 @@ class AlertDispatcher:
                 level = alerts.decimal(raw)
                 if level is None or not alerts.crossed(previous, price, level):
                     continue
-                text = alerts.price_message(symbol, price, level, price >= previous)
+                text = alerts.price_message(symbol, price, level, price >= previous, previous)
                 await telegram.send(client, chat, text)
                 await self.raise_alert("move", None, text, False)
 
@@ -520,7 +530,9 @@ class AlertDispatcher:
                         continue
                     await telegram.send(
                         client, settings.telegram_team_chat_id,
-                        alerts.move_message(symbol, price, anchor, 1 if target > anchor else -1, level),
+                        alerts.move_message(
+                            symbol, price, anchor, 1 if target > anchor else -1, level, kind="level"
+                        ),
                     )
         else:
             step = alerts.threshold(prefs, "move_percent")
@@ -538,7 +550,7 @@ class AlertDispatcher:
                 continue
             await telegram.send(
                 client, settings.telegram_team_chat_id,
-                alerts.price_message(symbol, price, level, price >= previous),
+                alerts.price_message(symbol, price, level, price >= previous, previous),
             )
 
     async def members(self, trigger: str):
@@ -560,18 +572,43 @@ class AlertDispatcher:
                 out.append(({"user_id": user_id, "chat_id": str(link["chat_id"])}, mine))
         return out
 
+    async def settle_risk(self, client):
+        due = time.time() - settings.alert_risk_settle_seconds
+        for account in [a for a, stamp in self.state.dirty.items() if stamp <= due]:
+            del self.state.dirty[account]
+            await self.risk_changed(client, account)
+
     async def risk_changed(self, client, account_id: str):
         positions = await self.positions_for(account_id)
-        worst = alerts.worst_terminal(positions, self.spot_of(positions))
-        if worst is None:
+        spot = self.spot_of(positions)
+        found = alerts.worst_terminal_at(positions, spot)
+        if found is None:
             return
+        worst, worst_at = found
+        book = alerts.book_of(positions)
         before = self.state.risk.get(account_id)
+        spot_before = self.state.spots.get(account_id)
+        held = self.state.books.get(account_id)
         self.state.risk[account_id] = worst
+        self.state.risk_at[account_id] = worst_at
+        self.state.spots[account_id] = spot
+        self.state.books[account_id] = book
         if before is None:
             return
         moved = abs(worst - before)
         entitled = set(await self.recipients(account_id))
-        text = alerts.risk_message(account_id, worst, before)
+        symbol = next(
+            (str(p.get("symbol") or "") for p in positions if alerts.decimal(p.get("underlying_price"))),
+            "",
+        )
+        text = alerts.risk_message(
+            account_id, worst, before,
+            symbol=symbol,
+            spot=spot,
+            spot_before=spot_before,
+            worst_at=worst_at,
+            changes=alerts.position_changes(held, book) if held is not None else None,
+        )
         told = False
         for member, prefs in await self.members("risk"):
             if member["chat_id"] not in entitled:
@@ -614,6 +651,7 @@ class AlertDispatcher:
                         self.group, "alerts", {self.keys.events: ">"}, count=50, block=1000
                     )
                     await self.sweep_pending(client)
+                    await self.settle_risk(client)
                     await self.announce_events(client)
                     for _, entries in batches or []:
                         for event_id, fields in entries:
@@ -695,6 +733,7 @@ class GatewaySession(Session):
         self.contracts = {}
         self.market_wanted = {}
         self.market_subscriptions = {}
+        self.market_denied = set()
         self.market_data_denied = False
         self.underlying_prices = {}
         self.previous_closes = {}
@@ -915,6 +954,8 @@ class GatewaySession(Session):
         if item.sec_type != "OPT" or self.market_data_denied or not contract:
             return
         key = self.underlying_key(item)
+        if key in self.market_denied:
+            return
         self.contracts[item.con_id] = contract
         if item.quantity != 0:
             self.market_wanted.setdefault(key, item.con_id)
@@ -1065,7 +1106,7 @@ class GatewaySession(Session):
         for key, con_id in list(self.market_wanted.items()):
             if self.market_data_denied:
                 return
-            if key in self.market_subscriptions or con_id not in self.contracts:
+            if key in self.market_subscriptions or key in self.market_denied or con_id not in self.contracts:
                 continue
             if key == "USD:SPX":
                 wanted = Index("SPX", "CBOE", "USD")
@@ -1095,10 +1136,30 @@ class GatewaySession(Session):
 
     def stop_market_data(self):
         self.market_data_denied = True
-        for contract in self.market_subscriptions.values():
+        for key, contract in self.market_subscriptions.items():
             self.ib.cancelMktData(contract)
+            self.mark_underlying_stale(key)
         self.market_subscriptions.clear()
         self.market_wanted.clear()
+
+    def deny_market_data_line(self, req_id, contract) -> bool:
+        if contract is None:
+            known = getattr(self.ib.wrapper, "reqId2Ticker", {})
+            contract = getattr(known[req_id], "contract", None) if req_id in known else None
+        if contract is None or not getattr(contract, "symbol", None):
+            return False
+        key = f"{contract.currency}:{contract.symbol}"
+        self.market_denied.add(key)
+        self.market_wanted.pop(key, None)
+        if (subscribed := self.market_subscriptions.pop(key, None)) is not None:
+            self.ib.cancelMktData(subscribed)
+        self.mark_underlying_stale(key)
+        return True
+
+    def mark_underlying_stale(self, key):
+        if key in self.live_underlyings:
+            self.live_underlyings.discard(key)
+            self.underlying_changed.add(key)
 
     def ticker_value(self, tickers):
         for ticker in tickers:
@@ -1186,10 +1247,17 @@ class GatewaySession(Session):
 
     def broker_error(self, req_id, code, message, contract):
         if code in BROKER_MARKET_DATA or req_id in getattr(self.ib.wrapper, "reqId2Ticker", {}):
-            log.warning(
-                "broker.market_data_unavailable connection=%s code=%s message=%s", self.label, code, message
-            )
-            self.stop_market_data()
+            if self.deny_market_data_line(req_id, contract):
+                log.warning(
+                    "broker.market_data_line_denied connection=%s code=%s request=%s message=%s",
+                    self.label, code, req_id, message,
+                )
+            else:
+                log.warning(
+                    "broker.market_data_unavailable connection=%s code=%s message=%s",
+                    self.label, code, message,
+                )
+                self.stop_market_data()
             return
         if code in BROKER_NOTICES:
             log.info("broker.notice connection=%s code=%s message=%s", self.label, code, message)
@@ -1365,6 +1433,7 @@ class GatewaySession(Session):
                 self.contracts.clear()
                 self.market_wanted.clear()
                 self.market_subscriptions.clear()
+                self.market_denied.clear()
                 self.market_data_denied = False
                 self.underlying_prices.clear()
                 self.live_underlyings.clear()

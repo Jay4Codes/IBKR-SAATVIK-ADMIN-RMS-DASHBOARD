@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { api } from "@/lib/api";
 import { HistoryResponse } from "@/lib/types";
+import { HISTORY_START, sinceDays } from "@/lib/history";
 import { DownloadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Chart } from "./chart";
@@ -13,18 +14,15 @@ import { money } from "./tables";
 import { ChartSkeleton } from "./skeleton";
 
 const RANGES = [
+  { label: "1W", days: 7 },
   { label: "1M", days: 30 },
   { label: "3M", days: 91 },
-  { label: "6M", days: 183 },
   { label: "1Y", days: 365 },
   { label: "All", days: 0 },
 ] as const;
 
-function since(days: number): string | undefined {
-  if (!days) return undefined;
-  const from = new Date();
-  from.setUTCDate(from.getUTCDate() - days);
-  return from.toISOString().slice(0, 10);
+function since(days: number): string {
+  return sinceDays(days);
 }
 
 export function PerformancePanel({
@@ -48,8 +46,7 @@ export function PerformancePanel({
     queryFn: () => {
       const params = new URLSearchParams();
       if (!accountId) params.set("accounts", scope.join(","));
-      const from = since(days);
-      if (from) params.set("since", from);
+      params.set("since", since(days));
       const query = params.toString();
       return accountId
         ? api<HistoryResponse["series"]>(`/accounts/${accountId}/history${query ? `?${query}` : ""}`).then(
@@ -288,8 +285,8 @@ export function PerformancePanel({
             )}
           </div>
           <p className="footnote">
-            Net liquidation as the broker reported it, one point per trading day. Days before this
-            platform began recording come from an IBKR Flex backfill; a day is only included in the
+            Net liquidation as the broker reported it, one point per trading day, starting from{" "}
+            {HISTORY_START} when the desk went live on this platform. A day is only included in the
             combined line once every selected account has a figure for it, so a missing account
             cannot read as a drawdown.
           </p>
