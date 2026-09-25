@@ -91,7 +91,7 @@ export type RealizedLeg = RealizedSummary["legs"][number];
 export function legAdjustment(leg: RealizedLeg, withClosed: boolean, withCommissions: boolean): number {
   const realized = numeric(leg.realized_pnl) ?? 0;
   const commission = numeric(leg.commission) ?? 0;
-  return (withClosed ? realized : 0) + (withCommissions && realized === 0 ? commission : 0);
+  return (withClosed ? realized : 0) - (!withCommissions && realized === 0 ? commission : 0);
 }
 
 export function realizedGroupKey(lens: Lens, leg: RealizedLeg): string {

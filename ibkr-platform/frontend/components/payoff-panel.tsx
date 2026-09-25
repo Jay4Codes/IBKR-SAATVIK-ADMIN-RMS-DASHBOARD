@@ -207,7 +207,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const openCommission = realizedLegs
     .filter(leg => (numeric(leg.realized_pnl) ?? 0) === 0)
     .reduce((sum, leg) => sum + (numeric(leg.commission) ?? 0), 0);
-  const charged = withCommissions ? openCommission : 0;
+  const charged = withCommissions ? 0 : -openCommission;
   const applied = withClosed ? booked : 0;
   const realized = applied + charged;
   const adjusted = realized === 0 ? points : points.map(point => ({
@@ -273,9 +273,9 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     : [];
   const viewRealizedLegs = realizedLegs.filter(leg => realizedGroupKey(lens, leg) === focus);
   const viewBooked = viewRealizedLegs.reduce((sum, leg) => sum + (withClosed ? numeric(leg.realized_pnl) ?? 0 : 0), 0);
-  const viewCharged = withCommissions ? viewRealizedLegs
+  const viewCharged = withCommissions ? 0 : -viewRealizedLegs
     .filter(leg => (numeric(leg.realized_pnl) ?? 0) === 0)
-    .reduce((sum, leg) => sum + (numeric(leg.commission) ?? 0), 0) : 0;
+    .reduce((sum, leg) => sum + (numeric(leg.commission) ?? 0), 0);
   const total: LensRow = focused ?? {
     id: TOTAL_ROW,
     label: accountId ? accountId : "Desk total",
@@ -584,7 +584,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           </div>
           <div className="scenario-group" role="group" aria-label="Include in P&L">
             <span className="group-label">Include</span>
-            <label className="toggle-chip" title="Commissions paid on this cycle's fills">
+            <label className="toggle-chip" title="On: IBKR numbers, commissions already included. Off: subtract commissions.">
               <input type="checkbox" checked={withCommissions} onChange={e => setWithCommissions(e.target.checked)} />
               <span>Commissions</span>
             </label>
@@ -663,12 +663,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
         {booked !== 0 && !withClosed && <p className="footnote">Open legs only. <Amount value={String(booked)} /> {currency} of P&amp;L booked on closed legs this cycle is excluded — an adjustment that closed a strike at a loss and opened another leaves that loss out of the open positions entirely, so every figure here reads as though it never happened.</p>}
         {openCommission !== 0 && <p className="footnote">
           {withCommissions
-            ? <>Gross of commissions: the {money(String(openCommission))} {currency} IBKR embedded in average cost has been added back, so these figures price off the premium alone and match a tool that does the same. Untick the box to see what the broker actually charged.</>
-            : <>Net of commissions, as the broker reports it: IBKR builds the {money(String(openCommission))} {currency} paid on this cycle&rsquo;s fills into each leg&rsquo;s average cost, so every figure above already carries it.</>}
+            ? <>IBKR already includes commissions in these figures — the {money(String(openCommission))} {currency} paid on this cycle&rsquo;s opening fills is in the broker numbers. Untick the box to subtract that cost again.</>
+            : <>Commissions subtracted: the {money(String(openCommission))} {currency} paid on this cycle&rsquo;s opening fills is taken off every figure. Tick the box to match IBKR, which already includes it.</>}
         </p>}
         {realized !== 0 && booked !== 0 && <p className="footnote">Booked P&amp;L covers {realizedLegs.filter(l => numeric(l.realized_pnl) !== 0).length} closed {realizedLegs.filter(l => numeric(l.realized_pnl) !== 0).length === 1 ? "leg" : "legs"} on the {[...new Set(realizedLegs.filter(l => numeric(l.realized_pnl) !== 0).map(l => l.expiry).filter(Boolean))].join(", ") || "live"} cycle — an adjustment that closes a strike at a loss and opens another leaves that loss out of the open positions entirely, so it is added back here as a constant. {withCommissions
-            ? `Gross of commissions; ${money(String(realizedCommission))} ${currency} of commission was paid on those fills, and is included above.`
-            : `Net of the ${money(String(realizedCommission))} ${currency} commission paid on those fills.`} Every figure above and in the table includes it, attributed to the row it was booked on.</p>}
+            ? `IBKR already includes the ${money(String(realizedCommission))} ${currency} commission on those fills.`
+            : `The ${money(String(realizedCommission))} ${currency} commission on those fills is subtracted above.`} Every figure above and in the table includes it, attributed to the row it was booked on.</p>}
         <p className="footnote">The two worst-case figures answer different questions: the first is what this book can finally settle at, the second what it could mark at today before any time value has decayed — they peak at different prices, and the second is the one a margin call follows. Both are limited to the plotted range, so widening it can make either worse. Live marked values update with IBKR position marks over WebSocket. Expiry values change only when the scenario crosses a strike; a defined-risk strategy&rsquo;s worst terminal loss can remain fixed as the market moves.</p>
       </>}
       {focusedUnpriced.map(group => (
