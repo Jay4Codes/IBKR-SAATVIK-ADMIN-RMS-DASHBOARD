@@ -134,6 +134,9 @@
   font-weight: 500;
   font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dropdown-menu {
   position: absolute;
@@ -1632,6 +1635,22 @@ h1 {
   font-size: var(--text-base);
   text-align: left;
 }
+.ss-label {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.ss-value > span:not(.ss-label):not(.ss-caret) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.table-facet .ss-label,
+.mobile-sort .ss-label {
+  display: none;
+}
 .ss-value:hover {
   border-color: var(--line-strong);
 }
@@ -2281,6 +2300,29 @@ tbody tr:hover td {
 .account-link:hover {
   text-decoration: underline;
 }
+.account-name-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.account-name-cell form { min-width: 12rem; }
+.account-name-cell input {
+  height: var(--control-height-sm);
+  width: 100%;
+  font-size: var(--text-base);
+}
+.account-name-cell .rename {
+  flex: none;
+  margin-top: 2px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.account-name-cell .rename:hover { color: var(--text); }
 .empty {
   padding: var(--space-8) var(--gutter);
   text-align: center;
@@ -2396,6 +2438,9 @@ tbody tr:hover td {
   display: inline;
   margin: 0;
   line-height: 1;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
@@ -2422,7 +2467,7 @@ tbody tr:hover td {
   gap: var(--space-2);
 }
 .lens-focus {
-  min-width: 11rem;
+  min-width: 14rem;
   margin: 0;
 }
 .lens-focus .ss-value {

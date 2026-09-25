@@ -1120,6 +1120,7 @@ def commission_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "execution_id": row.get("execution_id") or "",
                 "account_id": account,
                 "commission": str(amount),
+                "expiry": row.get("expiry") or None,
             }
         )
     return {

@@ -10,13 +10,13 @@ import { buildColumns, Column, COLUMN_ORDER_KEY, CUSTOM_LEVELS_KEY, DEFAULT_LEVE
 import { ChevronDown, ChevronUp, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Denomination, LensTable, TOTAL_ROW } from "./lens-table";
-import { useSelection } from "./selection";
+import { useCrossSelection } from "./selection";
 import { Segmented } from "./segmented";
 import { ShockCurve } from "./shock-curve";
 import { StrategyPayoff } from "./strategy-payoff";
 import { SearchableSelect } from "./searchable-select";
 import { SearchableMultiSelect } from "./searchable-multi-select";
-import { Amount, money, positionLabel } from "./tables";
+import { Amount, money, positionLabel, quotedCost } from "./tables";
 import { Term } from "./term";
 import { useZone } from "./timezone";
 import { todayIn } from "@/lib/timezone";
@@ -118,17 +118,27 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const scoped = rows.filter(p => (p.currency || "Unknown") === currency);
   const { legs: allLegs, excluded } = prepareLegs(scoped, now);
 
-  const accountIds = [...new Set(allLegs.map(l => l.position.account_id))].sort();
-  const allKeys = [...new Set(allLegs.map(l => underlyingKey(l.position)))].sort();
-  const expiries = [...new Set(allLegs.map(l => expiryOf(l.position)))].sort((a, b) => (a === NO_EXPIRY ? 1 : b === NO_EXPIRY ? -1 : a.localeCompare(b)));
-  const accountChoice = useSelection(accountIds);
-  const nameChoice = useSelection(allKeys);
-  const cycleChoice = useSelection(expiries);
+  const filtersBy = useCrossSelection(allLegs, {
+    account: l => l.position.account_id,
+    asset: l => underlyingKey(l.position),
+    expiry: l => expiryOf(l.position),
+  }, {
+    expiry: (a, b) => (a === NO_EXPIRY ? 1 : b === NO_EXPIRY ? -1 : a.localeCompare(b)),
+  });
+  const accountChoice = filtersBy.account;
+  const nameChoice = filtersBy.asset;
+  const cycleChoice = filtersBy.expiry;
+  const accountIds = accountChoice.options;
+  const expiries = cycleChoice.options;
   const legs = allLegs.filter(l =>
     accountChoice.has(l.position.account_id) && nameChoice.has(underlyingKey(l.position)) && cycleChoice.has(expiryOf(l.position)),
   );
-  const legCount = (predicate: (leg: (typeof allLegs)[number]) => boolean) => {
-    const n = allLegs.filter(predicate).length;
+  const legCount = (dim: "account" | "expiry", value: string) => {
+    const n = allLegs.filter(l =>
+      (dim === "account" ? l.position.account_id === value : accountChoice.has(l.position.account_id)) &&
+      (dim === "expiry" ? expiryOf(l.position) === value : cycleChoice.has(expiryOf(l.position))) &&
+      nameChoice.has(underlyingKey(l.position)),
+    ).length;
     return `${n} ${n === 1 ? "leg" : "legs"}`;
   };
 
@@ -360,7 +370,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
                 <span className="acct">{name(leg.position.account_id)}</span>
                 <span className="name">{positionLabel(leg.position)}</span>
                 <span className={`qty ${leg.quantity < 0 ? "negative" : "positive"}`}>{leg.quantity > 0 ? "+" : ""}{leg.quantity}</span>
-                <span className="num" title="Average cost">{money(leg.position.average_cost)}</span>
+                <span className="num" title="Average cost, per unit">{money(quotedCost(leg.position))}</span>
                 <span className="num" title="Broker mark">{money(leg.position.market_price)}</span>
               </li>
             ))}
@@ -381,11 +391,11 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     <div className="lens-filters" role="group" aria-label="Filters">
       {!accountId && accountIds.length > 0 && (
         <SearchableMultiSelect label="Accounts" selection={accountChoice} noun="accounts"
-          describe={id => legCount(l => l.position.account_id === id)} />
+          format={name} describe={id => legCount("account", id)} />
       )}
       {expiries.length > 0 && (
         <SearchableMultiSelect label="Expiry" className="expiry-picker" selection={cycleChoice} noun="cycles" searchFrom={2} format={expiryLabel}
-          describe={value => legCount(l => expiryOf(l.position) === value)} />
+          describe={value => legCount("expiry", value)} />
       )}
     </div>
   );
@@ -430,14 +440,14 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
               />
             </label>
           )}
-          {lens !== "asset" && focusRows.length > 0 && (
+          {lens === "expiry" && focusRows.length > 0 && (
             <label className="lens-focus">
               <SearchableSelect
-                label={lens === "expiry" ? "This expiry" : "Account"}
+                label="This expiry"
                 value={focus}
                 options={focusRows.map(row => row.id)}
                 onChange={setFocus}
-                format={id => focusRows.find(row => row.id === id)?.label ?? symbolOf(id)}
+                format={id => focusRows.find(row => row.id === id)?.label ?? id}
                 searchFrom={2}
               />
             </label>
@@ -449,7 +459,6 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
             options={LENSES.map(item => ({
               id: item.id,
               label: item.label,
-              count: item.id === "asset" ? pricedKeys.length : item.id === "expiry" ? new Set(modeled.map(l => expiryOf(l.position))).size : new Set(modeled.map(l => l.position.account_id)).size,
               title: `Group the same legs by ${item.noun}`,
             }))}
           />
@@ -659,7 +668,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
               aria-label="Price range either side of spot" onChange={e => setRange(Number(e.target.value))} />
           </label>
         </div>
-        <p className="footnote">The dropdown picks one {LENSES.find(item => item.id === lens)?.noun} at a time. One name shows its payoff against its own price with the strikes held; a group of names shows P&amp;L against the scenario move. Zoom a payoff graph by scrolling or pinching on the plot, or drag the bar below it. The shaded bell is the probability of each level at expiry under the IV above, not a forecast.</p>
+        <p className="footnote">{lens !== "account" && <>The dropdown picks one {LENSES.find(item => item.id === lens)?.noun} at a time. </>}One name shows its payoff against its own price with the strikes held; a group of names shows P&amp;L against the scenario move. Zoom a payoff graph by scrolling or pinching on the plot, or drag the bar below it. The shaded bell is the probability of each level at expiry under the IV above, not a forecast.</p>
         {booked !== 0 && !withClosed && <p className="footnote">Open legs only. <Amount value={String(booked)} /> {currency} of P&amp;L booked on closed legs this cycle is excluded — an adjustment that closed a strike at a loss and opened another leaves that loss out of the open positions entirely, so every figure here reads as though it never happened.</p>}
         {openCommission !== 0 && <p className="footnote">
           {withCommissions

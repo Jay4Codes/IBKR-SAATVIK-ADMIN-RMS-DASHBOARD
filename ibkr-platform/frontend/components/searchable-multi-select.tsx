@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Dropdown } from "./dropdown";
-import { Selection, SelectionActions } from "./selection";
+import { Selection, SelectionActions, summarizeChoices } from "./selection";
 
 export function SearchableMultiSelect({
   label,
@@ -31,7 +31,7 @@ export function SearchableMultiSelect({
         return option.toLowerCase().includes(needle) || format(option).toLowerCase().includes(needle) || extra.toLowerCase().includes(needle);
       });
 
-  const value = selection.options.length === 1 && selection.isAll ? format(selection.options[0]) : selection.summary;
+  const value = summarizeChoices(selection.selected.map(format));
   return (
     <Dropdown label={label} value={value} className={className}>
       <div className="dropdown-menu" role="group" aria-label={label}>

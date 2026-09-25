@@ -104,25 +104,32 @@ export function applyEvent(client: QueryClient, event: LiveEvent) {
     if (!rows) return rows;
     if (type === "orders.reconciled")
       return data.orders as Record<string, unknown>[];
-    const others = rows.filter(
+    const index = rows.findIndex(
       (row) =>
-        identity(row) !== identity(data) &&
-        !(
-          kind === "orders" &&
+        identity(row) === identity(data) ||
+        (kind === "orders" &&
           Number(data.perm_id) > 0 &&
           !Number(row.perm_id) &&
           row.client_id === data.client_id &&
-          row.order_id === data.order_id
-        ),
+          row.order_id === data.order_id),
     );
-    if (removed) return others;
+    if (removed) return index === -1 ? rows : rows.filter((_, i) => i !== index);
     // A fill is announced before IBKR's commission report and re-sent on
     // reconnect without one; like the server, only ever add fields to it.
-    const known =
-      kind === "executions" ? rows.find((row) => identity(row) === identity(data)) : undefined;
-    const next = known
-      ? { ...known, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v != null)) }
-      : data;
+    const known = index === -1 ? undefined : rows[index];
+    const next =
+      known && kind === "executions"
+        ? { ...known, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v != null)) }
+        : data;
+    // Marks stream constantly. Keep a position where it already sits so the
+    // book does not reshuffle on every tick; a new contract appends.
+    if (kind === "positions") {
+      if (index === -1) return [...rows, next];
+      const copy = rows.slice();
+      copy[index] = next;
+      return copy;
+    }
+    const others = index === -1 ? rows : rows.filter((_, i) => i !== index);
     return [next, ...others].slice(0, kind === "executions" ? 100 : undefined);
   });
   const current = client.getQueryData<Record<string, unknown>[]>(key);

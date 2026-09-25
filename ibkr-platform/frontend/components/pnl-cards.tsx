@@ -5,10 +5,13 @@ import { api } from "@/lib/api";
 import { CommissionSummary, RealizedSummary } from "@/lib/types";
 import { Amount, money } from "./tables";
 import { TablePager, usePagedRows } from "./table-pager";
+import { expiryLabel, NO_EXPIRY } from "@/lib/risk-lenses";
 import { SearchableMultiSelect } from "./searchable-multi-select";
-import { Selection, useSelection } from "./selection";
+import { Selection, useCrossSelection } from "./selection";
 import { LinesSkeleton } from "./skeleton";
 import { useAccountNames } from "./account-names";
+
+const expiryKey = (expiry: string | null | undefined) => expiry || NO_EXPIRY;
 
 export function chosen(choice: Selection, fallback: string): boolean {
   if (choice.isAll) return true;
@@ -30,18 +33,20 @@ export function PnlCards({ accountId }: { accountId?: string }) {
 
   const legs = (realized.data?.legs ?? []).filter(leg => !accountId || leg.account_id === accountId);
   const fills = (commissions.data?.fills ?? []).filter(fill => !accountId || fill.account_id === accountId);
-  const accountOptions = [...new Set([
-    ...legs.map(leg => leg.account_id),
-    ...fills.map(fill => fill.account_id),
-  ].filter(Boolean))].sort();
-  const idOptions = [...new Set([
-    ...legs.map(leg => leg.execution_id),
-    ...fills.map(fill => fill.execution_id),
-  ].filter(Boolean))].sort();
-  const accountChoice = useSelection(accountOptions);
-  const idChoice = useSelection(idOptions);
-  const shownLegs = legs.filter(leg => chosen(accountChoice, leg.account_id) && chosen(idChoice, leg.execution_id));
-  const shownFills = fills.filter(fill => chosen(accountChoice, fill.account_id) && chosen(idChoice, fill.execution_id));
+  const rows = [
+    ...legs.map(leg => ({ account: leg.account_id, expiry: expiryKey(leg.expiry) })),
+    ...fills.map(fill => ({ account: fill.account_id, expiry: expiryKey(fill.expiry) })),
+  ].filter(row => row.account || row.expiry);
+  const linked = useCrossSelection(rows, {
+    account: row => row.account,
+    expiry: row => row.expiry,
+  }, {
+    expiry: (a, b) => (a === NO_EXPIRY ? 1 : b === NO_EXPIRY ? -1 : a.localeCompare(b)),
+  });
+  const accountChoice = linked.account;
+  const expiryChoice = linked.expiry;
+  const shownLegs = legs.filter(leg => chosen(accountChoice, leg.account_id) && chosen(expiryChoice, expiryKey(leg.expiry)));
+  const shownFills = fills.filter(fill => chosen(accountChoice, fill.account_id) && chosen(expiryChoice, expiryKey(fill.expiry)));
 
   const booked = shownLegs.reduce((sum, leg) => sum + Number(leg.realized_pnl || 0), 0);
   const spent = fills.length
@@ -56,12 +61,11 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     ...shownFills.map(fill => fill.account_id),
   ].filter(Boolean))].sort();
   const accountPage = usePagedRows(accountsInView, accountsInView.join("\0"));
-  const idHint = (id: string) => {
-    const leg = legs.find(row => row.execution_id === id);
-    const fill = fills.find(row => row.execution_id === id);
-    const account = leg?.account_id || fill?.account_id;
-    const symbol = leg?.symbol;
-    return [account ? name(account) : "", symbol].filter(Boolean).join(" · ");
+  const expiryHint = (expiry: string) => {
+    const closings = legs.filter(leg =>
+      expiryKey(leg.expiry) === expiry && chosen(accountChoice, leg.account_id) && Number(leg.realized_pnl || 0) !== 0,
+    ).length;
+    return `${closings} closing ${closings === 1 ? "fill" : "fills"}`;
   };
   const bookedFor = (account: string) =>
     shownLegs.filter(leg => leg.account_id === account).reduce((sum, leg) => sum + Number(leg.realized_pnl || 0), 0);
@@ -77,18 +81,19 @@ export function PnlCards({ accountId }: { accountId?: string }) {
         <LinesSkeleton label="Loading P&L" lines={4} />
       ) : (
         <>
-          {(accountOptions.length > 1 || idOptions.length > 1) && (
+          {(accountChoice.options.length > 1 || expiryChoice.options.length > 1) && (
             <div className="pnl-filters">
-              {!accountId && accountOptions.length > 1 && (
-                <SearchableMultiSelect label="Accounts" noun="accounts" selection={accountChoice} searchFrom={2} describe={name} />
+              {!accountId && accountChoice.options.length > 1 && (
+                <SearchableMultiSelect label="Accounts" noun="accounts" selection={accountChoice} searchFrom={2} format={name} describe={name} />
               )}
-              {idOptions.length > 1 && (
+              {expiryChoice.options.length > 1 && (
                 <SearchableMultiSelect
-                  label="IDs"
-                  noun="execution IDs"
-                  selection={idChoice}
+                  label="Expiry"
+                  noun="expiries"
+                  selection={expiryChoice}
                   searchFrom={2}
-                  describe={idHint}
+                  format={expiryLabel}
+                  describe={expiryHint}
                 />
               )}
             </div>
@@ -148,8 +153,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
             </div>
           )}
           <p className="footnote">
-            Booked P&amp;L covers every cycle the broker has reported, including ones that have
-            expired — unlike the payoff panel, which models the live cycle only. Commissions
+            Booked P&amp;L covers {expiryChoice.isAll ? "every cycle the broker has reported, including ones that have expired" : expiryChoice.selected.map(expiryLabel).join(", ")} — unlike the payoff panel, which models the live cycle only. Commissions
             total {money(String(spent))} across {fillCount} fills.
           </p>
         </>

@@ -43,9 +43,9 @@ async def test_commissions_are_summed_by_day_and_account(client, stores):
         {"account_id": "DU2", "commission": "0.75"},
     ]
     assert body["fills"] == [
-        {"execution_id": "e1", "account_id": "DU1", "commission": "1.50"},
-        {"execution_id": "e2", "account_id": "DU1", "commission": "2.25"},
-        {"execution_id": "e3", "account_id": "DU2", "commission": "0.75"},
+        {"execution_id": "e1", "account_id": "DU1", "commission": "1.50", "expiry": None},
+        {"execution_id": "e2", "account_id": "DU1", "commission": "2.25", "expiry": None},
+        {"execution_id": "e3", "account_id": "DU2", "commission": "0.75", "expiry": None},
     ]
 
 async def test_commissions_can_be_scoped_to_one_account(client, stores):

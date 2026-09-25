@@ -271,5 +271,5 @@ export type CommissionSummary = {
   count: number;
   by_day: { date: string; commission: string }[];
   by_account: { account_id: string; commission: string }[];
-  fills?: { execution_id: string; account_id: string; commission: string }[];
+  fills?: { execution_id: string; account_id: string; commission: string; expiry?: string | null }[];
 };

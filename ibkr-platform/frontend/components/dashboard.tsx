@@ -299,6 +299,10 @@ function Terminal({
           .reduce((n, a) => n.plus(String(a[field])), new Decimal(0))
           .toString()
       : null;
+  const reportedDayPnl = monetary.filter((a) => a.day_pnl != null);
+  const dayPnl = reportedDayPnl.length
+    ? reportedDayPnl.reduce((n, a) => n.plus(a.day_pnl!), new Decimal(0)).toString()
+    : null;
   const cushions = monetary
     .filter(
       (a) =>
@@ -559,7 +563,7 @@ function Terminal({
                   </div>
                   <div>
                     <label>Day P&L</label>
-                    <strong>{kpi(<Amount value={sum("day_pnl")} />)}</strong>
+                    <strong>{kpi(<Amount value={dayPnl} />)}</strong>
                     <small>Broker daily P&L</small>
                   </div>
                   <div>
@@ -642,13 +646,13 @@ function Terminal({
                 }}
               />
             )}
-            {!accountId && (view === "Overview" || view === "Accounts") && loadingAccounts && (
+            {!accountId && view === "Accounts" && loadingAccounts && (
               <section className="panel">
                 <h2>Accounts</h2>
                 <AccountsTable rows={[]} onRow={() => {}} loading />
               </section>
             )}
-            {!accountId && (view === "Overview" || view === "Accounts") && selected.length > 1 && (
+            {!accountId && view === "Accounts" && selected.length > 1 && (
               <section className="panel">
                 <h2>
                   Accounts <ArrowUpRight size={16} />
@@ -656,6 +660,14 @@ function Terminal({
                 <AccountsTable
                   rows={selected}
                   onRow={(a) => router.push(`/accounts/${a.account_id}`)}
+                  onRename={
+                    isAdmin
+                      ? async (accountId, label) => {
+                          await apiPatch(`/accounts/${accountId}`, { label });
+                          await client.invalidateQueries({ queryKey: ["accounts"] });
+                        }
+                      : undefined
+                  }
                 />
               </section>
             )}
@@ -723,9 +735,9 @@ function Terminal({
                   loading={loadingAccounts || positions.some((p) => p.isPending)}
                 />
                 <p className="footnote">
-                  ¹ Average cost is the broker value; derivative costs include
-                  the contract multiplier. Missing marks indicate unavailable
-                  broker valuation.
+                  ¹ Average cost is the premium, the broker cost divided by the
+                  contract multiplier, in the same units as the mark. Missing
+                  marks indicate unavailable broker valuation.
                 </p>
               </section>
             )}

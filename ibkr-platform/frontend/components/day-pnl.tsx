@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { api } from "@/lib/api";
-import { DailyPnlResponse, IntradayResponse } from "@/lib/types";
+import { Account, DailyPnlResponse, IntradayResponse } from "@/lib/types";
 import { HISTORY_START, PERIODS, Period, sinceDays } from "@/lib/history";
 import { formatDateTime, todayIn, ZONES, ZoneId, zoneOf } from "@/lib/timezone";
 import { Chart } from "./chart";
-import { SelectionActions, useSelection } from "./selection";
+import { SelectionActions, summarizeChoices, useSelection } from "./selection";
 import { money } from "./tables";
 import { useZone } from "./timezone";
 import { useAccountNames } from "./account-names";
@@ -74,6 +74,14 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
     enabled: scope.length > 0 && daily && !noAssets,
   });
 
+  const liveAccounts = useQuery({
+    queryKey: ["accounts"],
+    queryFn: () => api<Account[]>("/accounts"),
+    enabled: !daily && !assetFilter,
+  });
+  const liveById = new Map((liveAccounts.data ?? []).map((account) => [account.account_id, account]));
+  const liveStandings = !daily && !assetFilter;
+
   const series = intraday.data?.series ?? [];
   const combined = intraday.data?.combined ?? [];
   const unreported = new Set(intraday.data?.unreported ?? []);
@@ -87,10 +95,25 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
   const lastStamp = stamps[stamps.length - 1] ?? null;
   const periodLabel = PERIODS.find((p) => p.id === period)?.label ?? "Day";
 
-  const pointsFor = (id: string) =>
-    series
+  const extendLive = (points: [number, number][], at: number, value: number | null) => {
+    if (value == null || !Number.isFinite(at) || at <= 0) return points;
+    const last = points[points.length - 1];
+    if (last && at <= last[0]) return [...points.slice(0, -1), [last[0], value] as [number, number]];
+    return [...points, [at, value] as [number, number]];
+  };
+  const pointsFor = (id: string) => {
+    const history = series
       .filter((r) => r.account_id === id && r.day_pnl != null)
       .map((r) => [Date.parse(r.taken_at), Number(r.day_pnl)] as [number, number]);
+    if (!liveStandings) return history;
+    const account = liveById.get(id);
+    return extendLive(history, Date.parse(account?.updated_at ?? ""), account?.day_pnl != null ? Number(account.day_pnl) : null);
+  };
+  const liveReported = liveStandings ? scope.filter((id) => liveById.get(id)?.day_pnl != null) : [];
+  const liveTotal = liveReported.length
+    ? liveReported.reduce((sum, id) => sum + Number(liveById.get(id)!.day_pnl), 0)
+    : null;
+  const liveAt = liveReported.reduce((at, id) => Math.max(at, Date.parse(liveById.get(id)?.updated_at ?? "") || 0), 0);
   const cumulativeFor = (id: string) => {
     let running = 0;
     const byDate = new Map(dailySeries.filter((r) => r.account_id === id).map((r) => [r.report_date, Number(r.day_pnl)]));
@@ -100,8 +123,17 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
     });
   };
 
-  const standings: Standing[] = perAccount
+  const standings: Standing[] = (liveStandings ? scope : perAccount)
     .map((id) => {
+      if (liveStandings) {
+        const account = liveById.get(id);
+        return {
+          id,
+          value: account?.day_pnl != null ? Number(account.day_pnl) : null,
+          at: account?.updated_at ?? null,
+          stale: false,
+        };
+      }
       if (daily) {
         const rows = dailySeries.filter((r) => r.account_id === id);
         return {
@@ -132,6 +164,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
   const latestDaily = dailyCombined[dailyCombined.length - 1];
   const latest = (() => {
     if (daily) return latestDaily ? new Decimal(latestDaily.cumulative) : null;
+    if (liveTotal != null) return new Decimal(liveTotal);
     if (desk || (!accountId && combined.length)) return latestCombined ? new Decimal(latestCombined.day_pnl) : null;
     const v = valued[0]?.value;
     return v == null ? null : new Decimal(v);
@@ -183,7 +216,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
         )}
         {!accountId && accounts.length > 1 && (
           <details className="day-pnl-accounts">
-            <summary>Accounts · {choice.summary}</summary>
+            <summary>Accounts · {summarizeChoices(choice.selected.map(name))}</summary>
             <fieldset className="account-picker">
               <legend>Accounts in this view</legend>
               <SelectionActions selection={choice} noun="accounts" />
@@ -374,7 +407,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
             height={320}
             ariaLabel={`Day profit and loss through ${date} in ${zoneLabel} for ${scope.join(", ")}`}
             unavailable="Chart unavailable."
-            deps={[stamps.join(","), perAccount.join(","), combined.length, zone, mode, focus, desk]}
+            deps={[stamps.join(","), perAccount.join(","), combined.length, zone, mode, focus, desk, liveTotal, liveAt, scope.map((id) => liveById.get(id)?.day_pnl ?? "").join(",")]}
             option={(t, zoom) => {
               const zeroLine = {
                 silent: true,
@@ -402,7 +435,11 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                 };
                 return { data, gradient };
               };
-              const total: [number, number][] = combined.map((r) => [Date.parse(r.taken_at), Number(r.day_pnl)]);
+              const total = extendLive(
+                combined.map((r) => [Date.parse(r.taken_at), Number(r.day_pnl)] as [number, number]),
+                liveAt,
+                liveTotal,
+              );
               const single = !desk ? pointsFor(perAccount[0]) : [];
               const main = showCombined ? signed(total) : !desk ? signed(single) : null;
 
@@ -544,9 +581,11 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                     );
                   })}
               </ol>
-              {unreported.size > 0 && (
+              {(liveStandings ? standings.some((s) => s.value === null) : unreported.size > 0) && (
                 <p className="day-pnl-missing">
-                  No figure from the broker today: {[...unreported].map(name).join(", ")}
+                  No figure from the broker today: {(liveStandings
+                    ? standings.filter((s) => s.value === null).map((s) => s.id)
+                    : [...unreported]).map(name).join(", ")}
                 </p>
               )}
             </div>

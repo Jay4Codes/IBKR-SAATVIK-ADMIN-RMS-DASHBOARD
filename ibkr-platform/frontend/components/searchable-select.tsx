@@ -84,6 +84,7 @@ export function SearchableSelect({
           setActive(Math.max(0, options.indexOf(value)));
         }}
       >
+        <span className="ss-label">{label}</span>
         <span>{format(value) || value || "—"}</span>
         <ChevronDown size={16} strokeWidth={2.25} aria-hidden="true" className="ss-caret" />
       </button>

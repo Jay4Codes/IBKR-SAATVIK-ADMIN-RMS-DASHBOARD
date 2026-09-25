@@ -23,6 +23,14 @@ import { useZone } from "./timezone";
 import { useAccountNames } from "./account-names";
 import { formatDay, formatTime } from "@/lib/timezone";
 
+/** IBKR's average cost for a derivative is the premium times the multiplier. Mark is already per unit. */
+export function quotedCost(row: { sec_type: string; average_cost: string; multiplier: Money }) {
+  if (row.sec_type === "STK" || row.average_cost === "") return row.average_cost;
+  const multiplier = Number(row.multiplier);
+  if (!Number.isFinite(multiplier) || multiplier <= 1) return row.average_cost;
+  return new Decimal(row.average_cost).div(multiplier).toString();
+}
+
 export function money(value: Money | undefined, digits = 2) {
   if (value == null) return "—";
   return new Decimal(value)
@@ -112,13 +120,35 @@ export function DataTable<T>({
   const choices = useMemo(
     () =>
       Object.fromEntries(
-        facets.map((facet) => [
-          facet.label,
-          [ANY, ...[...new Set(rows.map((row) => facet.value(row)).filter((v): v is string => !!v))].sort()],
-        ]),
+        facets.map((facet) => {
+          const pool = rows.filter((row) =>
+            facets.every((other) => {
+              if (other.label === facet.label) return true;
+              const want = picked[other.label];
+              return !want || want === ANY || other.value(row) === want;
+            }),
+          );
+          return [
+            facet.label,
+            [ANY, ...[...new Set(pool.map((row) => facet.value(row)).filter((v): v is string => !!v))].sort()],
+          ];
+        }),
       ),
-    [facets, rows],
+    [facets, rows, picked],
   );
+  const nextPicked = useMemo(() => {
+    let changed = false;
+    const next = { ...picked };
+    for (const facet of facets) {
+      const value = next[facet.label];
+      if (value && value !== ANY && !(choices[facet.label] ?? []).includes(value)) {
+        delete next[facet.label];
+        changed = true;
+      }
+    }
+    return changed ? next : picked;
+  }, [picked, choices, facets]);
+  if (nextPicked !== picked) setPicked(nextPicked);
 
   const visible = useMemo(
     () =>
@@ -141,9 +171,10 @@ export function DataTable<T>({
             numeric.test(String(av)) && numeric.test(String(bv))
               ? new Decimal(av).cmp(new Decimal(bv))
               : String(av).localeCompare(String(bv));
-          return comparison * (sort.asc ? 1 : -1);
+          if (comparison !== 0) return comparison * (sort.asc ? 1 : -1);
+          return id(a).localeCompare(id(b));
         }),
-    [rows, columns, search, sort, facets, picked, searchText],
+    [rows, columns, search, sort, facets, picked, searchText, id],
   );
 
   const groups = useMemo(() => {
@@ -391,13 +422,112 @@ export function accountLabel(row: { account_id: string; label?: string }) {
   return row.label?.trim() || row.account_id;
 }
 
+function AccountNameCell({
+  row,
+  onOpen,
+  onRename,
+}: {
+  row: Account;
+  onOpen: () => void;
+  onRename?: (label: string) => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.label ?? "");
+  const [saving, setSaving] = useState(false);
+  const skipSave = useRef(false);
+  const savingRef = useRef(false);
+
+  const save = async () => {
+    if (skipSave.current) {
+      skipSave.current = false;
+      return;
+    }
+    if (savingRef.current) return;
+    const next = draft.trim();
+    if (next === (row.label ?? "").trim()) {
+      setEditing(false);
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await onRename?.(next);
+      setEditing(false);
+    } catch {
+      savingRef.current = false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="account-name-cell" onClick={(e) => e.stopPropagation()}>
+      {editing ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <input
+            aria-label={`Name for ${row.account_id}`}
+            value={draft}
+            maxLength={60}
+            autoFocus
+            disabled={saving}
+            placeholder="Account name"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void save()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                skipSave.current = true;
+                setEditing(false);
+              }
+            }}
+          />
+          <small>{row.account_id} · {row.currency}</small>
+        </form>
+      ) : (
+        <>
+          <button
+            className="account-link"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+          >
+            {accountLabel(row)}
+            <small>{row.label ? `${row.account_id} · ${row.currency}` : row.currency}</small>
+          </button>
+          {onRename && (
+            <button
+              type="button"
+              className="rename"
+              onClick={() => {
+                savingRef.current = false;
+                setDraft(row.label ?? "");
+                setEditing(true);
+              }}
+            >
+              {row.label?.trim() ? "Rename" : "Add a name"}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function AccountsTable({
   rows,
   onRow,
+  onRename,
   loading,
 }: {
   rows: Account[];
   onRow: (row: Account) => void;
+  onRename?: (accountId: string, label: string) => void | Promise<void>;
   loading?: boolean;
 }) {
   return (
@@ -410,17 +540,11 @@ export function AccountsTable({
         {
           label: "Account",
           render: (r) => (
-            <button
-              className="account-link"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRow(r);
-              }}
-            >
-              {accountLabel(r)}
-
-              <small>{r.label ? `${r.account_id} · ${r.currency}` : r.currency}</small>
-            </button>
+            <AccountNameCell
+              row={r}
+              onOpen={() => onRow(r)}
+              onRename={onRename ? (label) => onRename(r.account_id, label) : undefined}
+            />
           ),
 
           value: (r) => `${accountLabel(r)} ${r.account_id}`,
@@ -479,6 +603,14 @@ export function AccountsTable({
     />
   );
 }
+function positionSortKey(r: Position) {
+  const strike =
+    r.strike == null || r.strike === ""
+      ? ""
+      : new Decimal(r.strike).toFixed(4).padStart(16, "0");
+  return [r.symbol, r.sec_type, r.expiry, strike, r.right, r.account_id].join("\0");
+}
+
 export function positionLabel(r: Position) {
   const expiry =
     r.expiry.length === 8
@@ -520,7 +652,7 @@ export function PositionsTable({ rows, loading }: { rows: Position[]; loading?: 
               </small>
             </span>
           ),
-          value: (r) => r.symbol,
+          value: (r) => positionSortKey(r),
         },
         { label: "Type", render: (r) => r.sec_type, value: (r) => r.sec_type },
         {
@@ -537,8 +669,8 @@ export function PositionsTable({ rows, loading }: { rows: Position[]; loading?: 
         { label: "Qty", render: (r) => r.quantity, value: (r) => r.quantity },
         {
           label: "Avg cost¹",
-          render: (r) => money(r.average_cost),
-          value: (r) => r.average_cost,
+          render: (r) => money(quotedCost(r)),
+          value: (r) => quotedCost(r),
         },
         {
           label: "Mark",
