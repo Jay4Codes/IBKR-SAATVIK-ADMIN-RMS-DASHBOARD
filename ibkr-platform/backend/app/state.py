@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 
+from app.config import settings
 from app.domain import Event, GatewayState, now, order_key
 from app.tenancy import TenantKeys
 
@@ -71,6 +72,8 @@ class StateRepository:
             pipe.xadd(
                 keys.events,
                 {"event": event.model_dump_json(), "connection_id": connection},
+                maxlen=settings.event_stream_maxlen,
+                approximate=True,
             )
             if account != "*":
                 pipe.hset(
@@ -93,7 +96,10 @@ class StateRepository:
     async def stream_gateway(self, connection_id: str, state: dict):
         event = Event(event_type="gateway.login", account_id="*", data=state)
         await self.redis.xadd(
-            self.keys.events, {"event": event.model_dump_json(), "connection_id": connection_id}
+            self.keys.events,
+            {"event": event.model_dump_json(), "connection_id": connection_id},
+            maxlen=settings.event_stream_maxlen,
+            approximate=True,
         )
 
     async def gateway(self, connection_id: str | None = None) -> dict:

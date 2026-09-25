@@ -285,3 +285,57 @@ async def test_daily_pnl_respects_account_grants(client, stores):
     _, db = stores
     await pnl_point(db, "DU2", "2026-09-23", "1500", "5")
     assert (await client.get("/api/v1/history/pnl?accounts=DU2", cookies=as_user("TRADER"))).status_code == 403
+
+async def asset_point(db, account, symbol, date, bucket, value):
+    await db.asset_pnl_snapshots.update_one(
+        {"_id": f"{snapshot_id(TENANT, account, date, bucket)}:{symbol}"},
+        {"$set": {
+            "tenant_id": TENANT, "account_id": account, "symbol": symbol, "report_date": date,
+            "taken_at": f"{date}T{bucket[:2]}:{bucket[2:]}:00+00:00", "currency": "USD",
+            "day_pnl": value, "legs": 1,
+        }},
+        upsert=True,
+    )
+
+async def test_intraday_can_be_narrowed_to_chosen_assets(client, stores):
+    _, db = stores
+    await pnl_point(db, "DU1", "2026-09-23", "1500", "999")
+    await asset_point(db, "DU1", "SPX", "2026-09-23", "1500", "100")
+    await asset_point(db, "DU1", "TSLA", "2026-09-23", "1500", "-40")
+    await asset_point(db, "DU1", "NVDA", "2026-09-23", "1500", "7")
+    body = (await client.get("/api/v1/history/intraday?accounts=DU1&assets=spx,tsla&date=2026-09-23")).json()["data"]
+    assert body["assets"] == ["SPX", "TSLA"]
+    assert [(r["account_id"], r["day_pnl"]) for r in body["series"]] == [("DU1", "60")]
+    assert [r["day_pnl"] for r in body["combined"]] == ["60"]
+    everything = (await client.get("/api/v1/history/intraday?accounts=DU1&date=2026-09-23")).json()["data"]
+    assert [r["day_pnl"] for r in everything["combined"]] == ["999"], "no asset filter keeps the broker's account figure"
+
+async def test_daily_pnl_can_be_narrowed_to_chosen_assets(client, stores, monkeypatch):
+    from app.config import settings
+
+    _, db = stores
+    monkeypatch.setattr(settings, "history_start_date", "2026-09-22")
+    await asset_point(db, "DU1", "SPX", "2026-09-22", "1000", "5")
+    await asset_point(db, "DU1", "SPX", "2026-09-22", "1500", "30")
+    await asset_point(db, "DU1", "TSLA", "2026-09-22", "1500", "-100")
+    await asset_point(db, "DU1", "SPX", "2026-09-23", "1500", "-10")
+    body = (await client.get("/api/v1/history/pnl?accounts=DU1&assets=SPX")).json()["data"]
+    assert [(r["report_date"], r["day_pnl"], r["cumulative"]) for r in body["combined"]] == [
+        ("2026-09-22", "30", "30"), ("2026-09-23", "-10", "20"),
+    ]
+
+async def test_the_asset_list_covers_what_was_traded(client, stores, monkeypatch):
+    from app.config import settings
+
+    _, db = stores
+    monkeypatch.setattr(settings, "history_start_date", "2026-09-22")
+    await asset_point(db, "DU1", "SPX", "2026-09-23", "1500", "1")
+    await asset_point(db, "DU1", "TSLA", "2026-09-21", "1500", "1")
+    body = (await client.get("/api/v1/history/assets?accounts=DU1")).json()["data"]
+    assert body == ["SPX"], "assets only traded before the history start are not offered"
+
+async def test_asset_filters_respect_account_grants(client, stores):
+    _, db = stores
+    await asset_point(db, "DU2", "SPX", "2026-09-23", "1500", "5")
+    assert (await client.get("/api/v1/history/intraday?accounts=DU2&assets=SPX", cookies=as_user("TRADER"))).status_code == 403
+    assert (await client.get("/api/v1/history/assets?accounts=DU2", cookies=as_user("TRADER"))).status_code == 403

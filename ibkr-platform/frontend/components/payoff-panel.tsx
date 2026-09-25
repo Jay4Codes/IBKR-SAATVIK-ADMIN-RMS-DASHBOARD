@@ -20,8 +20,9 @@ import { Amount, money, positionLabel } from "./tables";
 import { Term } from "./term";
 import { useZone } from "./timezone";
 import { todayIn } from "@/lib/timezone";
-import { parseLevels, parsePrices, usePersisted, writeStored } from "@/lib/persisted";
+import { formatPriceLevels, parseLevels, parsePriceLevels, PriceLevel, usePersisted, writeStored } from "@/lib/persisted";
 import { ChartSkeleton } from "./skeleton";
+import { useAccountNames } from "./account-names";
 
 export { buildColumns, COLUMN_ORDER_KEY, levelLabel, orderColumns } from "@/lib/scenario-columns";
 
@@ -65,6 +66,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   error: boolean;
   light: boolean;
 }) {
+  const { name } = useAccountNames();
   const [overrides, setOverrides] = useState<Record<string, Partial<Assumption>>>({});
   const [range, setRange] = useState(10);
   const [withCommissions, setWithCommissions] = useState(true);
@@ -77,7 +79,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
   const denomination: Denomination = usePersisted(DENOMINATION_KEY, "money") === "pct" ? "pct" : "money";
   const setDenomination = (next: Denomination) => writeStored(DENOMINATION_KEY, next);
   const custom = parseLevels(usePersisted(CUSTOM_LEVELS_KEY, DEFAULT_LEVELS));
-  const prices = parsePrices(usePersisted(PRICE_LEVELS_KEY, ""));
+  const prices = parsePriceLevels(usePersisted(PRICE_LEVELS_KEY, ""));
   const [draft, setDraft] = useState("");
   const [priceDraft, setPriceDraft] = useState("");
   const write = (key: string, values: number[]) =>
@@ -92,18 +94,15 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     setDraft("");
   };
   const wantedPrice = Math.round(Number(priceDraft) * 100) / 100;
-  const canAddPrice =
-    Number.isFinite(wantedPrice) && wantedPrice > 0 &&
-    prices.length < MAX_CUSTOM && !prices.includes(wantedPrice);
-  const addPrice = () => {
-    if (!canAddPrice) return;
-    write(PRICE_LEVELS_KEY, [...prices, wantedPrice]);
-    setPriceDraft("");
-  };
+  const writePrices = (levels: PriceLevel[]) => writeStored(PRICE_LEVELS_KEY, formatPriceLevels(levels));
   const dropColumn = (column: Column) => {
-    const value = Number(column.group.split(":")[1]);
-    if (column.kind === "price") write(PRICE_LEVELS_KEY, prices.filter((p: number) => p !== value));
-    else write(CUSTOM_LEVELS_KEY, custom.filter((p: number) => p !== value));
+    if (column.kind === "price") {
+      const key = column.group.slice("price:".length);
+      writePrices(prices.filter(l => `${l.symbol}@${l.price}` !== key));
+    } else {
+      const value = Number(column.group.split(":")[1]);
+      write(CUSTOM_LEVELS_KEY, custom.filter((p: number) => p !== value));
+    }
   };
   const [days, setDays] = useState(0);
   const [rate, setRate] = useState(DEFAULT_RATE * 100);
@@ -164,7 +163,12 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     : `${horizon.toFixed(1)}d`;
   const ready = !loading && !error && modeled.length > 0;
   const priceLevels = lens === "asset" || pricedKeys.length === 1 ? prices : [];
-  const naturalColumns = buildColumns(custom, priceLevels, assumptions[pricedKeys[0]]?.spot ?? 0);
+  const keyOfSymbol = (symbol: string) => pricedKeys.find(key => symbolOf(key) === symbol);
+  const spotOfSymbol = (symbol: string) => {
+    const key = keyOfSymbol(symbol);
+    return key ? assumptions[key]?.spot ?? 0 : 0;
+  };
+  const naturalColumns = buildColumns(custom, priceLevels, spotOfSymbol, benchmark ? symbolOf(benchmark) : "");
   const columnOrder = usePersisted(COLUMN_ORDER_KEY, "").split(",").filter(Boolean);
   const columns = orderColumns(naturalColumns, columnOrder);
   const chipColumns = columns.filter(column =>
@@ -299,6 +303,15 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
     ? Math.min(...viewCurves.map(p => p.modeled))
     : (adjusted.length ? Math.min(...adjusted.map(p => p.modeled)) : NaN);
   const viewKeys = focused?.keys ?? pricedKeys;
+  const priceSymbol = viewKeys.length === 1 ? symbolOf(viewKeys[0]) : benchmark ? symbolOf(benchmark) : "";
+  const canAddPrice =
+    Number.isFinite(wantedPrice) && wantedPrice > 0 && !!priceSymbol &&
+    prices.length < MAX_CUSTOM && !prices.some(l => l.symbol === priceSymbol && l.price === wantedPrice);
+  const addPrice = () => {
+    if (!canAddPrice) return;
+    writePrices([...prices, { symbol: priceSymbol, price: wantedPrice }]);
+    setPriceDraft("");
+  };
 
   const levelFor = (shock: number): ReactNode => {
     const parts = viewKeys.map(key => ({ symbol: symbolOf(key), price: money(String(assumptions[key].spot * (1 + shock * (assumptions[key].beta ?? 1) / 100))) }));
@@ -344,7 +357,7 @@ export const PayoffPanel = memo(function PayoffPanel({ rows, accounts = [], acco
           <ul>
             {rowLegs.map(leg => (
               <li key={`${leg.position.account_id}:${leg.position.con_id}`}>
-                <span className="acct">{leg.position.account_id}</span>
+                <span className="acct">{name(leg.position.account_id)}</span>
                 <span className="name">{positionLabel(leg.position)}</span>
                 <span className={`qty ${leg.quantity < 0 ? "negative" : "positive"}`}>{leg.quantity > 0 ? "+" : ""}{leg.quantity}</span>
                 <span className="num" title="Average cost">{money(leg.position.average_cost)}</span>

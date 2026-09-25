@@ -2,7 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "ibkr_session";
 
-const PUBLIC_PATHS = new Set(["/login"]);
+/** Sign-in plus what link previews, browsers and crawlers fetch without a session. */
+const PUBLIC_PATHS = new Set(["/login", "/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/social-card"]);
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -16,5 +17,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|api/|favicon.ico|sattvic-logo.png).*)"],
+  matcher: ["/((?!_next/static|_next/image|api/|favicon.ico|sattvic-logo.png|brand/).*)"],
 };

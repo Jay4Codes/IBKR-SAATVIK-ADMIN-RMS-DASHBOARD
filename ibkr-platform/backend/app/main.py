@@ -295,13 +295,14 @@ async def create_tenant(body: TenantCreate, request: Request, user: Principal = 
     slug = normalize_slug(body.slug or body.name)
     if await db.tenants.find_one({"slug": slug}):
         raise HTTPException(409, f"A tenant with the slug '{slug}' already exists")
-    tenant = new_tenant(body.name, slug)
-    await db.tenants.insert_one(tenant)
     owner = None
     if body.owner_email:
         owner = await db.users.find_one({"email": body.owner_email.lower()})
         if not owner:
             raise HTTPException(404, f"No user with the email {body.owner_email}")
+    tenant = new_tenant(body.name, slug)
+    await db.tenants.insert_one(tenant)
+    if owner:
         await db.tenant_members.insert_one(
             {
                 "_id": str(uuid4()),
@@ -924,6 +925,7 @@ async def portfolio_history(
 async def daily_pnl(
     request: Request,
     accounts: str = "",
+    assets: str = "",
     since: str | None = None,
     until: str | None = None,
     user: Principal = Depends(require_tenant),
@@ -939,14 +941,19 @@ async def daily_pnl(
         window["$gte"] = since
     if until:
         window["$lte"] = until
-    query = user.scope({"account_id": {"$in": wanted}, "source": "snapshot", "day_pnl": {"$ne": None}})
-    if window:
-        query["report_date"] = window
-    cursor = request.app.state.db.account_snapshots.find(
-        query, {"_id": 0, "account_id": 1, "report_date": 1, "taken_at": 1, "day_pnl": 1, "currency": 1}
-    )
+    picked = wanted_assets(assets)
+    if picked:
+        found = await asset_rows(request.app.state.db, user, wanted, picked, window or {"$gte": "0000-00-00"})
+    else:
+        query = user.scope({"account_id": {"$in": wanted}, "source": "snapshot", "day_pnl": {"$ne": None}})
+        if window:
+            query["report_date"] = window
+        cursor = request.app.state.db.account_snapshots.find(
+            query, {"_id": 0, "account_id": 1, "report_date": 1, "taken_at": 1, "day_pnl": 1, "currency": 1}
+        )
+        found = await cursor.sort("taken_at", 1).to_list(200_000)
     last: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in await cursor.sort("taken_at", 1).to_list(200_000):
+    for row in found:
         last[(row["account_id"], row["report_date"])] = row
     series = [
         {
@@ -972,12 +979,64 @@ async def daily_pnl(
             "day_pnl": str(total),
             "cumulative": str(running),
         })
-    return ok({"accounts": wanted, "since": since, "series": series, "combined": combined})
+    return ok({"accounts": wanted, "assets": picked, "since": since, "series": series, "combined": combined})
+
+def wanted_assets(assets: str) -> list[str]:
+    return sorted({a.strip().upper() for a in assets.split(",") if a.strip()})
+
+async def asset_rows(db, user: Principal, accounts: list[str], assets: list[str], window: dict[str, Any]):
+    """Per-asset day P&L summed to one row per account per sample, shaped like an account snapshot."""
+    query = user.scope({"account_id": {"$in": accounts}, "symbol": {"$in": assets}})
+    query["report_date"] = window
+    cursor = db.asset_pnl_snapshots.find(query, {"_id": 0, "tenant_id": 0})
+    summed: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in await cursor.sort("taken_at", 1).to_list(200_000):
+        key = (row["account_id"], row["taken_at"])
+        into = summed.setdefault(
+            key,
+            {
+                "account_id": row["account_id"],
+                "report_date": row["report_date"],
+                "taken_at": row["taken_at"],
+                "currency": row.get("currency") or "",
+                "day_pnl": Decimal(0),
+                "source": "asset",
+            },
+        )
+        into["day_pnl"] += Decimal(str(row["day_pnl"]))
+    rows = sorted(summed.values(), key=lambda r: (r["taken_at"], r["account_id"]))
+    for row in rows:
+        row["day_pnl"] = str(row["day_pnl"])
+    return rows
+
+@app.get("/api/v1/history/assets")
+async def history_assets(
+    request: Request,
+    accounts: str = "",
+    since: str | None = None,
+    user: Principal = Depends(require_tenant),
+):
+    """Every asset with a recorded day P&L for these accounts, for the asset picker."""
+    repo = repository(request, user)
+    visible = sorted(a for a in await repo.accounts() if user.sees(a))
+    wanted = [a.strip() for a in accounts.split(",") if a.strip()] or visible
+    for account in wanted:
+        user.require_account(account)
+    query = user.scope({"account_id": {"$in": wanted}})
+    query["report_date"] = {"$gte": history_since(since) or "0000-00-00"}
+    symbols = await request.app.state.db.asset_pnl_snapshots.distinct("symbol", query)
+    positions: set[str] = set()
+    for account in wanted:
+        for row in await repo.rows(account, "positions"):
+            if Decimal(str(row.get("quantity") or 0)) != 0 and row.get("symbol"):
+                positions.add(str(row["symbol"]).upper())
+    return ok(sorted({str(s).upper() for s in symbols} | positions))
 
 @app.get("/api/v1/history/intraday")
 async def intraday(
     request: Request,
     accounts: str = "",
+    assets: str = "",
     date: str | None = None,
     user: Principal = Depends(require_tenant),
 ):
@@ -987,11 +1046,15 @@ async def intraday(
     for account in wanted:
         user.require_account(account)
     day = date or now().date().isoformat()
-    cursor = request.app.state.db.account_snapshots.find(
-        user.scope({"account_id": {"$in": wanted}, "report_date": day, "source": "snapshot"}),
-        {"_id": 0, "tenant_id": 0},
-    )
-    rows = await cursor.sort("taken_at", 1).to_list(50_000)
+    picked = wanted_assets(assets)
+    if picked:
+        rows = await asset_rows(request.app.state.db, user, wanted, picked, day)
+    else:
+        cursor = request.app.state.db.account_snapshots.find(
+            user.scope({"account_id": {"$in": wanted}, "report_date": day, "source": "snapshot"}),
+            {"_id": 0, "tenant_id": 0},
+        )
+        rows = await cursor.sort("taken_at", 1).to_list(50_000)
     at: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         at.setdefault(row["taken_at"], []).append(row)
@@ -1021,7 +1084,10 @@ async def intraday(
         )
     unreported = sorted(present - reporting)
     return ok(
-        {"date": day, "accounts": wanted, "series": rows, "combined": combined, "unreported": unreported}
+        {
+            "date": day, "accounts": wanted, "assets": picked, "series": rows,
+            "combined": combined, "unreported": unreported,
+        }
     )
 
 async def commission_rows(db, user: Principal, accounts: list[str], since: str | None, until: str | None):

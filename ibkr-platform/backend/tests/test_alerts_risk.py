@@ -110,3 +110,11 @@ async def test_a_spread_arriving_leg_by_leg_is_one_alert_about_the_spread(monkey
     assert "bought 2 × SPX 24 Sep 26 7690 Put" in sent[0]
     assert "Worst-case risk" in sent[0]
     assert "U1" not in worker.state.dirty
+
+def test_account_display_pairs_name_and_id():
+    from app.alerts import account_display, fill_message
+
+    assert account_display("U1", "Desk A") == "Desk A · U1"
+    assert account_display("U1", "  ") == "U1"
+    text = fill_message({"account_id": "U1", "data": {"side": "BOT", "quantity": "1", "price": "2"}}, "Desk A · U1")
+    assert "Desk A · U1 filled at 2.00" in text

@@ -198,14 +198,19 @@ def position_changes(before: dict[int, dict[str, Any]], after: dict[int, dict[st
             changes.append(f"{verb} {compact(abs(delta))} × {name} (now {compact(now)})")
     return changes
 
-def fill_message(event: dict[str, Any]) -> str:
+def account_display(account_id: str, label: str = "") -> str:
+    """Name and ID together, as the dashboard shows them, or just the ID when unnamed."""
+    label = (label or "").strip()
+    return f"{label} · {account_id}" if label else account_id
+
+def fill_message(event: dict[str, Any], account_name: str = "") -> str:
     data = event.get("data") or {}
     side = str(data.get("side") or "").upper()
     action = "Bought" if side == "BOT" else "Sold" if side == "SLD" else side or "Filled"
     realized = decimal(data.get("realized_pnl"))
     quantity, price = decimal(data.get("quantity")), decimal(data.get("price"))
     multiplier = decimal(data.get("multiplier")) or Decimal(1)
-    account = escape(event.get("account_id") or "")
+    account = escape(account_name or event.get("account_id") or "")
     detail = f"{account} filled at {escape(price_text(data.get('price')))}"
     if quantity and price:
         detail += f" · {escape(money(abs(quantity) * price * multiplier))} {'paid' if action == 'Bought' else 'collected'}"

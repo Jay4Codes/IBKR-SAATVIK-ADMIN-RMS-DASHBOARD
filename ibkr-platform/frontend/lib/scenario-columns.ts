@@ -1,4 +1,5 @@
 import { RMS_SHOCKS, signedLevels } from "./payoff";
+import { PriceLevel } from "./persisted";
 
 export function levelLabel(shock: number): string {
   const shown = Number.isInteger(shock) ? String(shock) : shock.toFixed(1);
@@ -24,7 +25,17 @@ export const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
 const formatPrice = (price: number) => Math.round(price).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-export function buildColumns(percents: number[], prices: number[], spot: number): Column[] {
+/**
+ * A price level is quoted in one underlying's own price and anchored on that underlying's spot;
+ * every other underlying in the table gets the equivalent percent shock. Levels saved without a
+ * symbol are anchored on `benchmark`, the underlying carrying most of the book.
+ */
+export function buildColumns(
+  percents: number[],
+  prices: PriceLevel[],
+  spotOf: (symbol: string) => number,
+  benchmark = "",
+): Column[] {
   const columns = new Map<number, Column>();
   for (const shock of signedLevels(percents)) {
     columns.set(round(shock), {
@@ -33,12 +44,15 @@ export function buildColumns(percents: number[], prices: number[], spot: number)
       custom: !RMS_SHOCKS.includes(Math.abs(shock) as (typeof RMS_SHOCKS)[number]),
     });
   }
-  for (const price of prices) {
+  for (const level of prices) {
+    const symbol = level.symbol || benchmark;
+    const spot = spotOf(symbol);
     if (!(spot > 0)) continue;
-    const shock = round((price / spot - 1) * 100);
+    const shock = round((level.price / spot - 1) * 100);
+    const key = `${level.symbol}@${level.price}`;
     columns.set(shock, {
-      shock, label: formatPrice(price), kind: "price",
-      id: `price:${price}`, group: `price:${price}`, custom: true,
+      shock, label: symbol ? `${symbol} ${formatPrice(level.price)}` : formatPrice(level.price), kind: "price",
+      id: `price:${key}`, group: `price:${key}`, custom: true,
     });
   }
   return [...columns.values()].sort((a, b) => a.shock - b.shock);

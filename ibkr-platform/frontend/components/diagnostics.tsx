@@ -7,6 +7,7 @@ import { formatDateTime } from "@/lib/timezone";
 import { Gateway, LiveEvent } from "@/lib/types";
 import { GatewayStatus } from "./gateway-status";
 import { TablePager, usePagedRows } from "./table-pager";
+import { useAccountNames } from "./account-names";
 
 const EVENT_KINDS = [
   { key: "account", label: "Last account event" },
@@ -23,6 +24,7 @@ type Diagnostics = {
 };
 export function Diagnostics({ clock }: { clock: number }) {
   const zone = useZone();
+  const { name } = useAccountNames();
   const query = useQuery({
     queryKey: ["diagnostics"],
     queryFn: () => api<Diagnostics>("/admin/diagnostics"),
@@ -66,7 +68,7 @@ export function Diagnostics({ clock }: { clock: number }) {
             <tbody>
               {paged.rows.map(([account, events]) => (
                 <tr key={account}>
-                  <td data-label="Account">{account}</td>
+                  <td data-label="Account">{name(account)}</td>
                   {EVENT_KINDS.map((kind) => (
                     <td key={kind.key} data-label={kind.label}>
                       {events[kind.key] ?? "Not received"}
@@ -162,7 +164,7 @@ export function Diagnostics({ clock }: { clock: number }) {
             <details key={event.event_id}>
               <summary>
                 <time>{formatDateTime(event.timestamp, zone)}</time> <b>{event.event_type}</b>{" "}
-                {event.account_id}
+                {name(event.account_id)}
               </summary>
               <pre>{JSON.stringify(event.data, null, 2)}</pre>
             </details>

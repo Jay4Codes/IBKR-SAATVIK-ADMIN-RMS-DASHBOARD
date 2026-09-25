@@ -37,6 +37,24 @@ export function usePersisted(key: string, fallback: string): string {
   );
 }
 
+export type PriceLevel = { symbol: string; price: number };
+
+/** "SPX@7600,7800" → levels; a bare number carries no symbol and is anchored on the benchmark. */
+export function parsePriceLevels(raw: string): PriceLevel[] {
+  const found = new Map<string, PriceLevel>();
+  for (const part of raw.split(",")) {
+    const [head, tail] = part.includes("@") ? part.split("@", 2) : ["", part];
+    const price = Math.round(Number((tail ?? "").trim()) * 100) / 100;
+    const symbol = head.trim().toUpperCase();
+    if (Number.isFinite(price) && price > 0) found.set(`${symbol}@${price}`, { symbol, price });
+  }
+  return [...found.values()].sort((a, b) => a.symbol.localeCompare(b.symbol) || a.price - b.price);
+}
+
+export function formatPriceLevels(levels: PriceLevel[]): string {
+  return levels.map(l => (l.symbol ? `${l.symbol}@${l.price}` : String(l.price))).join(",");
+}
+
 export function parsePrices(raw: string): number[] {
   const found = new Set<number>();
   for (const part of raw.split(",")) {

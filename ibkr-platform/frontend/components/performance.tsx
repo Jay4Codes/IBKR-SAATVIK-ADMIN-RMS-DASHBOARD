@@ -12,6 +12,7 @@ import { Chart } from "./chart";
 import { SelectionActions, useSelection } from "./selection";
 import { money } from "./tables";
 import { ChartSkeleton } from "./skeleton";
+import { useAccountNames } from "./account-names";
 
 const RANGES = [
   { label: "1W", days: 7 },
@@ -35,6 +36,7 @@ export function PerformancePanel({
   isAdmin?: boolean;
 }) {
   const client = useQueryClient();
+  const { name } = useAccountNames();
   const [days, setDays] = useState<number>(91);
   const choice = useSelection(accounts);
   const [combined, setCombined] = useState(true);
@@ -88,7 +90,7 @@ export function PerformancePanel({
     <section className="panel">
       <h2>
         {accountId ? "Account performance" : "Portfolio performance"}
-        <span>{accountId ? accountId : `${scope.length} of ${accounts.length} accounts`}</span>
+        <span>{accountId ? name(accountId) : `${scope.length} of ${accounts.length} accounts`}</span>
         {isAdmin && !accountId && (
           <span className="panel-actions">
             <Button
@@ -151,7 +153,7 @@ export function PerformancePanel({
           {accounts.map((id) => (
             <label key={id}>
               <input type="checkbox" checked={choice.has(id)} onChange={() => choice.toggle(id)} />
-              {id}
+              {name(id)}
             </label>
           ))}
         </fieldset>
@@ -253,7 +255,7 @@ export function PerformancePanel({
                     ]
                   : []),
                 ...perAccount.map((id) => ({
-                  name: id,
+                  name: name(id),
                   type: "line",
                   showSymbol: false,
                   connectNulls: true,

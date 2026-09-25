@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { BrandMark } from "@/components/brand";
+import { useSite } from "@/components/site-context";
 import { Button } from "@/components/ui/button";
 import { Eye, EyeOff } from "lucide-react";
 export default function LoginForm({ next = "/dashboard" }: { next?: string }) {
@@ -10,11 +11,12 @@ export default function LoginForm({ next = "/dashboard" }: { next?: string }) {
     [pending, setPending] = useState(false),
     [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
+  const site = useSite();
   return (
     <main className="login">
       <section>
         <BrandMark priority />
-        <p className="eyebrow">SATTVIC / RMS</p>
+        <p className="eyebrow">{site.eyebrow}</p>
         <h1>Operations terminal</h1>
         <p className="muted">Sign in to monitor your IBKR accounts.</p>
         <form

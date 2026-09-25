@@ -75,6 +75,7 @@ class Position(BaseModel):
     underlying_prev_close: Decimal | None = None
     unrealized_pnl: Decimal | None = None
     realized_pnl: Decimal | None = None
+    day_pnl: Decimal | None = None
     updated_at: datetime = Field(default_factory=now)
 
 class Order(BaseModel):

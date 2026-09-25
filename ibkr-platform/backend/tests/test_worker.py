@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,7 +7,7 @@ import pytest
 
 from app import massive
 from app.db import persist, scoped_id
-from app.domain import Event, GatewayStatus
+from app.domain import AccountState, Event, GatewayStatus
 from app.tenancy import TenantKeys
 from app.worker import GatewaySession, backoff, durable_consumer
 from tests.conftest import CONNECTION, TENANT, gateway_connection
@@ -594,7 +595,24 @@ async def test_a_request_error_on_our_own_market_data_line_spares_the_gateway(st
     assert worker.state.last_error is None
     assert not worker.fault.is_set()
     worker.broker_error(8, 321, "Error validating request. cause - Please enter exchange", None)
-    assert worker.state.status == GatewayStatus.DEGRADED
+    assert worker.state.status == GatewayStatus.CONNECTED, "one malformed request is not a session fault"
+    assert worker.state.last_error is None
+    worker.broker_error(-1, 321, "Error validating request.", None)
+    assert worker.state.status == GatewayStatus.DEGRADED, "a 321 with no request behind it is still reported"
+
+async def test_previous_close_is_requested_on_smart_when_the_position_has_no_exchange(stores):
+    redis, db = stores
+    ib = qualifying(MagicMock())
+    ib.reqHistoricalDataAsync = AsyncMock(return_value=[])
+    worker = session(redis, db, ib)
+    worker.position_value(held(con_id=2, symbol="MCD"))
+    worker.market_denied.add("USD:SPY")
+    worker.position_value(held(con_id=3, symbol="SPY"))
+    await worker.refresh_previous_closes()
+    asked = [c.args[0] for c in ib.reqHistoricalDataAsync.call_args_list]
+    assert [c.symbol for c in asked] == ["MCD"], "a refused line is not asked for a close either"
+    assert asked[0].exchange == "SMART"
+    assert worker.contracts[2].exchange == "", "the stored contract must not be mutated"
 
 async def test_ibkrs_aggregate_is_not_counted_as_an_account(stores):
 \
@@ -620,3 +638,86 @@ async def test_an_explicit_account_filter_still_wins(stores):
 
     worker.account_filter = "All"
     assert worker.accept_account("All") is False
+
+async def test_supervisor_backs_off_after_a_session_crashes(stores, monkeypatch):
+    from app import worker as worker_module
+    from app.worker import Supervisor
+
+    redis, db = stores
+    supervisor = Supervisor(redis, db)
+    doc = gateway_connection(TENANT, CONNECTION, "Primary", 4101)
+    calls = {"count": 0}
+
+    async def supervised(_db):
+        return [doc]
+
+    async def crash():
+        calls["count"] += 1
+        raise RuntimeError("gateway exploded")
+
+    class CrashingSession:
+        def __init__(self, *_args):
+            self.label = "primary"
+            self.stop = asyncio.Event()
+            self.fingerprint = ""
+            self.run = crash
+
+    monkeypatch.setattr(worker_module.registry, "supervised", supervised)
+    monkeypatch.setattr(worker_module, "build_session", lambda *_a: CrashingSession())
+    monkeypatch.setattr(worker_module, "durable_consumer", lambda *_a, **_k: asyncio.sleep(0))
+    monkeypatch.setattr(
+        worker_module.AlertDispatcher, "run", lambda self, stop: asyncio.sleep(0)
+    )
+
+    await supervisor.reconcile()
+    await asyncio.sleep(0.05)
+    assert calls["count"] == 1
+    await supervisor.reconcile()
+    await asyncio.sleep(0.05)
+    assert calls["count"] == 1, "crashed session must not be restarted before the backoff"
+    assert CONNECTION in supervisor.restart_after
+    supervisor.restart_after[CONNECTION] = 0.0
+    await supervisor.reconcile()
+    await asyncio.sleep(0.05)
+    assert calls["count"] == 2
+    for _, task in supervisor.sessions.values():
+        task.cancel()
+    for _, task in [*supervisor.consumers.values(), *supervisor.dispatchers.values()]:
+        task.cancel()
+
+async def test_the_event_stream_is_capped_so_it_cannot_fill_the_disk(stores, monkeypatch):
+    from app.config import settings
+    from app.state import StateRepository
+    from app.tenancy import TenantKeys
+
+    redis, _ = stores
+    monkeypatch.setattr(settings, "event_stream_maxlen", 50)
+    repo = StateRepository(redis, TENANT, CONNECTION)
+    account = AccountState(account_id="U1")
+    for _ in range(400):
+        await repo.publish(Event(event_type="account.updated", account_id="U1", data=account.model_dump(mode="json")))
+    length = await redis.xlen(TenantKeys(TENANT).events)
+    assert length < 400, "old events must be trimmed as new ones arrive"
+    assert length >= 50, "the newest entries are always kept"
+
+async def test_asset_day_pnl_keeps_what_a_closed_leg_made_today(stores):
+    redis, db = stores
+    ib = qualifying(MagicMock())
+    worker = session(redis, db, ib)
+    worker.accounts["U1"] = AccountState(account_id="U1", currency="USD")
+    worker.position_value(held(con_id=1))
+    worker.position_value(held(con_id=2))
+    worker.position_value(held(con_id=3, symbol="TSLA"))
+    for con_id, daily in ((1, 120.0), (2, -20.0), (3, 7.5)):
+        pnl = MagicMock(account="U1", conId=con_id, dailyPnL=daily, unrealizedPnL=0.0, realizedPnL=0.0, value=100.0)
+        worker.position_pnl(pnl)
+    for con_id in (1, 2, 3):
+        worker.positions[("U1", con_id)] = worker.positions[("U1", con_id)].model_copy(update={"currency": "USD"})
+    today = datetime.now(UTC).date().isoformat()
+    totals = worker.asset_day_pnl(today)
+    assert totals[("U1", "SPX")]["day_pnl"] == Decimal("100") and totals[("U1", "SPX")]["legs"] == 2
+    assert totals[("U1", "TSLA")]["day_pnl"] == Decimal("7.5")
+    worker.position_value(held(con_id=1, quantity="0"))
+    totals = worker.asset_day_pnl(today)
+    assert totals[("U1", "SPX")]["day_pnl"] == Decimal("100"), "the closed leg's 120 still counts today"
+    assert totals[("U1", "SPX")]["legs"] == 1

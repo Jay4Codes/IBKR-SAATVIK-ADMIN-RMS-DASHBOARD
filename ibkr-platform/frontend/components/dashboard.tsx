@@ -69,6 +69,7 @@ import { TimezonePicker, useZone } from "./timezone";
 import { formatClock } from "@/lib/timezone";
 import { CLOSING_SOON, countdown, marketState } from "@/lib/market";
 import { BrandMark } from "./brand";
+import { useSite } from "./site-context";
 import { Connections } from "./connections";
 import { Members } from "./members";
 import { TenantsAdmin } from "./tenants-admin";
@@ -247,7 +248,12 @@ function Terminal({
     })),
   });
   const isAdmin = !!user.data?.is_super_admin;
-  const view = !isAdmin && ADMIN_VIEWS.includes(requestedView) ? "RMS" : requestedView;
+  /** Tenant owners and admins run their own connections and members; the backend gates the same way. */
+  const isTenantAdmin = isAdmin || ["OWNER", "ADMIN"].includes(user.data?.tenant?.role ?? "");
+  const view =
+    (!isTenantAdmin && ADMIN_VIEWS.includes(requestedView)) || (!user.data?.is_super_admin && requestedView === "Tenants")
+      ? "RMS"
+      : requestedView;
   const showView = (next: View) => {
     setView(next);
     if (typeof window !== "undefined")
@@ -258,6 +264,7 @@ function Terminal({
       );
   };
   const zone = useZone();
+  const site = useSite();
   const [tabs, setTabs] = useState<Record<string, AccountTab>>({});
   const [profileTab, setProfileTab] = useState<ProfileTab>("Account");
   const tab: AccountTab = (accountId && tabs[accountId]) || "RMS";
@@ -324,7 +331,7 @@ function Terminal({
         >
           {menuOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
-        <Link href="/dashboard" className="brand" aria-label="Sattvic RMS">
+        <Link href="/dashboard" className="brand" aria-label={site.name}>
           <BrandMark priority />
         </Link>
         <div className="top-right">
@@ -397,7 +404,7 @@ function Terminal({
         id="workspace-nav"
         className={`sidebar ${menuOpen ? "open" : ""}`}
       >
-        {visibleNav(isAdmin, isPlatformAdmin).map((section) => {
+        {visibleNav(isTenantAdmin, isPlatformAdmin).map((section) => {
           const items = section.items;
           return (
             <div className="nav-group" key={section.group}>
@@ -517,19 +524,19 @@ function Terminal({
                 gateway={gateway.data}
                 clock={clock}
                 isAdmin={isAdmin}
-                canControl={isAdmin || ["OWNER", "ADMIN"].includes(user.data.tenant?.role ?? "")}
+                canControl={isTenantAdmin}
                 onChanged={() => gateway.refetch()}
               />
             )}
             {view === "Connections" && !accountId && (
-              isAdmin ? (
+              isTenantAdmin ? (
                 <Connections />
               ) : (
                 <p role="alert">Tenant administrator access required.</p>
               )
             )}
             {view === "Members" && !accountId && (
-              isAdmin ? (
+              isTenantAdmin ? (
                 <Members user={user.data} />
               ) : (
                 <p role="alert">Tenant administrator access required.</p>
@@ -614,7 +621,12 @@ function Terminal({
                       Capital allocation{" "}
                       <span>{activeCurrency} · current snapshot</span>
                     </h2>
-                    <AllocationChart accounts={monetary} light={light} />
+                    <AllocationChart
+                      accounts={monetary}
+                      positions={positions.flatMap((p) => p.data ?? [])}
+                      positionsLoading={positions.some((p) => p.isPending)}
+                      light={light}
+                    />
                   </section>
                 )}
               </>
@@ -742,7 +754,7 @@ function Terminal({
                 key={accountId ?? "desk"}
                 accountId={accountId}
                 accounts={ids}
-                isAdmin={isAdmin || ["OWNER", "ADMIN"].includes(user.data.tenant?.role ?? "")}
+                isAdmin={isTenantAdmin}
               />
             )}
             {shows("Orders") && (
@@ -915,7 +927,7 @@ function Terminal({
           </>
         )}
         <footer>
-          SATTVIC WEALTH · RMS <span>{zone} timestamps · Decimal precision</span>
+          {site.footer} <span>{zone} timestamps</span>
         </footer>
       </main>
     </div>

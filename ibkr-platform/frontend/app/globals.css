@@ -1083,6 +1083,9 @@ small {
   object-position: center 49%;
   display: block;
 }
+/* The Ekalon lockup is already cropped to the wordmark ratio, on white. */
+.brand-mark.brand-ekalon { background: #fff; }
+.brand-mark.brand-ekalon img { object-fit: contain; object-position: center; }
 .top-right {
   flex: 1;
   min-width: 0;
@@ -2289,6 +2292,29 @@ tbody tr:hover td {
   width: 100%;
   padding: var(--space-3) var(--space-1) 0;
 }
+.allocation-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 var(--space-6);
+}
+.allocation-split > div { min-width: 0; }
+.allocation-split > div + div { border-left: 1px solid var(--line); }
+@media (max-width: 960px) {
+  .allocation-split { grid-template-columns: minmax(0, 1fr); }
+  .allocation-split > div + div { border-left: 0; border-top: 1px solid var(--line); margin-top: var(--space-3); }
+}
+.allocation-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: var(--space-3) var(--gutter) 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.allocation-title small { color: var(--muted); font-weight: 400; }
+.allocation.assets { grid-template-columns: 1fr; }
+.allocation.assets span small { display: block; color: var(--muted); font-size: var(--text-xs); }
+.allocation.assets b small { color: var(--muted); font-weight: 400; margin-left: var(--space-2); }
 .allocation {
   padding: var(--space-3) var(--gutter) var(--gutter);
   display: grid;
@@ -3294,6 +3320,7 @@ pre {
 
 .day-pnl-toolbar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; padding: 12px var(--gutter) 0; }
 .day-pnl-accounts { flex: 1 1 auto; min-width: 0; }
+.day-pnl-assets { flex: 0 0 auto; min-width: 200px; }
 .day-pnl-accounts summary { display: inline-flex; align-items: center; height: var(--control-height-sm); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--text-sm); cursor: pointer; list-style: none; }
 .day-pnl-accounts summary::-webkit-details-marker { display: none; }
 .day-pnl-accounts summary::after { content: "▾"; margin-left: 6px; font-size: 10px; }

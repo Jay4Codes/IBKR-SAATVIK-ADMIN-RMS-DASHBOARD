@@ -20,6 +20,7 @@ import { SearchableSelect } from "./searchable-select";
 import { TableRowsSkeleton } from "./skeleton";
 import { PAGE_SIZE, TablePager, usePagedRows } from "./table-pager";
 import { useZone } from "./timezone";
+import { useAccountNames } from "./account-names";
 import { formatDay, formatTime } from "@/lib/timezone";
 
 export function money(value: Money | undefined, digits = 2) {
@@ -491,13 +492,14 @@ const expiryLabel = (value: string) =>
   /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}` : value;
 
 export function PositionsTable({ rows, loading }: { rows: Position[]; loading?: boolean }) {
+  const { name } = useAccountNames();
   return (
     <DataTable
       loading={loading}
       rows={rows}
       id={(r) => `${r.account_id}:${r.con_id}`}
       facets={[
-        { label: "Account", value: (r) => r.account_id },
+        { label: "Account", value: (r) => name(r.account_id) },
         { label: "Type", value: (r) => r.sec_type },
         { label: "Right", value: (r) => (r.right === "C" ? "Call" : r.right === "P" ? "Put" : "") },
         { label: "Expiry", value: (r) => (r.expiry ? expiryLabel(r.expiry) : "") },
@@ -514,7 +516,7 @@ export function PositionsTable({ rows, loading }: { rows: Position[]; loading?: 
             <span title={`conId ${r.con_id}`}>
               {positionLabel(r)}
               <small>
-                {r.account_id} · {r.currency}
+                {name(r.account_id)} · {r.currency}
               </small>
             </span>
           ),
@@ -563,6 +565,7 @@ export function PositionsTable({ rows, loading }: { rows: Position[]; loading?: 
 }
 export function OrdersTable({ rows, loading }: { rows: Order[]; loading?: boolean }) {
   const zone = useZone();
+  const { name } = useAccountNames();
   return (
     <DataTable
       loading={loading}
@@ -581,7 +584,7 @@ export function OrdersTable({ rows, loading }: { rows: Order[]; loading?: boolea
           render: (r) => (
             <>
               {r.symbol}
-              <small>{r.account_id}</small>
+              <small>{name(r.account_id)}</small>
             </>
           ),
           value: (r) => r.symbol,
@@ -759,7 +762,7 @@ export function ExecutionsTable({
     () => Object.fromEntries(accounts.map((a) => [a.account_id, accountLabel(a)])),
     [accounts],
   );
-  const account = useCallback((id: string) => labels[id] ?? id, [labels]);
+  const account = useCallback((id: string) => (labels[id] ? `${labels[id]} · ${id}` : id), [labels]);
   const rate = (fill: Fill) =>
     withCommissions ? netRate(fill) ?? Number(fill.lead.price) : Number(fill.lead.price);
   const day = useMemo(() => fillDay(zone), [zone]);

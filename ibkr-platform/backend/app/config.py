@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     massive_session_close: str = "16:00"
 
     snapshot_seconds: float = 300
+    # Newest entries kept in each tenant's event stream. Consumers persist events to Mongo as
+    # they go, so the stream is a buffer, not the record; unbounded it filled the disk twice.
+    event_stream_maxlen: int = 1_000_000
     snapshot_retention_days: int = 1095
     ibkr_flex_token: str = ""
     ibkr_flex_query_id: str = ""

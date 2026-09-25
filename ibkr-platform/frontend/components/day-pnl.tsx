@@ -11,7 +11,9 @@ import { Chart } from "./chart";
 import { SelectionActions, useSelection } from "./selection";
 import { money } from "./tables";
 import { useZone } from "./timezone";
+import { useAccountNames } from "./account-names";
 import { ChartSkeleton } from "./skeleton";
+import { SearchableMultiSelect } from "./searchable-multi-select";
 
 type Mode = "combined" | "accounts";
 type Standing = { id: string; value: number | null; at: string | null; stale: boolean };
@@ -31,6 +33,7 @@ const compact = (v: number) => {
 
 export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accounts: string[] }) {
   const zone = useZone();
+  const { name } = useAccountNames();
   const choice = useSelection(accounts);
   const scope = accountId ? [accountId] : choice.selected;
   const date = todayIn(zone);
@@ -42,21 +45,33 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
   const periodDays = PERIODS.find((p) => p.id === period)?.days ?? 0;
   const from = daily ? sinceDays(periodDays) : date;
 
+  const assetList = useQuery({
+    queryKey: ["pnl-assets", scope.join(",")],
+    queryFn: () => api<string[]>(`/history/assets?accounts=${encodeURIComponent(scope.join(","))}`),
+    enabled: scope.length > 0,
+    staleTime: 60_000,
+  });
+  const assetChoice = useSelection(assetList.data ?? []);
+  /** Every asset ticked means the broker's own account figure; a subset sums those assets' legs. */
+  const assetFilter = assetChoice.isAll ? "" : assetChoice.selected.join(",");
+  const noAssets = assetChoice.isNone;
+  const assetParam = assetFilter ? `&assets=${encodeURIComponent(assetFilter)}` : "";
+
   const intraday = useQuery({
-    queryKey: ["intraday", scope.join(","), date],
+    queryKey: ["intraday", scope.join(","), date, assetFilter],
     queryFn: () =>
       api<IntradayResponse>(
-        `/history/intraday?accounts=${encodeURIComponent(scope.join(","))}&date=${date}`,
+        `/history/intraday?accounts=${encodeURIComponent(scope.join(","))}&date=${date}${assetParam}`,
       ),
-    enabled: scope.length > 0 && !daily,
+    enabled: scope.length > 0 && !daily && !noAssets,
   });
   const history = useQuery({
-    queryKey: ["daily-pnl", scope.join(","), from],
+    queryKey: ["daily-pnl", scope.join(","), from, assetFilter],
     queryFn: () =>
       api<DailyPnlResponse>(
-        `/history/pnl?accounts=${encodeURIComponent(scope.join(","))}&since=${from}`,
+        `/history/pnl?accounts=${encodeURIComponent(scope.join(","))}&since=${from}${assetParam}`,
       ),
-    enabled: scope.length > 0 && daily,
+    enabled: scope.length > 0 && daily && !noAssets,
   });
 
   const series = intraday.data?.series ?? [];
@@ -175,22 +190,36 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
               {accounts.map((id) => (
                 <label key={id}>
                   <input type="checkbox" checked={choice.has(id)} onChange={() => choice.toggle(id)} />
-                  {id}
+                  {name(id)}
                 </label>
               ))}
             </fieldset>
           </details>
         )}
+        {assetChoice.options.length > 0 && (
+          <SearchableMultiSelect
+            label="Assets"
+            noun="assets"
+            selection={assetChoice}
+            searchFrom={2}
+            className="day-pnl-assets"
+          />
+        )}
       </div>
 
       {!scope.length ? (
         <p role="status" className="footnote">No accounts selected. Open Accounts above and tick one to draw its P&amp;L.</p>
+      ) : noAssets ? (
+        <p role="status" className="footnote">No assets selected. Open Assets above and tick one to draw its P&amp;L.</p>
       ) : daily && history.isPending ? (
         <ChartSkeleton label={`Loading ${periodLabel.toLowerCase()} P&L`} height={300} />
       ) : daily && history.isError ? (
         <p role="alert" className="footnote">{periodLabel} P&amp;L could not be loaded.</p>
       ) : daily && !days.length ? (
-        <p className="footnote">No trading days recorded since {from} for these accounts.</p>
+        <p className="footnote">
+          No trading days recorded since {from} for{" "}
+          {assetFilter ? `${assetChoice.selected.join(", ")} in these accounts` : "these accounts"}.
+        </p>
       ) : daily ? (
         <div className={desk ? "day-pnl-body" : undefined}>
           <Chart
@@ -211,7 +240,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                     const color = id === focus ? t.text : colorOf(id);
                     const dim = focus !== null && id !== focus;
                     return {
-                      name: id,
+                      name: name(id),
                       type: "line",
                       showSymbol: days.length < 40,
                       z: id === focus ? 5 : color ? 3 : 2,
@@ -309,7 +338,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                           }}
                         >
                           <i style={{ background: color ?? "transparent", borderColor: color ?? "var(--line-strong)" }} />
-                          <span className="id">{s.id}</span>
+                          <span className="id" title={name(s.id)}>{name(s.id)}</span>
                           <span className={`bar ${s.value! < 0 ? "neg" : "pos"}`}>
                             <span style={{ width }} />
                           </span>
@@ -329,6 +358,11 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
         <ChartSkeleton label="Loading today's P&L" height={300} />
       ) : intraday.isError ? (
         <p role="alert" className="footnote">Day P&amp;L could not be loaded.</p>
+      ) : assetFilter && stamps.length < 2 ? (
+        <p className="footnote">
+          Not enough points yet for {assetChoice.selected.join(", ")} today. Per-asset P&amp;L is
+          sampled every few minutes, so the curve fills in as the session runs.
+        </p>
       ) : stamps.length < 2 ? (
         <p className="footnote">
           Not enough points yet for today. The worker records one every few minutes, so the curve
@@ -375,7 +409,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
               const lines = showCombined || !desk
                 ? [
                     {
-                      name: showCombined ? "Combined" : perAccount[0],
+                      name: showCombined ? "Combined" : name(perAccount[0]),
                       type: "line",
                       showSymbol: false,
                       lineStyle: { width: 2.5, color: main!.gradient },
@@ -391,7 +425,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                       const color = id === focus ? t.text : colorOf(id);
                       const dim = focus !== null && id !== focus;
                       return {
-                        name: id,
+                        name: name(id),
                         type: "line",
                         showSymbol: false,
                         z: id === focus ? 5 : color ? 3 : 2,
@@ -497,7 +531,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
                           }}
                         >
                           <i style={{ background: color ?? "transparent", borderColor: color ?? "var(--line-strong)" }} />
-                          <span className="id">{s.id}</span>
+                          <span className="id" title={name(s.id)}>{name(s.id)}</span>
                           <span className={`bar ${s.value! < 0 ? "neg" : "pos"}`}>
                             <span style={{ width }} />
                           </span>
@@ -512,12 +546,20 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
               </ol>
               {unreported.size > 0 && (
                 <p className="day-pnl-missing">
-                  No figure from the broker today: {[...unreported].join(", ")}
+                  No figure from the broker today: {[...unreported].map(name).join(", ")}
                 </p>
               )}
             </div>
           )}
         </div>
+      )}
+      {assetFilter && (
+        <p className="footnote">
+          Showing {assetChoice.selected.join(", ")} only: the sum of IBKR&apos;s day P&amp;L on each
+          open leg of those assets, plus legs closed earlier in the day. With every asset ticked the
+          chart uses the broker&apos;s account-level figure instead, which also includes cash, FX and
+          fees, so the two can differ slightly.
+        </p>
       )}
       {daily ? (
         <p className="footnote">

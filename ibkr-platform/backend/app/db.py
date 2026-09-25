@@ -53,6 +53,9 @@ async def _create_indexes(db):
         [("tenant_id", ASCENDING), ("account_id", ASCENDING), ("report_date", ASCENDING)]
     )
     await db.account_snapshots.create_index([("tenant_id", ASCENDING), ("report_date", ASCENDING)])
+    await db.asset_pnl_snapshots.create_index(
+        [("tenant_id", ASCENDING), ("report_date", ASCENDING), ("account_id", ASCENDING), ("symbol", ASCENDING)]
+    )
     await db.visibility_tests.create_index([("tenant_id", ASCENDING), ("checked_at", DESCENDING)])
     await db.telegram_links.create_index("chat_id", unique=True)
     await db.alerts.create_index([("tenant_id", ASCENDING), ("timestamp", DESCENDING)])

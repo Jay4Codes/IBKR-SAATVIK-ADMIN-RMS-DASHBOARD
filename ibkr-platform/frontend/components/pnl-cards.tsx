@@ -8,6 +8,7 @@ import { TablePager, usePagedRows } from "./table-pager";
 import { SearchableMultiSelect } from "./searchable-multi-select";
 import { Selection, useSelection } from "./selection";
 import { LinesSkeleton } from "./skeleton";
+import { useAccountNames } from "./account-names";
 
 export function chosen(choice: Selection, fallback: string): boolean {
   if (choice.isAll) return true;
@@ -16,6 +17,7 @@ export function chosen(choice: Selection, fallback: string): boolean {
 }
 
 export function PnlCards({ accountId }: { accountId?: string }) {
+  const { name } = useAccountNames();
   const scope = accountId ? `&accounts=${encodeURIComponent(accountId)}` : "";
   const realized = useQuery({
     queryKey: ["realized", "cards", accountId ?? "desk"],
@@ -59,7 +61,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     const fill = fills.find(row => row.execution_id === id);
     const account = leg?.account_id || fill?.account_id;
     const symbol = leg?.symbol;
-    return [account, symbol].filter(Boolean).join(" · ");
+    return [account ? name(account) : "", symbol].filter(Boolean).join(" · ");
   };
   const bookedFor = (account: string) =>
     shownLegs.filter(leg => leg.account_id === account).reduce((sum, leg) => sum + Number(leg.realized_pnl || 0), 0);
@@ -78,7 +80,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
           {(accountOptions.length > 1 || idOptions.length > 1) && (
             <div className="pnl-filters">
               {!accountId && accountOptions.length > 1 && (
-                <SearchableMultiSelect label="Accounts" noun="accounts" selection={accountChoice} searchFrom={2} />
+                <SearchableMultiSelect label="Accounts" noun="accounts" selection={accountChoice} searchFrom={2} describe={name} />
               )}
               {idOptions.length > 1 && (
                 <SearchableMultiSelect
@@ -132,7 +134,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                     const spentAccount = spentFor(account);
                     return (
                       <tr key={account}>
-                        <th>{account}</th>
+                        <th>{name(account)}</th>
                         <td><Amount value={String(bookedAccount)} /></td>
                         <td><Amount value={String(-spentAccount)} /></td>
                         <td><Amount value={String(bookedAccount - spentAccount)} /></td>

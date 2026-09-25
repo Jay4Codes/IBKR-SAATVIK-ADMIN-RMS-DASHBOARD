@@ -32,6 +32,7 @@ RENEW = "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire'
 RELEASE = "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end"
 
 SUPERVISE_INTERVAL = 10.0
+SESSION_RESTART_BACKOFF = 60.0
 LEASE_SECONDS = 20
 
 BROKER_NOTICES = (2104, 2106, 2107, 2108, 2119, 2150, 2158)
@@ -39,6 +40,7 @@ BROKER_FARM_FAULTS = (2103, 2105, 2157)
 BROKER_FARM_RECOVERED = (2104, 2106, 2119, 2158)
 BROKER_FATAL = (1100, 1101, 1300, 326, 502, 504)
 BROKER_RESTORED = 1102
+BROKER_BAD_REQUEST = 321
 BROKER_MARKET_DATA = (354, 10089, 10090, 10091, 10167, 10168, 10197)
 
 def backoff(attempt):
@@ -287,6 +289,21 @@ class AlertDispatcher:
         raw = await self.redis.hvals(self.keys.account_rows(account_id, "positions"))
         return [json.loads(row) for row in raw]
 
+    async def account_name(self, account_id: str | None) -> str:
+        """The account as the desk knows it: its label and ID, or the ID alone."""
+        if not account_id:
+            return ""
+        key = f"account:{account_id}"
+        if key not in self.names:
+            label = ""
+            if self.db is not None:
+                doc = await self.db.ibkr_accounts.find_one(
+                    {"tenant_id": self.tenant_id, "account_id": account_id}, {"label": 1}
+                )
+                label = (doc or {}).get("label") or ""
+            self.names[key] = alerts.account_display(account_id, label)
+        return self.names[key]
+
     async def label_for(self, connection_id: str) -> str:
 
         if not connection_id:
@@ -310,7 +327,10 @@ class AlertDispatcher:
             execution_id = str(data.get("execution_id") or event.get("event_id") or "")
             if execution_id and not await self.once(f"fill:{execution_id}"):
                 return
-            await self.deliver(client, "fills", account, alerts.fill_message(event))
+            await self.deliver(
+                client, "fills", account,
+                alerts.fill_message(event, await self.account_name(account)),
+            )
             return
 
         if kind.startswith("gateway."):
@@ -602,7 +622,7 @@ class AlertDispatcher:
             "",
         )
         text = alerts.risk_message(
-            account_id, worst, before,
+            await self.account_name(account_id), worst, before,
             symbol=symbol,
             spot=spot,
             spot_before=spot_before,
@@ -726,6 +746,10 @@ class GatewaySession(Session):
         self.accounts = {}
         self.positions = {}
         self.pnl_subscriptions = set()
+        # Day P&L of legs closed earlier today, per (account, symbol): IB stops reporting a leg
+        # once it is flat, but what it made or lost today still belongs to that asset's day.
+        self.closed_day_pnl: dict[tuple[str, str], Decimal] = {}
+        self.closed_day: str = ""
         self.execution_versions = {}
         self.order_versions = {}
         self.account_filter = (connection.get("account_filter") or "").strip()
@@ -823,6 +847,8 @@ class GatewaySession(Session):
                 update={"quantity": item.quantity, "average_cost": item.average_cost, "updated_at": now()}
             )
         item.quantity_changed = previous is None or previous.quantity != item.quantity
+        if item.quantity == 0 and previous is not None and previous.quantity != 0 and previous.day_pnl is not None:
+            self.carry_closed_day_pnl(item.account_id, item.symbol, previous.day_pnl)
         item.underlying_price = self.underlying_of(item)
         item.underlying_source = self.underlying_source_of(item)
         item.underlying_prev_close = self.previous_close_of(item)
@@ -852,6 +878,7 @@ class GatewaySession(Session):
                 "market_value": norm.decimal(value.value),
                 "unrealized_pnl": norm.decimal(value.unrealizedPnL),
                 "realized_pnl": norm.decimal(value.realizedPnL),
+                "day_pnl": norm.decimal(value.dailyPnL),
                 "updated_at": now(),
             }
         )
@@ -859,6 +886,34 @@ class GatewaySession(Session):
             item.market_price = item.market_value / (item.quantity * (item.multiplier or Decimal(1)))
         self.positions[(value.account, value.conId)] = item
         self.enqueue("position.closed" if item.quantity == 0 else "position.updated", item)
+
+    def carry_closed_day_pnl(self, account_id: str, symbol: str, amount: Decimal):
+        today = now().date().isoformat()
+        if self.closed_day != today:
+            self.closed_day_pnl.clear()
+            self.closed_day = today
+        key = (account_id, symbol)
+        self.closed_day_pnl[key] = self.closed_day_pnl.get(key, Decimal(0)) + amount
+
+    def asset_day_pnl(self, report_date: str) -> dict[tuple[str, str], dict]:
+        """Today's P&L per (account, asset): open legs as IB reports them, plus legs closed today."""
+        totals: dict[tuple[str, str], dict] = {}
+        for item in self.positions.values():
+            if item.quantity == 0 or item.day_pnl is None:
+                continue
+            row = totals.setdefault(
+                (item.account_id, item.symbol),
+                {"day_pnl": Decimal(0), "legs": 0, "currency": item.currency},
+            )
+            row["day_pnl"] += item.day_pnl
+            row["legs"] += 1
+        if self.closed_day == report_date:
+            for (account_id, symbol), amount in self.closed_day_pnl.items():
+                row = totals.setdefault(
+                    (account_id, symbol), {"day_pnl": Decimal(0), "legs": 0, "currency": ""}
+                )
+                row["day_pnl"] += amount
+        return totals
 
     def account_pnl(self, value):
         if value.account not in self.accounts:
@@ -905,9 +960,14 @@ class GatewaySession(Session):
             stamped = self.previous_closes.get(key)
             if stamped and stamped[0] == today:
                 continue
+            if key in self.market_denied:
+                continue
             contract = self.market_subscriptions.get(key) or self.contracts.get(con_id)
             if contract is None:
                 continue
+            if not getattr(contract, "exchange", ""):
+                contract = copy.copy(contract)
+                contract.exchange = "SMART"
             try:
                 bars = await asyncio.wait_for(
                     self.ib.reqHistoricalDataAsync(
@@ -1101,6 +1161,31 @@ class GatewaySession(Session):
                 except Exception:
                     log.exception("snapshot.write_failed connection=%s account=%s",
                                   self.label, account.account_id)
+            await self.snapshot_assets(moment, report_date, bucket)
+
+    async def snapshot_assets(self, moment, report_date: str, bucket: str):
+        for (account_id, symbol), row in self.asset_day_pnl(report_date).items():
+            currency = row["currency"] or getattr(self.accounts.get(account_id), "currency", "") or ""
+            try:
+                await self.db.asset_pnl_snapshots.update_one(
+                    {"_id": f"{snapshot_id(self.tenant_id, account_id, report_date, bucket)}:{symbol}"},
+                    {
+                        "$set": {
+                            "tenant_id": self.tenant_id,
+                            "account_id": account_id,
+                            "symbol": symbol,
+                            "report_date": report_date,
+                            "taken_at": moment.isoformat(),
+                            "currency": currency,
+                            "day_pnl": str(row["day_pnl"]),
+                            "legs": row["legs"],
+                        }
+                    },
+                    upsert=True,
+                )
+            except Exception:
+                log.exception("snapshot.asset_write_failed connection=%s account=%s symbol=%s",
+                              self.label, account_id, symbol)
 
     async def subscribe_underlyings(self):
         for key, con_id in list(self.market_wanted.items()):
@@ -1267,6 +1352,12 @@ class GatewaySession(Session):
         if code == BROKER_RESTORED:
             log.info("broker.restored connection=%s code=%s message=%s", self.label, code, message)
             self.farm_recovered()
+            return
+        if code == BROKER_BAD_REQUEST and req_id not in (None, -1):
+            log.warning(
+                "broker.request_rejected connection=%s code=%s request=%s message=%s",
+                self.label, code, req_id, message,
+            )
             return
         log.error(
             "broker.error connection=%s code=%s request=%s message=%s", self.label, code, req_id, message
@@ -1700,6 +1791,7 @@ class Supervisor:
         self.sessions: dict[str, tuple[Session, asyncio.Task]] = {}
         self.consumers: dict[str, tuple[asyncio.Event, asyncio.Task]] = {}
         self.dispatchers: dict[str, tuple[asyncio.Event, asyncio.Task]] = {}
+        self.restart_after: dict[str, float] = {}
 
     def fingerprint(self, doc: dict) -> str:
         return json.dumps(
@@ -1726,7 +1818,24 @@ class Supervisor:
         for connection_id, (session, task) in list(self.sessions.items()):
             doc = wanted.get(connection_id)
             if doc is None or self.fingerprint(doc) != session.fingerprint or task.done():
-                log.info("supervisor.stopping connection=%s", session.label)
+                if task.done() and not task.cancelled() and task.exception() is not None:
+                    # A session that dies on its own is retried after a backoff, and the
+                    # reason is logged, so a broken gateway does not flood the log with a
+                    # silent stop/start pair every SUPERVISE_INTERVAL.
+                    log.warning(
+                        "supervisor.session_crashed connection=%s retry_in=%ss",
+                        session.label, int(SESSION_RESTART_BACKOFF),
+                        exc_info=task.exception(),
+                    )
+                    self.restart_after[connection_id] = time.monotonic() + SESSION_RESTART_BACKOFF
+                elif task.done():
+                    log.warning(
+                        "supervisor.session_exited connection=%s retry_in=%ss",
+                        session.label, int(SESSION_RESTART_BACKOFF),
+                    )
+                    self.restart_after[connection_id] = time.monotonic() + SESSION_RESTART_BACKOFF
+                else:
+                    log.info("supervisor.stopping connection=%s", session.label)
                 session.stop.set()
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -1735,6 +1844,9 @@ class Supervisor:
         for connection_id, doc in wanted.items():
             if connection_id in self.sessions:
                 continue
+            if time.monotonic() < self.restart_after.get(connection_id, 0.0):
+                continue
+            self.restart_after.pop(connection_id, None)
             session = build_session(self.redis, self.db, doc)
             if session is None:
                 continue

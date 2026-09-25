@@ -6,8 +6,10 @@ import { CommissionSummary } from "@/lib/types";
 import { money } from "./tables";
 import { TablePager, usePagedRows } from "./table-pager";
 import { LinesSkeleton } from "./skeleton";
+import { useAccountNames } from "./account-names";
 
 export function CommissionsPanel({ accountId }: { accountId?: string }) {
+  const { name } = useAccountNames();
   const path = accountId ? `/accounts/${accountId}/commissions` : "/commissions";
   const commissions = useQuery({
     queryKey: ["commissions", accountId ?? "desk"],
@@ -39,7 +41,7 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
               <div>
                 <label>Accounts charged</label>
                 <strong>{byAccount.length}</strong>
-                <small>Largest: {byAccount[0].account_id} at {money(byAccount[0].commission)}</small>
+                <small>Largest: {name(byAccount[0].account_id)} at {money(byAccount[0].commission)}</small>
               </div>
             )}
             {recentDays.length > 0 && (
@@ -64,7 +66,7 @@ export function CommissionsPanel({ accountId }: { accountId?: string }) {
                 <tbody>
                   {accountPage.rows.map((row) => (
                     <tr key={row.account_id}>
-                      <th>{row.account_id}</th>
+                      <th>{name(row.account_id)}</th>
                       <td>{money(row.commission)}</td>
                       <td>{total ? `${((Number(row.commission) / total) * 100).toFixed(1)}%` : "—"}</td>
                     </tr>
