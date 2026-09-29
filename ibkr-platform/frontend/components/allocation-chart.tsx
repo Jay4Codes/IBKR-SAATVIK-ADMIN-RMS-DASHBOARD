@@ -102,7 +102,6 @@ const num = (value: string | null | undefined) => (value == null || value === ""
 
 export type AssetBucket = { label: string; value: number; long: number; short: number; count: number; note?: string };
 
-/** One row per asset: each stock or fund by ticker, each option underlying as "<name> options", then cash. */
 export function assetBuckets(accounts: Account[], positions: Position[]): { buckets: AssetBucket[]; unpriced: string[]; total: number } {
   const cash = accounts.reduce((sum, a) => sum + (num(a.cash) ?? 0), 0);
   const total = accounts.reduce((sum, a) => sum + (num(a.net_liquidation) ?? 0), 0);

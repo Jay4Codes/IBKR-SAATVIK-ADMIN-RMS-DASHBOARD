@@ -14,7 +14,13 @@ export type Selection = {
   clear: () => void;
 };
 
-/** Closed-dropdown text: the chosen labels, not "2 of 5". */
+export function summarizeSelection(selection: Selection, format: (value: string) => string = value => value): string {
+  if (selection.isNone) return "None";
+  if (selection.selected.length === 1) return format(selection.selected[0]);
+  if (selection.isAll) return "All";
+  return `${selection.selected.length} of ${selection.options.length}`;
+}
+
 export function summarizeChoices(values: string[], limit = 3): string {
   if (!values.length) return "None";
   if (values.length <= limit) return values.join(", ");
@@ -33,7 +39,7 @@ export function useSelection(options: string[]): Selection {
     selected,
     isAll,
     isNone,
-    summary: isAll ? `All ${options.length}` : isNone ? "None" : `${selected.length} of ${options.length}`,
+    summary: isAll ? "All" : isNone ? "None" : `${selected.length} of ${options.length}`,
     has: value => selected.includes(value),
     toggle: value => {
       const next = selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value];
@@ -44,7 +50,6 @@ export function useSelection(options: string[]): Selection {
   };
 }
 
-/** Each list shows only values that still exist under the other lists' current picks. */
 export function useCrossSelection<T>(
   items: T[],
   dims: Record<string, (item: T) => string>,
@@ -70,7 +75,7 @@ export function useCrossSelection<T>(
       selected,
       isAll,
       isNone,
-      summary: isAll ? `All ${options.length}` : isNone ? "None" : `${selected.length} of ${options.length}`,
+      summary: isAll ? "All" : isNone ? "None" : `${selected.length} of ${options.length}`,
       has: value => selected.includes(value),
       toggle: value => {
         const next = selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value];

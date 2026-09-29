@@ -2,7 +2,11 @@ import { Position } from "./types";
 
 export type Assumption = { spot: number; volatility: number; dividend: number; beta?: number };
 export const ownShock = (assumption: Assumption, shock: number) => shock * (assumption.beta ?? 1);
-export type RiskLeg = { position: Position; quantity: number; cost: number; multiplier: number; strike: number; days: number };
+export type RiskLeg = {
+  position: Position; quantity: number; cost: number; multiplier: number; strike: number; days: number;
+  marked: number | null;
+  anchorSpot: number | null;
+};
 export const RMS_SHOCKS = [-10, -5, -3, -1, 1, 3, 5, 10] as const;
 export const underlyingKey = (p: Position) => `${p.currency}:${p.symbol}`;
 export function numeric(value: string | null | undefined): number | null {
@@ -42,24 +46,43 @@ export function expiryDate(expiry: string): string {
 const EXCHANGE_ZONE = "America/New_York";
 const EXPIRY_CLOSE_HOUR = 16;
 
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+function zoneFormatter(zone: string): Intl.DateTimeFormat {
+  let formatter = zoneFormatters.get(zone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+    zoneFormatters.set(zone, formatter);
+  }
+  return formatter;
+}
+
 function zoneOffset(instant: number, zone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: zone, hour12: false,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).formatToParts(instant);
+  const parts = zoneFormatter(zone).formatToParts(instant);
   const at = Object.fromEntries(parts.map(p => [p.type, p.value])) as Record<string, string>;
   const asUtc = Date.UTC(+at.year, +at.month - 1, +at.day, +at.hour % 24, +at.minute, +at.second);
   return asUtc - instant;
 }
 
+const expiryInstants = new Map<string, number>();
+
 export function expiryInstant(expiry: string): number {
+  const cached = expiryInstants.get(expiry);
+  if (cached !== undefined) return cached;
   const date = expiryDate(expiry);
-  if (!date) return NaN;
-  const naive = Date.parse(`${date}T${String(EXPIRY_CLOSE_HOUR).padStart(2, "0")}:00:00Z`);
-  if (!Number.isFinite(naive)) return NaN;
-  const once = naive - zoneOffset(naive, EXCHANGE_ZONE);
-  return naive - zoneOffset(once, EXCHANGE_ZONE);
+  let instant = NaN;
+  if (date) {
+    const naive = Date.parse(`${date}T${String(EXPIRY_CLOSE_HOUR).padStart(2, "0")}:00:00Z`);
+    if (Number.isFinite(naive)) {
+      const once = naive - zoneOffset(naive, EXCHANGE_ZONE);
+      instant = naive - zoneOffset(once, EXCHANGE_ZONE);
+    }
+  }
+  expiryInstants.set(expiry, instant);
+  return instant;
 }
 
 export function daysToExpiry(expiry: string, at: number): number {
@@ -84,8 +107,14 @@ export function prepareLegs(positions: Position[], at: number) {
     else if (quantity === null || cost === null || cost < 0) reason = "Invalid quantity or average cost";
     else if (p.sec_type === "OPT" && (!multiplier || multiplier <= 0 || strike === null || strike <= 0 || !["C", "P"].includes(p.right))) reason = "Missing option terms or multiplier";
     else if (p.sec_type === "OPT" && (!validDate || days < 0)) reason = "Missing, invalid or past expiry";
-    if (reason) excluded.push({ position: p, reason });
-    else legs.push({ position: p, quantity: quantity!, cost: cost!, multiplier: multiplier!, strike: strike ?? 0, days: p.sec_type === "OPT" ? days : Infinity });
+    if (reason) { excluded.push({ position: p, reason }); continue; }
+    const price = numeric(p.market_price);
+    const marked = numeric(p.unrealized_pnl) ?? (price === null ? null : quantity! * (price * multiplier! - cost!));
+    const anchorSpot = p.sec_type === "STK" ? price : numeric(p.underlying_price);
+    legs.push({
+      position: p, quantity: quantity!, cost: cost!, multiplier: multiplier!, strike: strike ?? 0,
+      days: p.sec_type === "OPT" ? days : Infinity, marked, anchorSpot,
+    });
   }
   return { legs, excluded };
 }
@@ -208,28 +237,30 @@ export function validAssumption(a: Assumption | undefined): a is Assumption {
   return !!a && Number.isFinite(a.spot) && a.spot > 0 && Number.isFinite(a.volatility) && a.volatility >= 0 && a.volatility <= 5 && Number.isFinite(a.dividend) && a.dividend >= 0 && a.dividend <= 1;
 }
 
-export function scenarioPnl(leg: RiskLeg, assumption: Assumption, shock: number, horizon: number, rate: number, terminal: boolean) {
+export type LegModel = { gap: number; remaining: number } | null;
+
+export function modelLeg(leg: RiskLeg, assumption: Assumption, horizon: number, rate: number): LegModel {
+  if (leg.marked === null) return null;
+  const anchorSpot = leg.anchorSpot ?? assumption.spot;
+  const anchorValue = leg.position.sec_type === "STK"
+    ? anchorSpot
+    : optionValue(anchorSpot, leg.strike, leg.position.right, leg.days / 365, assumption.volatility, rate, assumption.dividend);
+  const remaining = leg.position.sec_type === "OPT"
+    ? (leg.days > 0 ? Math.max(0, leg.days - horizon) / leg.days : 0)
+    : 1;
+  return { gap: leg.marked - leg.quantity * (anchorValue * leg.multiplier - leg.cost), remaining };
+}
+
+export function scenarioPnl(
+  leg: RiskLeg, assumption: Assumption, shock: number, horizon: number, rate: number, terminal: boolean,
+  model?: LegModel,
+) {
   const spot = assumption.spot * (1 + ownShock(assumption, shock) / 100);
   const value = leg.position.sec_type === "STK" ? spot : optionValue(spot, leg.strike, leg.position.right, terminal ? 0 : Math.max(0, leg.days - horizon) / 365, assumption.volatility, rate, assumption.dividend);
   const raw = leg.quantity * (value * leg.multiplier - leg.cost);
   if (terminal) return raw;
-
-  const marked = numeric(leg.position.unrealized_pnl) ?? (() => {
-    const price = numeric(leg.position.market_price);
-    return price === null ? null : leg.quantity * (price * leg.multiplier - leg.cost);
-  })();
-  if (marked === null) return raw;
-  const anchorSpot = leg.position.sec_type === "STK"
-    ? numeric(leg.position.market_price) ?? assumption.spot
-    : numeric(leg.position.underlying_price) ?? assumption.spot;
-  const anchorValue = leg.position.sec_type === "STK"
-    ? anchorSpot
-    : optionValue(anchorSpot, leg.strike, leg.position.right, leg.days / 365, assumption.volatility, rate, assumption.dividend);
-  const rawAtAnchor = leg.quantity * (anchorValue * leg.multiplier - leg.cost);
-  const remaining = leg.position.sec_type === "OPT"
-    ? (leg.days > 0 ? Math.max(0, leg.days - horizon) / leg.days : 0)
-    : 1;
-  return raw + (marked - rawAtAnchor) * remaining;
+  const fitted = model === undefined ? modelLeg(leg, assumption, horizon, rate) : model;
+  return fitted === null ? raw : raw + fitted.gap * fitted.remaining;
 }
 
 export function signedLevels(magnitudes: readonly number[]): number[] {
@@ -261,14 +292,17 @@ export function buildCurves(
       if (shock >= -Math.min(range, 100) && shock <= range) shocks.add(shock);
     }
   }
+  const prepared = legs.map(leg => {
+    const a = assumptions[underlyingKey(leg.position)];
+    return { leg, a, model: modelLeg(leg, a, horizon, rate) };
+  });
   return [...shocks].sort((a, b) => a - b).map((shock) => {
     let terminal = 0, modeled = 0;
     const accounts: Record<string, number> = {};
-    for (const leg of legs) {
-      const a = assumptions[underlyingKey(leg.position)];
+    for (const { leg, a, model } of prepared) {
       const pnl = scenarioPnl(leg, a, shock, horizon, rate, true);
       terminal += pnl;
-      modeled += scenarioPnl(leg, a, shock, horizon, rate, false);
+      modeled += scenarioPnl(leg, a, shock, horizon, rate, false, model);
       accounts[leg.position.account_id] = (accounts[leg.position.account_id] ?? 0) + pnl;
     }
     return { shock, terminal, modeled, accounts };
@@ -312,15 +346,18 @@ export function buildPriceCurve(
   }
   
   const ownBeta = assumptions[key].beta ?? 1;
+  const prepared = legs.map(leg => {
+    const a = assumptions[underlyingKey(leg.position)];
+    return { leg, a, model: modelLeg(leg, a, horizon, rate) };
+  });
   return [...prices].sort((a, b) => a - b).map(price => {
     const shock = (price / spot - 1) * 100 / (ownBeta > 0 ? ownBeta : 1);
     let terminal = 0, modeled = 0;
     const accounts: Record<string, number> = {};
-    for (const leg of legs) {
-      const a = assumptions[underlyingKey(leg.position)];
+    for (const { leg, a, model } of prepared) {
       const pnl = scenarioPnl(leg, a, shock, horizon, rate, true);
       terminal += pnl;
-      modeled += scenarioPnl(leg, a, shock, horizon, rate, false);
+      modeled += scenarioPnl(leg, a, shock, horizon, rate, false, model);
       accounts[leg.position.account_id] = (accounts[leg.position.account_id] ?? 0) + pnl;
     }
     return { price, shock, terminal, modeled, accounts };
@@ -367,10 +404,11 @@ export function strategyStats(
 ): StrategyStats {
   const netCredit = -legs.reduce((sum, leg) => sum + leg.quantity * leg.cost, 0);
   const values = (wide.length ? wide : points).map(p => p.terminal + offset);
-  const edge = (a: PricePoint | undefined, b: PricePoint | undefined) =>
-    a && b ? b.terminal - a.terminal : 0;
-  const rising = edge(wide.at(-2), wide.at(-1));
-  const falling = edge(wide[1], wide[0]);
+  const rising = wide.length > 1 ? wide[wide.length - 1].terminal - wide[wide.length - 2].terminal : 0;
+  if (wide.length > 1 && wide[0].price > 0 && wide[1].price > wide[0].price) {
+    const slope = (wide[1].terminal - wide[0].terminal) / (wide[1].price - wide[0].price);
+    values.push(wide[0].terminal - slope * wide[0].price + offset);
+  }
   const tolerance = Math.max(1, Math.abs(netCredit) * 1e-6);
   const crossings = breakevens(points, offset);
   let chance: number | null = null;
@@ -389,7 +427,7 @@ export function strategyStats(
     maxProfit: values.length ? Math.max(...values) : 0,
     maxLoss: values.length ? Math.min(...values) : 0,
     uncappedUpside: rising > tolerance,
-    uncappedDownside: falling > tolerance,
+    uncappedDownside: rising < -tolerance,
     breakevens: crossings,
     chanceOfProfit: chance,
   };

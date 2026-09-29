@@ -53,6 +53,13 @@ export function PnlCards({ accountId }: { accountId?: string }) {
     ? shownFills.reduce((sum, fill) => sum + Number(fill.commission || 0), 0)
     : Number(commissions.data?.total ?? 0);
   const closings = shownLegs.filter(leg => Number(leg.realized_pnl || 0) !== 0).length;
+  const contract = (leg: (typeof shownLegs)[number]) => `${leg.account_id}|${(leg.symbol ?? "").replace(/\s+/g, "")}`;
+  const closedContracts = new Set(shownLegs.filter(leg => Number(leg.realized_pnl || 0) !== 0).map(contract));
+  const closedSpentFor = (account?: string) =>
+    shownLegs
+      .filter(leg => (!account || leg.account_id === account) && closedContracts.has(contract(leg)))
+      .reduce((sum, leg) => sum + Math.abs(Number(leg.commission || 0)), 0);
+  const closedSpent = closedSpentFor();
   const fillCount = fills.length ? shownFills.length : (commissions.data?.count ?? 0);
   const pending = realized.isPending || commissions.isPending;
 
@@ -101,18 +108,18 @@ export function PnlCards({ accountId }: { accountId?: string }) {
           <div className="balance-grid">
             <div>
               <label>Booked P&amp;L</label>
-              <small>Realised on legs that have been closed, gross of commission.</small>
+              <small>Realised on closed legs, after commission, exactly as IBKR reports it.</small>
               <strong><Amount value={String(booked)} /></strong>
             </div>
             <div>
-              <label>Commissions</label>
-              <small>Every fill the broker has reported a commission for.</small>
+              <label>Commissions paid</label>
+              <small>On every reported fill. Already taken out of the P&amp;L, shown for reference.</small>
               <strong><Amount value={String(-spent)} /></strong>
             </div>
             <div>
-              <label>Net of commission</label>
-              <small>Booked P&amp;L less what was paid to book it.</small>
-              <strong><Amount value={String(booked - spent)} /></strong>
+              <label>Booked before commission</label>
+              <small>Booked P&amp;L with the commissions on those closed legs added back.</small>
+              <strong><Amount value={String(booked + closedSpent)} /></strong>
             </div>
             <div>
               <label>Closing fills</label>
@@ -128,8 +135,8 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                   <tr>
                     <th>Account</th>
                     <th>Booked P&amp;L</th>
-                    <th>Commissions</th>
-                    <th>Net of commission</th>
+                    <th>Commissions paid</th>
+                    <th>Booked before commission</th>
                     <th>Closing fills</th>
                   </tr>
                 </thead>
@@ -142,7 +149,7 @@ export function PnlCards({ accountId }: { accountId?: string }) {
                         <th>{name(account)}</th>
                         <td><Amount value={String(bookedAccount)} /></td>
                         <td><Amount value={String(-spentAccount)} /></td>
-                        <td><Amount value={String(bookedAccount - spentAccount)} /></td>
+                        <td><Amount value={String(bookedAccount + closedSpentFor(account))} /></td>
                         <td>{closingsFor(account)}</td>
                       </tr>
                     );
@@ -153,8 +160,10 @@ export function PnlCards({ accountId }: { accountId?: string }) {
             </div>
           )}
           <p className="footnote">
-            Booked P&amp;L covers {expiryChoice.isAll ? "every cycle the broker has reported, including ones that have expired" : expiryChoice.selected.map(expiryLabel).join(", ")} — unlike the payoff panel, which models the live cycle only. Commissions
-            total {money(String(spent))} across {fillCount} fills.
+            Booked P&amp;L covers {expiryChoice.isAll ? "every cycle the broker has reported, including ones that have expired" : expiryChoice.selected.map(expiryLabel).join(", ")} — unlike the payoff panel, which models the live cycle only. IBKR&apos;s
+            booked figure is already after the opening and closing commission on each leg, so the{" "}
+            {money(String(spent))} of commissions across {fillCount} fills is shown beside it, never
+            taken off it a second time.
           </p>
         </>
       )}

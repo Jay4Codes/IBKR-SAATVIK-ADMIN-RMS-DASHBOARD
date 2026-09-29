@@ -17,7 +17,7 @@ const FIELDS: { key: keyof Account; title: string; detail: string }[] = [
 function cushionOf(account: Account): string {
   const raw = account.cushion == null ? null : Number(account.cushion);
   if (raw === null || !Number.isFinite(raw)) {
-
+        
     const excess = Number(account.excess_liquidity);
     const net = Number(account.net_liquidation);
     if (!Number.isFinite(excess) || !Number.isFinite(net) || net === 0) return "—";
@@ -37,6 +37,25 @@ export function accountName(account: { account_id: string; label?: string }) {
   return account.label?.trim() || account.account_id;
 }
 
+export function RenameAccount({ account, onRename }: {
+  account: { account_id: string; label?: string };
+  onRename: (label: string) => void | Promise<void>;
+}) {
+  return (
+    <button
+      type="button"
+      className="rename"
+      title={`Name ${account.account_id}`}
+      onClick={() => {
+        const next = window.prompt(`Name for ${account.account_id}`, account.label ?? "");
+        if (next !== null) void onRename(next.trim());
+      }}
+    >
+      {account.label ? "Rename" : "Add a name"}
+    </button>
+  );
+}
+
 export function BalancePanel({ account, canRename, onRename }: {
   account: Account;
   canRename?: boolean;
@@ -53,20 +72,7 @@ export function BalancePanel({ account, canRename, onRename }: {
         {accountName(account)} · balance &amp; margin
         <span>
           {account.label ? `${account.account_id} · ` : ""}{account.currency}
-          {canRename && (
-            <button
-              type="button"
-              className="rename"
-              title="Name this account"
-              onClick={() => {
-
-                const next = window.prompt("Name for this account", account.label ?? "");
-                if (next !== null) onRename?.(next.trim());
-              }}
-            >
-              {account.label ? "Rename" : "Add a name"}
-            </button>
-          )}
+          {canRename && onRename && <RenameAccount account={account} onRename={onRename} />}
         </span>
       </h2>
       <div className="balance-grid">

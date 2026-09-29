@@ -1,7 +1,5 @@
 import { CSSProperties } from "react";
 
-// Placeholder shapes shown while data loads, sized like the content they stand
-// in for so nothing jumps when it arrives.
 export function Shimmer({
   width = "100%",
   height,

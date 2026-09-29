@@ -252,4 +252,5 @@ async def test_tenant_gateway_operator_process(client, stores, login, role, expe
     await db.tenant_members.update_one({"user_id": "ADMIN", "tenant_id": TENANT}, {"$set": {"role": role}})
     response = await client.post("/api/v1/gateway/process", json={"action": "stop"})
     assert response.status_code == expected
-    assert (await client.get("/api/v1/members")).status_code == 403
+    # Gateway control and tenant administration go together: OWNER and ADMIN run their tenant.
+    assert (await client.get("/api/v1/members")).status_code == expected

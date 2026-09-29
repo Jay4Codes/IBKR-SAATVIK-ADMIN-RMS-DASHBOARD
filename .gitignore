@@ -3,14 +3,12 @@
 .env.*
 !.env.example
 
-# JavaScript
 node_modules/
 .next/
 out/
 npm-debug.log*
 *.tsbuildinfo
 
-# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -18,11 +16,9 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
-# Editors
 .idea/
 .vscode/
 
-# Local authentication database
 backend/data/
 *.sqlite3*
 external/*

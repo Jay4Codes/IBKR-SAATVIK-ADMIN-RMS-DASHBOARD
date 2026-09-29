@@ -62,7 +62,7 @@ export function LensTable({
   rows: LensRow[];
   total: LensRow;
   totalLabel: string;
-  realized: { open: Record<number, number>; booked: number; charged: number };
+  realized: { open: Record<number, number>; openCommission: number; booked: number; charged: number; gross: boolean };
   showLevelRow: boolean;
   levelFor: (shock: number) => ReactNode;
   expanded: string | null;
@@ -88,6 +88,7 @@ export function LensTable({
   const numberCells = (row: LensRow, isTotal = false) => (
     <>
       <td className="now"><Cell value={row.now} nlv={row.nlv} denomination={denomination} /></td>
+      <td className="worst"><Cell value={row.worst} nlv={row.nlv} denomination={denomination} /></td>
       {shownColumns.map(column => (
         <td key={column.id} className={cellClass(column)}>
           <Cell
@@ -98,7 +99,6 @@ export function LensTable({
           />
         </td>
       ))}
-      <td className="worst"><Cell value={row.worst} nlv={row.nlv} denomination={denomination} /></td>
       <td className="shape" title={`Payoff shape across the plotted range${isTotal ? "" : ` for ${row.label}`}`}>
         <Sparkline values={row.spark} label={`Payoff shape for ${row.label}`} />
       </td>
@@ -122,6 +122,9 @@ export function LensTable({
             <th scope="col" className="now">
               <Term hint="Live mark-to-market at the current reference (0% move), including any booked adjustments.">MTM</Term>
             </th>
+            <th scope="col" className="worst">
+              <Term hint="Lowest settlement P&L anywhere in the plotted range. Widen the range to test a deeper move.">Worst</Term>
+            </th>
             {shownColumns.map((column, index) => (
               <th key={column.id} scope="col" className={cellClass(column)} aria-label={column.label}>
                 <span className="col-head">
@@ -135,9 +138,6 @@ export function LensTable({
                 </span>
               </th>
             ))}
-            <th scope="col" className="worst">
-              <Term hint="Lowest settlement P&L anywhere in the plotted range. Widen the range to test a deeper move.">Worst</Term>
-            </th>
             <th scope="col" className="shape"><span className="sr-only">Payoff shape</span></th>
           </tr>
         </thead>
@@ -146,33 +146,33 @@ export function LensTable({
             <tr className="level-row">
               <th scope="row">Scenario underlying level</th>
               {lens === "asset" && <td className="ref" />}
-              <td className="now muted">{levelFor(0)}</td>
+              <td className="now muted">{levelFor(0)}</td><td className="worst" />
               {shownColumns.map(column => <td key={column.id} className={cellClass(column)}>{levelFor(column.shock)}</td>)}
-              <td className="worst" /><td className="shape" />
+              <td className="shape" />
             </tr>
           )}
           {(realized.booked !== 0 || realized.charged !== 0) && (
             <>
               <tr>
-                <th scope="row">Open legs, as broker reports</th>
+                <th scope="row">{realized.gross ? "Open legs, before commission" : "Open legs, as broker reports"}</th>
                 {lens === "asset" && <td className="ref" />}
-                <td className="now"><Cell value={total.now - total.adjustment} nlv={total.nlv} denomination={denomination} /></td>
+                <td className="now"><Cell value={total.now - total.adjustment + realized.openCommission} nlv={total.nlv} denomination={denomination} /></td><td className="worst" />
                 {shownColumns.map(column => <td key={column.id} className={cellClass(column)}><Cell value={realized.open[column.shock]} nlv={total.nlv} denomination={denomination} /></td>)}
-                <td className="worst" /><td className="shape" />
+                <td className="shape" />
               </tr>
               {realized.booked !== 0 && <tr className="booked">
-                <th scope="row">Booked P&amp;L (closed legs)</th>
+                <th scope="row">{realized.gross ? "Booked P&L (closed legs), before commission" : "Booked P&L (closed legs)"}</th>
                 {lens === "asset" && <td className="ref" />}
-                <td className="now"><Cell value={realized.booked} nlv={total.nlv} denomination={denomination} /></td>
+                <td className="now"><Cell value={realized.booked} nlv={total.nlv} denomination={denomination} /></td><td className="worst" />
                 {shownColumns.map(column => <td key={column.id} className={cellClass(column)}><Cell value={realized.booked} nlv={total.nlv} denomination={denomination} /></td>)}
-                <td className="worst" /><td className="shape" />
+                <td className="shape" />
               </tr>}
               {realized.charged !== 0 && <tr className="booked">
                 <th scope="row">Commissions</th>
                 {lens === "asset" && <td className="ref" />}
-                <td className="now"><Cell value={realized.charged} nlv={total.nlv} denomination={denomination} /></td>
+                <td className="now"><Cell value={realized.charged} nlv={total.nlv} denomination={denomination} /></td><td className="worst" />
                 {shownColumns.map(column => <td key={column.id} className={cellClass(column)}><Cell value={realized.charged} nlv={total.nlv} denomination={denomination} /></td>)}
-                <td className="worst" /><td className="shape" />
+                <td className="shape" />
               </tr>}
             </>
           )}
@@ -185,9 +185,9 @@ export function LensTable({
           <tr className="estimate">
             <th scope="row">Pre-expiry estimate</th>
             {lens === "asset" && <td className="ref" />}
-            <td className="now"><Cell value={total.now} nlv={total.nlv} denomination={denomination} /></td>
+            <td className="now"><Cell value={total.now} nlv={total.nlv} denomination={denomination} /></td><td className="worst" />
             {shownColumns.map(column => <td key={column.id} className={cellClass(column)}><Cell value={total.estimate[column.shock]} nlv={total.nlv} denomination={denomination} /></td>)}
-            <td className="worst" /><td className="shape" />
+            <td className="shape" />
           </tr>
           {rows.map(row => {
             const bucketHead = firstInBucket.has(row.id)

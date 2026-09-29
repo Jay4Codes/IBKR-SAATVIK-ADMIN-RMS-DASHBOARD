@@ -8,7 +8,7 @@ import { Account, DailyPnlResponse, IntradayResponse } from "@/lib/types";
 import { HISTORY_START, PERIODS, Period, sinceDays } from "@/lib/history";
 import { formatDateTime, todayIn, ZONES, ZoneId, zoneOf } from "@/lib/timezone";
 import { Chart } from "./chart";
-import { SelectionActions, summarizeChoices, useSelection } from "./selection";
+import { SelectionActions, summarizeSelection, useSelection } from "./selection";
 import { money } from "./tables";
 import { useZone } from "./timezone";
 import { useAccountNames } from "./account-names";
@@ -52,7 +52,6 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
     staleTime: 60_000,
   });
   const assetChoice = useSelection(assetList.data ?? []);
-  /** Every asset ticked means the broker's own account figure; a subset sums those assets' legs. */
   const assetFilter = assetChoice.isAll ? "" : assetChoice.selected.join(",");
   const noAssets = assetChoice.isNone;
   const assetParam = assetFilter ? `&assets=${encodeURIComponent(assetFilter)}` : "";
@@ -216,7 +215,7 @@ export function DayPnlPanel({ accountId, accounts }: { accountId?: string; accou
         )}
         {!accountId && accounts.length > 1 && (
           <details className="day-pnl-accounts">
-            <summary>Accounts · {summarizeChoices(choice.selected.map(name))}</summary>
+            <summary>Accounts · {summarizeSelection(choice, name)}</summary>
             <fieldset className="account-picker">
               <legend>Accounts in this view</legend>
               <SelectionActions selection={choice} noun="accounts" />

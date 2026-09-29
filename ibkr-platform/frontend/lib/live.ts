@@ -114,15 +114,11 @@ export function applyEvent(client: QueryClient, event: LiveEvent) {
           row.order_id === data.order_id),
     );
     if (removed) return index === -1 ? rows : rows.filter((_, i) => i !== index);
-    // A fill is announced before IBKR's commission report and re-sent on
-    // reconnect without one; like the server, only ever add fields to it.
     const known = index === -1 ? undefined : rows[index];
     const next =
       known && kind === "executions"
         ? { ...known, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v != null)) }
         : data;
-    // Marks stream constantly. Keep a position where it already sits so the
-    // book does not reshuffle on every tick; a new contract appends.
     if (kind === "positions") {
       if (index === -1) return [...rows, next];
       const copy = rows.slice();

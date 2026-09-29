@@ -39,7 +39,6 @@ export function usePersisted(key: string, fallback: string): string {
 
 export type PriceLevel = { symbol: string; price: number };
 
-/** "SPX@7600,7800" → levels; a bare number carries no symbol and is anchored on the benchmark. */
 export function parsePriceLevels(raw: string): PriceLevel[] {
   const found = new Map<string, PriceLevel>();
   for (const part of raw.split(",")) {
@@ -69,7 +68,7 @@ export function parsePrices(raw: string): number[] {
 export function parseLevels(raw: string): number[] {
   const found = new Set<number>();
   for (const part of raw.split(",")) {
-
+    
     const value = Math.abs(Number(part.trim()));
     if (Number.isFinite(value) && value > 0 && value < 100) {
 

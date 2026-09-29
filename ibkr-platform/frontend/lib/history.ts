@@ -1,4 +1,3 @@
-/** The first trading day the desk's records on this platform are complete. Nothing is charted before it. */
 export const HISTORY_START = "2026-09-22";
 
 export type Period = "day" | "week" | "month" | "quarter" | "all";
@@ -11,7 +10,6 @@ export const PERIODS: { id: Period; label: string; days: number }[] = [
   { id: "all", label: "All", days: 0 },
 ];
 
-/** ISO date `days` ago, never earlier than HISTORY_START; 0 means the whole record. */
 export function sinceDays(days: number, now: number = Date.now()): string {
   if (!days) return HISTORY_START;
   const from = new Date(now);

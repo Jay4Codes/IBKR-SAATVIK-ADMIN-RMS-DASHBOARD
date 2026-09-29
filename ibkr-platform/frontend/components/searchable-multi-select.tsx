@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Dropdown } from "./dropdown";
-import { Selection, SelectionActions, summarizeChoices } from "./selection";
+import { Selection, SelectionActions, summarizeSelection } from "./selection";
 
 export function SearchableMultiSelect({
   label,
@@ -31,7 +31,7 @@ export function SearchableMultiSelect({
         return option.toLowerCase().includes(needle) || format(option).toLowerCase().includes(needle) || extra.toLowerCase().includes(needle);
       });
 
-  const value = summarizeChoices(selection.selected.map(format));
+  const value = summarizeSelection(selection, format);
   return (
     <Dropdown label={label} value={value} className={className}>
       <div className="dropdown-menu" role="group" aria-label={label}>
@@ -46,6 +46,18 @@ export function SearchableMultiSelect({
             onClick={event => event.stopPropagation()}
             onKeyDown={event => event.stopPropagation()}
           />
+        )}
+        {selection.options.length > 1 && !needle && (
+          <label className="ms-all">
+            <input
+              type="checkbox"
+              aria-label={`All ${noun}`}
+              checked={selection.isAll}
+              ref={input => { if (input) input.indeterminate = !selection.isAll && !selection.isNone; }}
+              onChange={() => (selection.isAll ? selection.clear() : selection.selectAll())}
+            />
+            <span>All<small>{selection.options.length} {noun}</small></span>
+          </label>
         )}
         {shown.map(value => {
           const extra = describe?.(value);

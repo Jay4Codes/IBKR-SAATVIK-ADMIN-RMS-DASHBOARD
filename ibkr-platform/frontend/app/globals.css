@@ -162,6 +162,7 @@
   font-variant-numeric: tabular-nums;
 }
 .dropdown-menu label:hover { background: var(--accent-soft); }
+.dropdown-menu label.ms-all { border-bottom: 1px solid var(--line); margin-bottom: 4px; padding-bottom: 8px; font-weight: 600; }
 .dropdown-menu input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent); }
 .dropdown-menu label span {
   display: flex;
@@ -1086,7 +1087,6 @@ small {
   object-position: center 49%;
   display: block;
 }
-/* The Ekalon lockup is already cropped to the wordmark ratio, on white. */
 .brand-mark.brand-ekalon { background: #fff; }
 .brand-mark.brand-ekalon img { object-fit: contain; object-position: center; }
 .top-right {
@@ -2172,7 +2172,6 @@ th:last-child .th-grip {
   font-size: 9px;
   margin-top: var(--space-2);
 }
-/* Wide screens: every tile on one row, sized to share the width. */
 @media (min-width: 900px) {
   .kpis { display: flex; container-type: inline-size; }
   .kpis > div { flex: 1 1 0; padding: clamp(10px, 1.6cqi, 20px); }
@@ -2751,8 +2750,6 @@ tbody tr:hover td {
   background: var(--bg);
   border-bottom: 1px solid var(--line-strong);
 }
-/* The grid scrolls sideways when it has many columns; keep the chart and legs
-   the width of the visible area instead of stretching across the whole table. */
 .lens-detail {
   position: sticky;
   left: 0;
@@ -3100,7 +3097,6 @@ pre {
   }
 }
 
-/* Executions blotter */
 .table-clear {
   height: var(--control-height-sm);
   padding: 0 var(--space-3);
@@ -3256,8 +3252,6 @@ pre {
 }
 .side.expired { color: var(--muted); background: var(--panel-raised); }
 
-/* KPI tiles share one row grid (subgrid), so a label that wraps to two lines
-   pushes every tile's figure down together instead of knocking one out of line. */
 .kpis { grid-auto-rows: auto; }
 .kpis > div {
   display: grid;
@@ -3279,7 +3273,6 @@ pre {
   }
 }
 
-/* Loading shimmer */
 .shimmer {
   display: block;
   height: 0.9em;
@@ -3316,14 +3309,12 @@ pre {
   .responsive-table .skeleton-row td::before { content: none; }
 }
 
-/* Table toolbar: search and filters flow from the left, the record count sits right. */
 .table-toolbar { justify-content: flex-start; gap: var(--space-2) var(--space-4); }
 .table-toolbar > div:last-child { margin-left: auto; }
 .table-toolbar input[type="checkbox"] { width: auto; height: auto; }
 .table-toolbar .table-facet { gap: var(--space-2); }
 .table-toolbar .table-facet .ss-value { height: var(--control-height-sm); min-width: 96px; }
 
-/* Header labels follow their column: numbers right, text left, badges centred. */
 .responsive-table th:not(:first-child) .th-sort { justify-content: flex-end; }
 .responsive-table th.col-contract .th-sort { justify-content: flex-start; }
 .responsive-table th.col-side .th-sort { justify-content: center; }
@@ -3396,3 +3387,15 @@ pre {
 .day-pnl-missing { margin: 8px 6px 0; color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
 .day-pnl h2 b.positive { color: var(--green); }
 .day-pnl h2 b.negative { color: var(--red); }
+
+.strike-ruler-toggle { margin: var(--space-2) 0; }
+.strike-ruler-toggle > summary {
+  display: inline-flex; align-items: baseline; gap: var(--space-2);
+  cursor: pointer; color: var(--muted); font-size: var(--text-sm); list-style: none;
+  padding: 2px 0;
+}
+.strike-ruler-toggle > summary::-webkit-details-marker { display: none; }
+.strike-ruler-toggle > summary::before { content: "▸"; font-size: 10px; }
+.strike-ruler-toggle[open] > summary::before { content: "▾"; }
+.strike-ruler-toggle > summary small { color: var(--muted); opacity: 0.8; }
+.strike-ruler-toggle > summary:hover { color: var(--text); }

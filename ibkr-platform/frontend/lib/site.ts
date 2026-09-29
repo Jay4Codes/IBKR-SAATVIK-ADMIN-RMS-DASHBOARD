@@ -1,18 +1,11 @@
-/**
- * One build serves several hostnames. Each hostname is its own brand: page titles, link
- * previews, icons and the wordmark all follow the host the visitor typed, never the tenant.
- */
 export type SiteKey = "sattvic" | "ekalon";
 
 export type Site = {
   key: SiteKey;
   host: string;
-  /** Short brand name, used for the tab title suffix and the web-app name. */
   name: string;
-  /** Full title of the landing page and of link previews. */
   title: string;
   description: string;
-  /** Small caps line above the sign-in heading. */
   eyebrow: string;
   footer: string;
   logo: { src: string; width: number; height: number; alt: string };
@@ -72,7 +65,6 @@ export const SITES: Record<SiteKey, Site> = {
   },
 };
 
-/** Map a Host header to its brand. Anything that is not a Sattvic host gets the Ekalon brand. */
 export function siteFor(host: string | null | undefined): Site {
   const name = (host ?? "").split(",")[0].trim().toLowerCase().replace(/:\d+$/, "");
   if (name.startsWith("sattvic-rms.") || name.startsWith("saatvik-rms.")) return SITES.sattvic;
@@ -80,5 +72,4 @@ export function siteFor(host: string | null | undefined): Site {
   return { ...SITES.ekalon, host: name.endsWith("ekalonsolutions.com") ? name : SITES.ekalon.host };
 }
 
-/** Public, unauthenticated paths that link previews, browsers and crawlers fetch. */
 export const PUBLIC_ASSET_PATHS = ["/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/social-card"];

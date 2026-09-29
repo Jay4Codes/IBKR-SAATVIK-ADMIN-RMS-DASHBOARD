@@ -43,3 +43,11 @@ async def test_only_an_administrator_may_rename(client, stores):
     ) as trader:
 
         assert (await trader.patch(f"/api/v1/accounts/{account}", json={"label": "Mine"})).status_code == 403
+
+async def test_a_tenant_owner_who_is_not_platform_admin_may_rename(client, stores):
+    _, db = stores
+    await db.users.update_one({"_id": "ADMIN"}, {"$set": {"email": "owner@test.local", "is_super_admin": False}})
+    me = (await client.get("/api/v1/auth/me")).json()["data"]
+    assert me["is_super_admin"] is False and me["role"] == "ADMIN"
+    account = (await client.get("/api/v1/accounts")).json()["data"][0]["account_id"]
+    assert (await client.patch(f"/api/v1/accounts/{account}", json={"label": "Desk A"})).json()["data"]["label"] == "Desk A"

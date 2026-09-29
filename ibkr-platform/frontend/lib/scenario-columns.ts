@@ -8,7 +8,7 @@ export function levelLabel(shock: number): string {
 
 export const CUSTOM_LEVELS_KEY = "rms.levels.custom";
 export const PRICE_LEVELS_KEY = "rms.levels.price";
-export const COLUMN_ORDER_KEY = "rms.columns.order";
+export const COLUMN_ORDER_KEY = "rms.columns.order.v2";
 export const DEFAULT_LEVELS = RMS_SHOCKS.filter(shock => shock > 0).join(",");
 export const MAX_CUSTOM = 8;
 
@@ -25,11 +25,6 @@ export const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
 const formatPrice = (price: number) => Math.round(price).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-/**
- * A price level is quoted in one underlying's own price and anchored on that underlying's spot;
- * every other underlying in the table gets the equivalent percent shock. Levels saved without a
- * symbol are anchored on `benchmark`, the underlying carrying most of the book.
- */
 export function buildColumns(
   percents: number[],
   prices: PriceLevel[],
@@ -55,7 +50,8 @@ export function buildColumns(
       id: `price:${key}`, group: `price:${key}`, custom: true,
     });
   }
-  return [...columns.values()].sort((a, b) => a.shock - b.shock);
+
+  return [...columns.values()].sort((a, b) => Math.abs(b.shock) - Math.abs(a.shock) || b.shock - a.shock);
 }
 
 export function orderColumns(columns: Column[], order: string[]): Column[] {

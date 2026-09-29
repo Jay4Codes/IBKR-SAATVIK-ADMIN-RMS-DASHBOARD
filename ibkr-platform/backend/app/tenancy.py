@@ -173,7 +173,8 @@ class Principal:
 
     @property
     def is_tenant_admin(self) -> bool:
-        return self.is_super_admin
+        """Platform super-admins, plus OWNER and ADMIN members of the active tenant."""
+        return self.is_super_admin or bool(self.active and self.active.is_admin)
 
     @property
     def can_control_gateway(self) -> bool:

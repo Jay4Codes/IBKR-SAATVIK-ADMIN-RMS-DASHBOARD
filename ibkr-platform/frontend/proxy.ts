@@ -2,7 +2,6 @@ import { type NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "ibkr_session";
 
-/** Sign-in plus what link previews, browsers and crawlers fetch without a session. */
 const PUBLIC_PATHS = new Set(["/login", "/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/social-card"]);
 
 export function proxy(request: NextRequest) {

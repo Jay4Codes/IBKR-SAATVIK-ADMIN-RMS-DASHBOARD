@@ -5,7 +5,6 @@ import { currentSite } from "@/lib/site-server";
 
 const icons = new Map<string, Promise<string>>();
 
-/** The brand's square icon as a data URL, read once per process from the shipped public/ folder. */
 function iconData(path: string): Promise<string> {
   if (!icons.has(path)) {
     icons.set(
@@ -16,7 +15,6 @@ function iconData(path: string): Promise<string> {
   return icons.get(path)!;
 }
 
-/** 1200×630 link-preview card, branded for whichever host asked for it. */
 export async function GET() {
   const site = await currentSite();
   const { card } = site;
@@ -48,7 +46,7 @@ export async function GET() {
             opacity: site.key === "sattvic" ? 0.22 : 0.9,
           }}
         />
-        {/* eslint-disable-next-line @next/next/no-img-element -- ImageResponse renders plain img, not next/image */}
+        
         <img src={icon} width={150} height={150} style={{ borderRadius: 16, marginBottom: 44 }} alt="" />
         <div style={{ display: "flex", fontSize: 68, fontWeight: 700, color: card.text, letterSpacing: -1 }}>
           {site.name}

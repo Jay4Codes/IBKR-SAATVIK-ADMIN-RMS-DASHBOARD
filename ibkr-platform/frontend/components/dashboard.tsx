@@ -5,8 +5,9 @@ import {
   useQueries,
   useQuery,
   useQueryClient,
+  UseQueryResult,
 } from "@tanstack/react-query";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Decimal from "decimal.js";
@@ -57,7 +58,7 @@ import { AllocationChart } from "./allocation-chart";
 import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "./searchable-select";
 import { AlertBell } from "./alert-bell";
-import { BalancePanel } from "./balance-panel";
+import { accountName, BalancePanel, RenameAccount } from "./balance-panel";
 import { PnlCards } from "./pnl-cards";
 import { AlertsPanel } from "./alerts-panel";
 import { PayoffPanel } from "./payoff-panel";
@@ -126,6 +127,15 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 
 const VIEWS = NAV.flatMap((section) => section.items.map((item) => item.view));
+
+function combinePositions(results: UseQueryResult<Position[]>[]) {
+  return {
+    rows: results.flatMap((r) => r.data ?? []),
+    pending: results.some((r) => r.isPending),
+    error: results.some((r) => r.isError),
+    errors: results.map((r) => r.error),
+  };
+}
 
 export function visibleNav(isAdmin: boolean, isPlatformAdmin: boolean) {
   return NAV.map((section) => ({
@@ -222,9 +232,10 @@ function Terminal({
     queryFn: () => api<Account[]>("/accounts"),
     enabled: !!user.data,
   });
-  const selected =
-    accounts.data?.filter((a) => !accountId || a.account_id === accountId) ??
-    [];
+  const selected = useMemo(
+    () => accounts.data?.filter((a) => !accountId || a.account_id === accountId) ?? [],
+    [accounts.data, accountId],
+  );
   const ids = selected.map((a) => a.account_id);
   const loadingAccounts = !!user.data && accounts.isPending;
   const kpi = (value: ReactNode) =>
@@ -234,7 +245,9 @@ function Terminal({
       queryKey: ["positions", id],
       queryFn: () => api<Position[]>(`/accounts/${id}/positions`),
     })),
+    combine: combinePositions,
   });
+  const positionRows = positions.rows;
   const orders = useQueries({
     queries: ids.map((id) => ({
       queryKey: ["orders", id],
@@ -248,8 +261,16 @@ function Terminal({
     })),
   });
   const isAdmin = !!user.data?.is_super_admin;
-  /** Tenant owners and admins run their own connections and members; the backend gates the same way. */
   const isTenantAdmin = isAdmin || ["OWNER", "ADMIN"].includes(user.data?.tenant?.role ?? "");
+  const renameAccount = async (id: string, label: string) => {
+    try {
+      await apiPatch(`/accounts/${id}`, { label });
+    } catch (error) {
+      window.alert(`Could not name ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    await client.invalidateQueries({ queryKey: ["accounts"] });
+  };
   const view =
     (!isTenantAdmin && ADMIN_VIEWS.includes(requestedView)) || (!user.data?.is_super_admin && requestedView === "Tenants")
       ? "RMS"
@@ -317,7 +338,7 @@ function Terminal({
     user.error,
     gateway.error,
     accounts.error,
-    ...positions.map((p) => p.error),
+    ...positions.errors,
     ...orders.map((p) => p.error),
     ...executions.map((p) => p.error),
   ].filter(Boolean);
@@ -627,8 +648,8 @@ function Terminal({
                     </h2>
                     <AllocationChart
                       accounts={monetary}
-                      positions={positions.flatMap((p) => p.data ?? [])}
-                      positionsLoading={positions.some((p) => p.isPending)}
+                      positions={positionRows}
+                      positionsLoading={positions.pending}
                       light={light}
                     />
                   </section>
@@ -639,11 +660,8 @@ function Terminal({
             {!accountId && (view === "Overview" || view === "Accounts") && selected.length === 1 && (
               <BalancePanel
                 account={selected[0]}
-                canRename={isAdmin}
-                onRename={async (label) => {
-                  await apiPatch(`/accounts/${selected[0].account_id}`, { label });
-                  await client.invalidateQueries({ queryKey: ["accounts"] });
-                }}
+                canRename={isTenantAdmin}
+                onRename={(label) => renameAccount(selected[0].account_id, label)}
               />
             )}
             {!accountId && view === "Accounts" && loadingAccounts && (
@@ -660,14 +678,7 @@ function Terminal({
                 <AccountsTable
                   rows={selected}
                   onRow={(a) => router.push(`/accounts/${a.account_id}`)}
-                  onRename={
-                    isAdmin
-                      ? async (accountId, label) => {
-                          await apiPatch(`/accounts/${accountId}`, { label });
-                          await client.invalidateQueries({ queryKey: ["accounts"] });
-                        }
-                      : undefined
-                  }
+                  onRename={isTenantAdmin ? renameAccount : undefined}
                 />
               </section>
             )}
@@ -704,7 +715,15 @@ function Terminal({
             >
             {shows("Summary") && selected[0] && (
               <section className="panel">
-                <h2>Account summary</h2>
+                <h2>
+                  {accountName(selected[0])} · account summary
+                  <span>
+                    {selected[0].label ? `${selected[0].account_id} · ` : ""}{selected[0].currency}
+                    {isTenantAdmin && (
+                      <RenameAccount account={selected[0]} onRename={(label) => renameAccount(selected[0].account_id, label)} />
+                    )}
+                  </span>
+                </h2>
                 <div className="summary-grid">
                   {(
                     [
@@ -731,8 +750,8 @@ function Terminal({
               <section className="panel">
                 <h2>Positions</h2>
                 <PositionsTable
-                  rows={positions.flatMap((p) => p.data ?? [])}
-                  loading={loadingAccounts || positions.some((p) => p.isPending)}
+                  rows={positionRows}
+                  loading={loadingAccounts || positions.pending}
                 />
                 <p className="footnote">
                   ¹ Average cost is the premium, the broker cost divided by the
@@ -744,19 +763,19 @@ function Terminal({
             {shows("RMS") && (
               <PayoffPanel
                 key={accountId ?? "desk"}
-                rows={positions.flatMap((p) => p.data ?? [])}
+                rows={positionRows}
                 accounts={selected}
                 accountId={accountId}
-                loading={accounts.isPending || positions.some((p) => p.isPending)}
-                error={accounts.isError || positions.some((p) => p.isError)}
+                loading={accounts.isPending || positions.pending}
+                error={accounts.isError || positions.error}
                 light={light}
               />
             )}
             {shows("Skew") && (
               <SkewPanel
-                rows={positions.flatMap((p) => p.data ?? [])}
-                loading={accounts.isPending || positions.some((p) => p.isPending)}
-                error={accounts.isError || positions.some((p) => p.isError)}
+                rows={positionRows}
+                loading={accounts.isPending || positions.pending}
+                error={accounts.isError || positions.error}
               />
             )}
 

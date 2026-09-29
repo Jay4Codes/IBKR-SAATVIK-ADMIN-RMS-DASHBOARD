@@ -1,7 +1,5 @@
 import { Execution } from "./types";
 
-// One row in the executions blotter: either a single fill, or a combo order's
-// parent (BAG) fill with the leg fills IBKR reports alongside it.
 export type Fill = {
   key: string;
   lead: Execution;
@@ -12,8 +10,6 @@ export type Fill = {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const OCC = /^(\S+)\s+(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/;
 
-// IBKR numbers a combo's fills <client>.<order>.<leg>.<n>: the parent is leg 01
-// and every leg shares the first two segments.
 const orderKey = (row: Execution) =>
   `${row.account_id}:${row.execution_id.split(".").slice(0, 2).join(".")}`;
 
@@ -43,12 +39,33 @@ export function groupFills(rows: Execution[]): Fill[] {
 
 export const isBuy = (row: Execution) => row.side === "BOT" || row.side === "BUY";
 
-// IBKR books an option that lapses as a zero-price fill on the evening of its
-// expiry. It carries no commission, ever, so it must not read as "pending".
 export function expired(fill: Fill): boolean {
   const row = fill.lead;
   if (fill.combo || row.sec_type !== "OPT" || Number(row.price) !== 0 || !row.expiry) return false;
   return row.executed_at.slice(0, 10).replaceAll("-", "") >= row.expiry;
+}
+
+function rowExpiry(row: Execution): string | null {
+  if (row.expiry && /^\d{8}$/.test(row.expiry)) return row.expiry;
+  const occ = OCC.exec(row.symbol);
+  return occ ? `20${occ[2]}${occ[3]}${occ[4]}` : null;
+}
+
+export function fillExpiry(fill: Fill): string | null {
+  const dates = [fill.lead, ...fill.legs].map(rowExpiry).filter((d): d is string => !!d);
+  return dates.length ? dates.sort().at(-1)! : null;
+}
+
+export function pastExpiry(fill: Fill, now: number = Date.now()): boolean {
+  const expiry = fillExpiry(fill);
+  if (!expiry) return false;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
+    }).formatToParts(now).map(p => [p.type, p.value]),
+  );
+  const today = `${parts.year}${parts.month}${parts.day}`;
+  return expiry < today || (expiry === today && Number(parts.hour) >= 16);
 }
 
 export function quantity(value: string): string {
@@ -80,7 +97,6 @@ const multiplier = (row: Execution) => {
   return Number.isFinite(m) && m > 0 ? m : 1;
 };
 
-// Premium paid (negative) or received (positive) for one execution.
 function cash(row: Execution): number | null {
   const price = Number(row.price), qty = Number(row.quantity);
   if (!Number.isFinite(price) || !Number.isFinite(qty)) return null;
@@ -94,7 +110,6 @@ const parts = (fill: Fill) => (fill.combo && fill.legs.length ? fill.legs : [fil
 
 export const cashFlow = (fill: Fill) => sum(parts(fill).map(cash));
 
-// null while IBKR has yet to report a commission for any part of the fill.
 export const commission = (fill: Fill) =>
   expired(fill) ? 0 : sum(parts(fill).map((row) => (row.commission == null ? null : Math.abs(Number(row.commission)))));
 
@@ -105,8 +120,6 @@ export function realized(fill: Fill): number | null {
   return values.length ? values.reduce((a, v) => a + v, 0) : null;
 }
 
-// Execution price with the commission folded in per unit: a buy costs more,
-// a sell nets less.
 export function netRate(fill: Fill): number | null {
   const paid = commission(fill);
   const price = Number(fill.lead.price);

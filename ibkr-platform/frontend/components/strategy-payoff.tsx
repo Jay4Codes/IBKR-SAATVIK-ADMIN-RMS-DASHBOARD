@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, ReactNode } from "react";
+import { memo, ReactNode, useMemo } from "react";
 import {
   Assumption,
   buildPriceCurve,
@@ -164,7 +164,7 @@ function PayoffGraph({
 }) {
   return (
     <Chart
-      height={420}
+      height={560}
       ariaLabel={`Payoff in ${currency} against the underlying price, with the probability of each level at expiry`}
       unavailable="Chart unavailable. The scenario table above carries the same numbers."
       deps={[version, currency, light]}
@@ -198,7 +198,7 @@ function PayoffGraph({
             },
           },
         },
-        grid: { left: PLOT_LEFT, right: PLOT_RIGHT, top: 78, bottom: 92, containLabel: false },
+        grid: { left: PLOT_LEFT, right: PLOT_RIGHT, top: 132, bottom: 92, containLabel: false },
         dataZoom: [
           { type: "inside", xAxisIndex: 0, filterMode: "none", ...zoom },
           {
@@ -262,7 +262,7 @@ function PayoffGraph({
             markLine: {
               silent: true, symbol: "none",
               label: {
-                show: true, position: "insideStartTop", distance: 4, color: t.muted, fontSize: 11,
+                show: true, position: "end", distance: 6, color: t.muted, fontSize: 11,
                 backgroundColor: t.raised, borderColor: t.line, borderWidth: 1,
                 padding: [2, 5], borderRadius: 3,
                 formatter: ({ value }: { value: number }) => money(String(value), 0),
@@ -270,7 +270,7 @@ function PayoffGraph({
               lineStyle: { color: t.lineStrong, type: "dashed" },
               data: [
                 { yAxis: 0, label: { show: false } },
-                ...breakevens.map(price => ({ xAxis: price })),
+                ...breakevens.map((price, index) => ({ xAxis: price, label: { distance: index % 2 ? 26 : 6 } })),
                 { xAxis: spot, lineStyle: { color: t.accent, type: "solid" }, label: { show: false } },
               ],
             },
@@ -302,21 +302,26 @@ export const StrategyPayoff = memo(function StrategyPayoff({
 }) {
   const key = keys[0];
   const assumption = assumptions[key];
-  const spot = assumption?.spot;
-  if (!key || !(spot > 0)) return null;
-
-  const scoped = legs.filter(leg => underlyingKey(leg.position) === key);
-  const points = buildPriceCurve(scoped, assumptions, key, range, horizon, rate / 100);
-  const wide = buildPriceCurve(scoped, assumptions, key, 95, horizon, rate / 100);
-  if (!points.length) return null;
-
-  const years = Math.max(0, Math.min(...scoped.filter(l => l.position.sec_type === "OPT").map(l => l.days)) - horizon) / 365;
-  const stats = strategyStats(points, wide, scoped, spot, assumption.volatility, years, rate / 100, assumption.dividend, offset);
-  const shown = points.map(p => ({ ...p, terminal: p.terminal + offset, modeled: p.modeled + offset }));
-  const density: [number, number][] = points.map(p => [
-    p.price,
-    priceDensity(p.price, spot, assumption.volatility, years, rate / 100, assumption.dividend),
-  ]);
+  const spot = assumption?.spot ?? NaN;
+  const volatility = assumption?.volatility ?? 0;
+  const dividend = assumption?.dividend ?? 0;
+  const computed = useMemo(() => {
+    if (!key || !(spot > 0)) return null;
+    const scoped = legs.filter(leg => underlyingKey(leg.position) === key);
+    const points = buildPriceCurve(scoped, assumptions, key, range, horizon, rate / 100);
+    if (!points.length) return null;
+    const wide = buildPriceCurve(scoped, assumptions, key, 95, horizon, rate / 100);
+    const years = Math.max(0, Math.min(...scoped.filter(l => l.position.sec_type === "OPT").map(l => l.days)) - horizon) / 365;
+    const stats = strategyStats(points, wide, scoped, spot, volatility, years, rate / 100, dividend, offset);
+    const shown = points.map(p => ({ ...p, terminal: p.terminal + offset, modeled: p.modeled + offset }));
+    const density: [number, number][] = points.map(p => [
+      p.price,
+      priceDensity(p.price, spot, volatility, years, rate / 100, dividend),
+    ]);
+    return { scoped, points, years, stats, shown, density };
+  }, [legs, assumptions, key, spot, volatility, dividend, range, horizon, rate, offset]);
+  if (!computed) return null;
+  const { scoped, points, years, stats, shown, density } = computed;
   const at = shown.find(p => p.price >= spot) ?? shown[0];
   const probabilityBelow = (price: number) =>
     years > 0 && assumption.volatility > 0
@@ -344,7 +349,21 @@ export const StrategyPayoff = memo(function StrategyPayoff({
         {toolbar}
       </div>
 
-      <StrikeRuler legs={scoped} spot={spot} symbol={symbol} fallback={[points[0].price, points[points.length - 1].price]} />
+      {(() => {
+        const pins = markers(scoped);
+        const calls = pins.filter(pin => pin.right === "C").length;
+        return (
+          <details className="strike-ruler-toggle">
+            <summary>
+              Held strikes
+              <small>
+                {calls} call{calls === 1 ? "" : "s"} · {pins.length - calls} put{pins.length - calls === 1 ? "" : "s"}
+              </small>
+            </summary>
+            <StrikeRuler legs={scoped} spot={spot} symbol={symbol} fallback={[points[0].price, points[points.length - 1].price]} />
+          </details>
+        );
+      })()}
 
       <div className="strategy-stats">
         <div>
@@ -352,11 +371,11 @@ export const StrategyPayoff = memo(function StrategyPayoff({
           <strong>{money(String(Math.abs(stats.netCredit)))}</strong>
         </div>
         <div>
-          <label>Max loss</label>
+          <label title={stats.uncappedDownside ? "Net short calls: the loss keeps growing as the price rises past the highest strike" : "Lowest expiry P&L anywhere from a price of zero up past the highest strike"}>Max loss</label>
           <strong>{stats.uncappedDownside ? "Uncapped" : <Amount value={String(stats.maxLoss)} />}</strong>
         </div>
         <div>
-          <label>Max profit</label>
+          <label title={stats.uncappedUpside ? "Net long calls: the profit keeps growing as the price rises past the highest strike" : "Highest expiry P&L anywhere from a price of zero up past the highest strike"}>Max profit</label>
           <strong>{stats.uncappedUpside ? "Uncapped" : <Amount value={String(stats.maxProfit)} />}</strong>
         </div>
         <div>

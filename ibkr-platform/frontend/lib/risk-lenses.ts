@@ -88,10 +88,23 @@ export function unpricedPositions(rows: Position[], currency: string, assumption
 
 export type RealizedLeg = RealizedSummary["legs"][number];
 
-export function legAdjustment(leg: RealizedLeg, withClosed: boolean, withCommissions: boolean): number {
+export const contractKey = (symbol: string | null | undefined) => (symbol ?? "").replace(/\s+/g, "");
+
+export function commissionAddBack(leg: RealizedLeg, withClosed: boolean, stillOpen: (contract: string) => boolean): number {
   const realized = numeric(leg.realized_pnl) ?? 0;
-  const commission = numeric(leg.commission) ?? 0;
-  return (withClosed ? realized : 0) - (!withCommissions && realized === 0 ? commission : 0);
+  const commission = Math.abs(numeric(leg.commission) ?? 0);
+  const counted = withClosed || (realized === 0 && stillOpen(contractKey(leg.symbol)));
+  return counted ? commission : 0;
+}
+
+export function legAdjustment(
+  leg: RealizedLeg,
+  withClosed: boolean,
+  withCommissions: boolean,
+  stillOpen: (contract: string) => boolean = () => true,
+): number {
+  const realized = numeric(leg.realized_pnl) ?? 0;
+  return (withClosed ? realized : 0) + (withCommissions ? 0 : commissionAddBack(leg, withClosed, stillOpen));
 }
 
 export function realizedGroupKey(lens: Lens, leg: RealizedLeg): string {
@@ -100,10 +113,16 @@ export function realizedGroupKey(lens: Lens, leg: RealizedLeg): string {
   return leg.account_id;
 }
 
-export function realizedByGroup(lens: Lens, legs: RealizedLeg[], withClosed: boolean, withCommissions: boolean) {
+export function realizedByGroup(
+  lens: Lens,
+  legs: RealizedLeg[],
+  withClosed: boolean,
+  withCommissions: boolean,
+  stillOpen: (contract: string) => boolean = () => true,
+) {
   const out: Record<string, number> = {};
   for (const leg of legs) {
-    const amount = legAdjustment(leg, withClosed, withCommissions);
+    const amount = legAdjustment(leg, withClosed, withCommissions, stillOpen);
     if (!amount) continue;
     const key = realizedGroupKey(lens, leg);
     out[key] = (out[key] ?? 0) + amount;
@@ -175,7 +194,6 @@ function sortRows(lens: Lens, rows: LensRow[]): LensRow[] {
   return rows.sort((a, b) => a.worst - b.worst || a.label.localeCompare(b.label));
 }
 
-/** One row at a time: SPX first on the asset lens, A–Z on accounts, date order on expiries. */
 export function focusChoices(lens: Lens, rows: { id: string; label: string }[]): { id: string; label: string }[] {
   if (lens === "asset") {
     return [...rows].sort((a, b) =>

@@ -15,6 +15,7 @@ import {
   netRate,
   quantity,
   realized,
+  pastExpiry,
 } from "@/lib/executions";
 import { SearchableSelect } from "./searchable-select";
 import { TableRowsSkeleton } from "./skeleton";
@@ -23,7 +24,6 @@ import { useZone } from "./timezone";
 import { useAccountNames } from "./account-names";
 import { formatDay, formatTime } from "@/lib/timezone";
 
-/** IBKR's average cost for a derivative is the premium times the multiplier. Mark is already per unit. */
 export function quotedCost(row: { sec_type: string; average_cost: string; multiplier: Money }) {
   if (row.sec_type === "STK" || row.average_cost === "") return row.average_cost;
   const multiplier = Number(row.multiplier);
@@ -103,8 +103,6 @@ export function DataTable<T>({
   initialSort?: { index: number; asc: boolean };
   searchText?: (row: T) => string;
   summary?: (visible: T[]) => ReactNode;
-  // Group header rows only make sense while the rows are ordered by the
-  // column the groups come from, so they appear when sorting by column 0.
   groupBy?: (row: T) => string;
   groupSummary?: (rows: T[]) => ReactNode;
   rowClassName?: (row: T) => string;
@@ -889,7 +887,13 @@ export function ExecutionsTable({
 }) {
   const zone = useZone();
   const [withCommissions, setWithCommissions] = useState(false);
-  const fills = useMemo(() => groupFills(rows), [rows]);
+  const [showExpired, setShowExpired] = useState(false);
+  const allFills = useMemo(() => groupFills(rows), [rows]);
+  const expiredCount = useMemo(() => allFills.filter((fill) => pastExpiry(fill)).length, [allFills]);
+  const fills = useMemo(
+    () => (showExpired ? allFills : allFills.filter((fill) => !pastExpiry(fill))),
+    [allFills, showExpired],
+  );
   const labels = useMemo(
     () => Object.fromEntries(accounts.map((a) => [a.account_id, accountLabel(a)])),
     [accounts],
@@ -913,10 +917,19 @@ export function ExecutionsTable({
   return (
     <DataTable
       toolbar={
-        <label className="commission-toggle table-toggle">
-          <input type="checkbox" checked={withCommissions} onChange={(e) => setWithCommissions(e.target.checked)} />
-          <span>Include commissions in traded rate</span>
-        </label>
+        <>
+          <label className="commission-toggle table-toggle">
+            <input type="checkbox" checked={withCommissions} onChange={(e) => setWithCommissions(e.target.checked)} />
+            <span>Include commissions in traded rate</span>
+          </label>
+          <label
+            className="commission-toggle table-toggle"
+            title="Fills on contracts whose expiry has passed (after the 4 pm New York close on expiry day)"
+          >
+            <input type="checkbox" checked={showExpired} onChange={(e) => setShowExpired(e.target.checked)} />
+            <span>Show expired contracts{expiredCount ? ` (${expiredCount})` : ""}</span>
+          </label>
+        </>
       }
       loading={loading}
       rows={fills}
